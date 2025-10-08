@@ -3,6 +3,7 @@ import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { WebhookEvent } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { clerkClient } from '@clerk/nextjs/server';
 
 export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -59,8 +60,13 @@ export async function POST(req: Request) {
       .eq('email', email)
       .maybeSingle();
 
+    let roles = ['client']; // Default role
+
     if (existingUser) {
       // Update existing user with Clerk ID (account claiming)
+      // Keep existing roles
+      roles = existingUser.roles || ['client'];
+
       const { error } = await supabaseAdmin
         .from('users')
         .update({
@@ -99,6 +105,20 @@ export async function POST(req: Request) {
 
       console.log(`✅ User ${id} created successfully`);
     }
+
+    // Sync roles to Clerk metadata
+    try {
+      const client = await clerkClient();
+      await client.users.updateUserMetadata(id, {
+        publicMetadata: {
+          roles: roles,
+        },
+      });
+      console.log(`✅ Synced roles to Clerk metadata: ${roles.join(', ')}`);
+    } catch (error) {
+      console.error('Error syncing roles to Clerk:', error);
+      // Don't fail the webhook if role sync fails
+    }
   }
 
   if (eventType === 'user.updated') {
@@ -118,6 +138,30 @@ export async function POST(req: Request) {
     if (error) {
       console.error('Error updating user in Supabase:', error);
       return new Response('Error updating user', { status: 500 });
+    }
+
+    // Sync roles from Supabase to Clerk
+    try {
+      const { data: user } = await supabaseAdmin
+        .from('users')
+        .select('roles')
+        .eq('clerk_user_id', id)
+        .single();
+
+      if (user) {
+        const client = await clerkClient();
+        await client.users.updateUserMetadata(id, {
+          publicMetadata: {
+            roles: user.roles,
+          },
+        });
+        console.log(
+          `✅ Synced roles to Clerk metadata: ${user.roles.join(', ')}`
+        );
+      }
+    } catch (error) {
+      console.error('Error syncing roles to Clerk:', error);
+      // Don't fail the webhook if role sync fails
     }
 
     console.log(`✅ User ${id} updated successfully`);

@@ -45,6 +45,10 @@ export async function completeOnboarding(formData: FormData) {
         return { success: false, error: 'File must be an image' };
       }
 
+      // Convert File to Buffer for Supabase upload
+      const arrayBuffer = await photoFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
       // Generate unique filename
       const fileExt = photoFile.name.split('.').pop();
       const fileName = `${userId}-${Date.now()}.${fileExt}`;
@@ -53,7 +57,8 @@ export async function completeOnboarding(formData: FormData) {
       // Upload to Supabase Storage
       const { error: uploadError } = await supabaseAdmin.storage
         .from('user-photos')
-        .upload(filePath, photoFile, {
+        .upload(filePath, buffer, {
+          contentType: photoFile.type,
           cacheControl: '3600',
           upsert: false,
         });
