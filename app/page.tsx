@@ -1,6 +1,7 @@
 // app/page.tsx
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
+import { SignOutButton } from '@clerk/nextjs';
 
 export default async function HomePage() {
   const user = await getCurrentUser();
@@ -51,7 +52,12 @@ export default async function HomePage() {
 
         {user && (
           <div className="mt-8">
-            <p className="text-sm text-gray-500">You are signed in</p>
+            <p className="text-sm text-gray-500 mb-3">You are signed in</p>
+            <SignOutButton>
+              <button className="rounded-lg border-2 border-gray-300 px-6 py-2 text-gray-700 hover:border-gray-400 hover:bg-gray-50">
+                Sign Out
+              </button>
+            </SignOutButton>
           </div>
         )}
       </div>

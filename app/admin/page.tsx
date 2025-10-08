@@ -1,7 +1,10 @@
 // app/admin/page.tsx
 import { requireStaff } from '@/lib/auth';
+import Link from 'next/link';
+import type { UserRole } from '@/types/database';
 
 export default async function AdminPage() {
+  // Check roles from database - no JWT needed!
   const { roles } = await requireStaff();
 
   return (
@@ -48,18 +51,30 @@ export default async function AdminPage() {
         <div className="mt-8">
           <h2 className="text-xl font-semibold text-gray-900">Quick Actions</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <button className="rounded-lg bg-black px-4 py-3 text-white hover:bg-gray-800">
+            <Link
+              href="/admin/clients/add"
+              className="rounded-lg bg-black px-4 py-3 text-center text-white hover:bg-gray-800"
+            >
               Add Client
-            </button>
-            <button className="rounded-lg bg-black px-4 py-3 text-white hover:bg-gray-800">
+            </Link>
+            <Link
+              href="/admin/team/add"
+              className="rounded-lg bg-black px-4 py-3 text-center text-white hover:bg-gray-800"
+            >
               Add Team Member
-            </button>
-            <button className="rounded-lg bg-black px-4 py-3 text-white hover:bg-gray-800">
+            </Link>
+            <Link
+              href="/admin/schedule"
+              className="rounded-lg bg-black px-4 py-3 text-center text-white hover:bg-gray-800"
+            >
               View Schedule
-            </button>
-            <button className="rounded-lg bg-black px-4 py-3 text-white hover:bg-gray-800">
+            </Link>
+            <Link
+              href="/admin/reports"
+              className="rounded-lg bg-black px-4 py-3 text-center text-white hover:bg-gray-800"
+            >
               Reports
-            </button>
+            </Link>
           </div>
         </div>
 
@@ -67,7 +82,7 @@ export default async function AdminPage() {
         <div className="mt-8 rounded-lg bg-blue-50 p-4">
           <h3 className="font-semibold text-blue-900">Your Roles:</h3>
           <div className="mt-2 flex gap-2">
-            {roles.map((role) => (
+            {roles.map((role: UserRole) => (
               <span
                 key={role}
                 className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-800"
@@ -76,6 +91,17 @@ export default async function AdminPage() {
               </span>
             ))}
           </div>
+          <p className="mt-2 text-sm text-blue-700">
+            ℹ️ Roles are checked from database in real-time. No sign out/in
+            needed!
+          </p>
+        </div>
+
+        {/* Back to Home */}
+        <div className="mt-8">
+          <Link href="/" className="text-sm text-gray-600 hover:text-gray-900">
+            ← Back to Home
+          </Link>
         </div>
       </div>
     </div>
