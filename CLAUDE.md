@@ -2,7 +2,7 @@
 
 > **Project Goal:** Build a hair salon booking system similar to Fresha  
 > **Last Updated:** October 2025  
-> **Architecture:** Server-Side with Service Role
+> **Architecture:** Clerk for Authentication, Supabase for Authorization (Simplified)
 
 ---
 
@@ -26,6 +26,7 @@
 - **Backend:** Next.js Server Actions, API Routes
 - **Database:** Supabase (PostgreSQL)
 - **Authentication:** Clerk (Email/Password + Google OAuth)
+- **Authorization:** Supabase (roles stored in database only)
 - **Storage:** Supabase Storage (for user photos)
 - **Data Access:** Service Role (server-side) for all operations
 
@@ -41,24 +42,25 @@
    - Avoids data duplication and inconsistencies
    - Handles role transitions seamlessly (e.g., client becomes team member)
 
-2. **Role-Based Access Control**
+2. **Separation of Concerns: Authentication vs Authorization**
+
+   - **Clerk**: Handles authentication only (sign in/up, user identity)
+   - **Supabase**: Single source of truth for authorization (roles, permissions)
+   - No syncing needed between systems!
+   - Roles stored ONLY in Supabase
+
+3. **Role-Based Access Control**
 
    - Users can have multiple roles stored as an array: `['client', 'team_member', 'admin']`
    - Permissions enforced server-side with explicit filtering
-   - Middleware protects routes based on roles
+   - Middleware queries Supabase to check roles for route protection
+   - Role changes take effect immediately (no sign out/in required!)
 
-3. **Server-Side Data Access Pattern**
-
+4. **Server-Side Data Access Pattern**
    - **All operations use Service Role** (`supabaseAdmin`)
    - Server-side filtering ensures users only access their data
    - Auth checks via `requireAuth()`, `requireStaff()`, `requireAdmin()`
    - RLS policies disabled (Service Role bypasses them anyway)
-
-4. **Clerk as Single Source of Truth**
-   - Clerk handles all authentication
-   - Supabase syncs user data via webhooks
-   - Clerk user ID links the two systems
-   - Roles synced to Clerk metadata for JWT claims
 
 ### Architecture Flow
 
@@ -69,17 +71,37 @@
 │                                                  │
 │  User Sign-up/Sign-in                           │
 │         ↓                                        │
-│    Clerk Authentication                         │
+│    Clerk Authentication ✅                      │
 │         ↓                                        │
 │    Clerk Webhook Trigger                        │
 │         ↓                                        │
 │  Supabase Users Table (Create/Update)           │
-│         ↓                                        │
-│  Roles Synced to Clerk Metadata                 │
+│    - Stores user data + roles                   │
+│    - NO sync back to Clerk!                     │
 │         ↓                                        │
 │  Onboarding (if needed)                         │
 │         ↓                                        │
 │  Dashboard                                       │
+│                                                  │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│         Authorization Flow (NEW!)                │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  User accesses protected route                  │
+│         ↓                                        │
+│  Middleware queries Supabase for roles          │
+│    - Single DB query (~5-10ms)                  │
+│    - Reads from users.roles column              │
+│         ↓                                        │
+│  Check permissions                               │
+│         ↓                                        │
+│  Allow or Redirect                               │
+│                                                  │
+│  ✅ Instant role changes!                       │
+│  ✅ No JWT caching issues!                      │
+│  ✅ Single source of truth!                     │
 │                                                  │
 └─────────────────────────────────────────────────┘
 
@@ -92,6 +114,7 @@
 │  1. Server Component/Action                     │
 │         ↓                                        │
 │  2. Auth Check (requireAuth/requireStaff)       │
+│    - Queries Supabase for user + roles          │
 │         ↓                                        │
 │  3. Service Role Query (supabaseAdmin)          │
 │         ↓                                        │
@@ -104,15 +127,16 @@
 └─────────────────────────────────────────────────┘
 ```
 
-### Why Service Role for Everything?
+### Why This Architecture?
 
-**Advantages:**
+**Key Benefits:**
 
-- ✅ **Simpler**: One authentication pattern throughout
+- ✅ **Simpler**: No role syncing between systems
 - ✅ **More Secure**: Server-side code can't be inspected/modified by users
-- ✅ **Easier to Debug**: Clear error messages, server logs
-- ✅ **Better for Business Logic**: Complex validations, calculations, emails
-- ✅ **Faster Development**: No JWT config, no RLS policies to maintain
+- ✅ **Easier to Debug**: Single source of truth for roles
+- ✅ **Better for Business Logic**: Complex validations, calculations
+- ✅ **Faster Development**: No sync utilities to maintain
+- ✅ **Instant Updates**: Role changes take effect immediately without re-authentication
 
 **Security via Server-Side Filtering:**
 
@@ -123,7 +147,7 @@ const user = await supabaseAdmin
   .from('users')
   .select('*')
   .eq('clerk_user_id', userId) // ✅ Only their data
-  .single();
+  .maybeSingle();
 
 // Admin viewing all users - no filter
 await requireAdmin();
@@ -136,27 +160,28 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 
 ### Clerk + Supabase Integration Method
 
-**Current Approach:** Server-side authentication with Service Role
+**Current Approach:** Clerk for Authentication, Supabase for Authorization
 
 **How It Works:**
 
-1. **User Authentication**
+1. **User Authentication (Clerk)**
 
    - Clerk handles sign-in/sign-up
    - JWT token stored in browser (for Clerk sessions)
    - Server extracts `userId` from Clerk session
 
-2. **Data Access**
+2. **User Authorization (Supabase)**
 
-   - All data queries use `supabaseAdmin` (Service Role)
-   - Server-side code validates auth and filters data
-   - Users never directly access Supabase
+   - All role checks query Supabase directly
+   - Middleware: One DB query per protected route
+   - Auth helpers: Query Supabase for user + roles
+   - Single source of truth: `users.roles` column
 
 3. **Role Management**
-   - Roles stored in Supabase `users.roles` array
-   - Synced to Clerk `publicMetadata.roles` via webhook
-   - Middleware checks roles for route protection
-   - Server actions verify roles before operations
+   - Roles stored ONLY in Supabase `users.roles` array
+   - NO syncing to Clerk metadata
+   - Middleware checks roles by querying Supabase
+   - Role changes effective immediately (no sign out needed!)
 
 ### Setup Requirements
 
@@ -164,19 +189,21 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 
    - Email/Password authentication enabled
    - Google OAuth enabled
-   - JWT template: `supabase` (optional, for future use)
    - Webhook endpoint configured
+   - NO JWT template needed!
 
 2. **Supabase Configuration**
 
    - Service Role key in environment variables
    - Storage bucket: `user-photos` (public read)
    - Tables: users, client_notes, team_members
+   - Index on `clerk_user_id` for fast lookups
 
 3. **Clerk Webhooks**
    - Events: `user.created`, `user.updated`, `user.deleted`
    - Endpoint: `/api/webhooks/clerk`
-   - Syncs user data and roles between systems
+   - Syncs user data (email, name, photo) to Supabase
+   - Does NOT sync roles (roles stay in Supabase only!)
 
 ### Two User Types
 
@@ -199,6 +226,7 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 - Fields: id, clerk_user_id (nullable), email, first_name, last_name, phone_number, birthday, photo_url, roles (array), is_registered, onboarding_completed, alert_note
 - Indexes on: clerk_user_id, email, roles
 - **RLS:** Disabled (Service Role bypasses it)
+- **IMPORTANT:** `roles` array is the ONLY source of truth for permissions
 
 **2. Client Notes Table**
 
@@ -227,6 +255,7 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 - **Separate notes table:** Better performance, audit trail, and queryability
 - **Team members extension:** Keeps user data normalized while allowing role-specific fields
 - **No RLS policies:** Simpler maintenance, security enforced in application code
+- **Roles in database only:** No syncing complexity, instant updates
 
 ---
 
@@ -262,7 +291,7 @@ const user = await supabaseAdmin
   .from('users')
   .select('first_name, last_name, phone_number, birthday, photo_url')
   .eq('clerk_user_id', userId)
-  .single();
+  .maybeSingle();
 // ✅ Returns only their data
 // ❌ No roles, no alert_note, no other users
 
@@ -308,7 +337,7 @@ const users = await supabaseAdmin.from('users').select('*');
 - Create/update/delete any user
 - Add team members and manage their profiles
 - Manage all client notes
-- Change user roles
+- Change user roles (changes effective immediately!)
 - All team member capabilities plus system administration
 
 ### Why Clients Can't See Their Own Notes
@@ -334,7 +363,7 @@ Webhook → Create user in Supabase (Service Role)
   - roles: ['client']
   - onboarding_completed: false
   ↓
-Webhook → Sync roles to Clerk metadata
+(NO sync back to Clerk!)
   ↓
 Redirect to /onboarding
   ↓
@@ -348,52 +377,47 @@ Server Action: Update user (Service Role)
 Redirect to dashboard
 ```
 
-### Workflow 2: Self Sign-up (Google OAuth)
+### Workflow 2: Admin Adds Team Member
 
 ```
-User → Sign up with Google
+Admin → Fill out "Add Team Member" form
   ↓
-Clerk OAuth (auto-fills name from Google)
+Check if email exists in database
   ↓
-Webhook → Create user in Supabase (Service Role)
-  - clerk_user_id: set
-  - first_name & last_name: from Google
-  - is_registered: true
-  - roles: ['client']
-  - onboarding_completed: false
+IF user exists:
+  - Add 'team_member' to roles array
+  - Update Supabase only (no Clerk sync!)
+  - Changes effective immediately!
   ↓
-Webhook → Sync roles to Clerk metadata
-  ↓
-Redirect to /onboarding
-  ↓
-User fills: phone number, photo (optional)
-  ↓
-Server Action: Complete onboarding (Service Role)
-  ↓
-Redirect to dashboard
-```
-
-### Workflow 3: Admin Creates Unregistered Client
-
-```
-Admin → Open "Add Client" form
-  ↓
-Admin enters: first name (required), other fields (optional)
-  ↓
-Server Action: Verify admin role
-  ↓
-Server Action: Create user (Service Role)
+IF user doesn't exist:
+  - Create unregistered user
+  - roles: ['client', 'team_member']
   - clerk_user_id: null
-  - is_registered: false
-  - roles: ['client']
-  - onboarding_completed: true
   ↓
-Client exists in database but cannot sign in
+User can register later (account claiming)
   ↓
-Optional: Send invite email (future feature)
+Webhook links Clerk ID to existing record
+  ↓
+Roles preserved, access granted immediately!
 ```
 
-**Use Case:** Walk-in clients, phone bookings, or clients without email
+### Workflow 3: Admin Changes User Roles
+
+```
+Admin → Update user roles in database
+  ↓
+Server Action: Update roles in Supabase
+  - Only updates users.roles column
+  - NO sync to Clerk needed!
+  ↓
+User refreshes page
+  ↓
+Middleware queries Supabase for new roles
+  ↓
+✅ New permissions active immediately!
+  ↓
+(No sign out/in required!)
+```
 
 ### Workflow 4: Client Edits Profile
 
@@ -411,31 +435,9 @@ Server Action: Update profile
   - Verify authentication
   - Upload photo if provided (Service Role)
   - Update allowed fields only
-  - Sync name to Clerk
   - Cannot modify: roles, alert_note
   ↓
 Success → Refresh page with updated data
-```
-
-### Workflow 5: Admin Manages User Roles
-
-```
-Admin → Go to /admin/clients/[id]
-  ↓
-Server Component: Load user data
-  - requireAdmin() verifies admin role
-  - Load full user data including roles
-  ↓
-Admin → Update roles array
-  ↓
-Server Action: Update user roles
-  - Verify admin role
-  - Update roles in Supabase (Service Role)
-  - Sync roles to Clerk metadata
-  ↓
-User → Sign out and sign in
-  ↓
-New roles active in JWT and middleware
 ```
 
 ---
@@ -461,6 +463,7 @@ New roles active in JWT and middleware
 - Don't skip authentication checks in server actions
 - Don't allow users to query data without proper filtering
 - Don't store passwords or secrets in code repository
+- Don't sync roles to Clerk (keep them in Supabase only!)
 
 ### Data Access Security
 
@@ -472,7 +475,7 @@ New roles active in JWT and middleware
 
 export async function someOperation() {
   // 2. Verify authentication and role
-  const { userId } = await requireAuth(); // or requireStaff/requireAdmin
+  const { userId, roles } = await requireAuth(); // Queries Supabase
 
   // 3. Use Service Role with explicit filtering
   const data = await supabaseAdmin
@@ -487,152 +490,36 @@ export async function someOperation() {
 
 **Security Layers:**
 
-1. **Middleware** - Protects routes based on authentication and roles
-2. **Auth Helpers** - Verify user identity and permissions
+1. **Middleware** - Queries Supabase for roles, protects routes
+2. **Auth Helpers** - Verify user identity and fetch permissions from DB
 3. **Server-Side Filtering** - Explicit queries ensure data isolation
 4. **Validation** - Check input data before database operations
 5. **Audit Trail** - Log all sensitive operations
 
-### Photo Upload Security
-
-- Allowed file types: JPEG, PNG, WebP only
-- Max file size: 5MB (configured in next.config.ts)
-- Server-side validation of file type and size
-- Upload via Service Role (server action)
-- Path structure: `{clerk_user_id}/{timestamp}-{filename}`
-- Public bucket with read access only
-- Delete old photos when uploading new ones
-
 ---
 
 ## 💻 Implementation Patterns
-
-### Server Actions vs API Routes
-
-**Use Server Actions for:**
-
-- ✅ Form submissions (onboarding, profile updates, client management)
-- ✅ Data mutations (create, update, delete)
-- ✅ Internal operations
-- ✅ Type-safe operations
-- ✅ File uploads
-
-**Use API Routes for:**
-
-- ✅ Webhooks (Clerk, Stripe)
-- ✅ External integrations
-- ✅ Public endpoints
-- ✅ OAuth callbacks
-
-### Data Loading Pattern
-
-**Server Component Pattern:**
-
-```typescript
-// app/some-page/page.tsx
-export default async function Page() {
-  // 1. Auth check
-  const { userId } = await requireAuth();
-
-  // 2. Load data with Service Role + filtering
-  const data = await supabaseAdmin
-    .from('table')
-    .select('*')
-    .eq('user_id', userId);
-
-  // 3. Pass to client component
-  return <ClientComponent data={data} />;
-}
-```
-
-**Client Component Pattern:**
-
-```typescript
-// components/some-component.tsx
-'use client';
-
-export default function ClientComponent({ data }) {
-  const [state, setState] = useState(data);
-
-  async function handleSubmit() {
-    // Call Server Action
-    const result = await updateSomething(formData);
-    if (result.success) {
-      router.refresh(); // Reload server component
-    }
-  }
-
-  return <form onSubmit={handleSubmit}>...</form>;
-}
-```
-
-### Simplified Type Management
-
-**Minimal types approach:**
-
-```typescript
-// types/database.ts - Simple and maintainable
-export type UserRole = 'client' | 'team_member' | 'admin';
-
-export interface User {
-  id: string;
-  clerk_user_id: string | null;
-  email: string;
-  first_name: string;
-  last_name: string | null;
-  phone_number: string | null;
-  birthday: string | null;
-  photo_url: string | null;
-  roles: UserRole[];
-  is_registered: boolean;
-  onboarding_completed: boolean;
-  alert_note: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ClientNote {
-  id: string;
-  client_id: string;
-  note: string;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  updated_by: string | null;
-}
-
-export interface TeamMember {
-  id: string;
-  user_id: string;
-  position: string | null;
-  bio: string | null;
-  specialties: string[] | null;
-  is_active: boolean;
-  hire_date: string | null;
-  created_at: string;
-  updated_at: string;
-}
-```
-
-**Why simple types?**
-
-- Easy to maintain
-- Less boilerplate
-- Works perfectly with `supabaseAdmin`
-- Add complex types only when needed
 
 ### Auth Helper Pattern
 
 **Centralized auth functions:**
 
 ```typescript
-// lib/auth.ts
+// lib/auth.ts - Queries Supabase for roles
 export async function getCurrentUser() {
-  const { userId, sessionClaims } = await auth();
+  const { userId } = await auth();
   if (!userId) return null;
-  const roles =
-    (sessionClaims?.metadata as { roles?: UserRole[] })?.roles || [];
-  return { userId, roles, sessionClaims };
+
+  // Fetch roles from Supabase (single source of truth)
+  const { data: user } = await supabaseAdmin
+    .from('users')
+    .select('id, roles')
+    .eq('clerk_user_id', userId)
+    .maybeSingle();
+
+  if (!user) return null;
+
+  return { userId, supabaseUserId: user.id, roles: user.roles };
 }
 
 export async function requireAuth() {
@@ -664,6 +551,39 @@ export async function requireAdmin() {
 - Easy to test
 - Type-safe
 - Centralized redirect logic
+- Single DB query per auth check
+
+### Role Management Pattern
+
+```typescript
+// lib/role-management.ts - Simple role management
+export async function updateUserRoles(userId: string, newRoles: UserRole[]) {
+  // Just update Supabase - no sync needed!
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ roles: newRoles })
+    .eq('id', userId);
+
+  if (error) return { success: false, error: 'Failed to update roles' };
+
+  // ✅ Changes effective immediately on next request!
+  return { success: true };
+}
+
+export async function addRoleToUser(userId: string, role: UserRole) {
+  // Get current roles
+  const { data: user } = await supabaseAdmin
+    .from('users')
+    .select('roles')
+    .eq('id', userId)
+    .single();
+
+  if (user.roles.includes(role)) return { success: true };
+
+  const newRoles = [...user.roles, role];
+  return await updateUserRoles(userId, newRoles);
+}
+```
 
 ---
 
@@ -690,19 +610,28 @@ export async function requireAdmin() {
 - [x] Account claiming flow
 - [x] Dashboard with onboarding check
 - [x] Profile page with edit functionality
-- [x] Role sync between Clerk and Supabase
 
-### Phase 3: Admin Panel (READY TO START) 🎯
+### Phase 2.5: Architecture Simplification ✅ (COMPLETED)
 
+- [x] Removed role syncing between Clerk and Supabase
+- [x] Updated auth helpers to query Supabase for roles
+- [x] Updated middleware to check Supabase for authorization
+- [x] Simplified webhook (no role sync)
+- [x] Created role management utilities
+- [x] Updated team member management
+- [x] Instant role changes (no sign out/in needed!)
+
+### Phase 3: Admin Panel (IN PROGRESS) 🎯
+
+- [x] Team member list view
+- [x] "Add Team Member" form with account claiming
+- [x] Role management utilities
 - [ ] Admin dashboard layout with navigation
 - [ ] Client list page with search/filter
 - [ ] "Add Client" form with validation
 - [ ] Client detail page
 - [ ] Client notes CRUD interface
 - [ ] Alert note management
-- [ ] "Add Team Member" form
-- [ ] Team member list view
-- [ ] Role management interface
 
 ### Phase 4: Client Management (FUTURE)
 
@@ -725,17 +654,6 @@ export async function requireAdmin() {
 - [ ] SMS reminders
 - [ ] Booking confirmations
 
-### Phase 6: Advanced Features (FUTURE)
-
-- [ ] Payment integration
-- [ ] Loyalty program
-- [ ] Gift cards
-- [ ] Product sales
-- [ ] Reporting and analytics
-- [ ] Multi-location support
-- [ ] Staff scheduling
-- [ ] Marketing automation
-
 ---
 
 ## 📚 Key Files Structure
@@ -749,11 +667,11 @@ project-root/
 │   ├── actions/
 │   │   ├── onboarding.ts             # ✅ Onboarding server action
 │   │   ├── profile.ts                # ✅ Profile update server action
-│   │   └── sync-roles.ts             # ✅ Manual role sync utility
+│   │   └── team-members.ts           # ✅ Team member management (simplified)
 │   ├── api/
 │   │   └── webhooks/
 │   │       └── clerk/
-│   │           └── route.ts          # ✅ Clerk webhook handler
+│   │           └── route.ts          # ✅ Clerk webhook (no role sync!)
 │   ├── onboarding/
 │   │   └── page.tsx                  # ✅ Onboarding flow
 │   ├── profile/
@@ -762,23 +680,26 @@ project-root/
 │   │   └── page.tsx                  # ✅ Client dashboard
 │   ├── admin/
 │   │   ├── page.tsx                  # ✅ Admin dashboard
-│   │   ├── clients/
-│   │   │   ├── page.tsx              # Client list (TODO)
-│   │   │   ├── add/page.tsx          # Add client form (TODO)
-│   │   │   └── [id]/page.tsx         # Client detail (TODO)
-│   │   └── team/
-│   │       ├── page.tsx              # Team member list (TODO)
-│   │       └── add/page.tsx          # Add team member form (TODO)
+│   │   ├── team/
+│   │   │   ├── page.tsx              # ✅ Team member list
+│   │   │   └── add/page.tsx          # ✅ Add team member form
+│   │   └── clients/
+│   │       ├── page.tsx              # Client list (TODO)
+│   │       ├── add/page.tsx          # Add client form (TODO)
+│   │       └── [id]/page.tsx         # Client detail (TODO)
 │   ├── sign-in/
 │   │   └── [[...sign-in]]/
 │   │       └── page.tsx              # ✅ Sign-in/Sign-up page
 │   ├── unauthorized/
 │   │   └── page.tsx                  # ✅ 403 page
-│   └── middleware.ts                 # ✅ Route protection
+│   └── middleware.ts                 # ✅ Route protection (queries Supabase)
 ├── components/
-│   └── profile-form.tsx              # ✅ Profile form component
+│   ├── profile-form.tsx              # ✅ Profile form component
+│   ├── add-team-member-form.tsx      # ✅ Team member form
+│   └── navbar.tsx                    # ✅ Navigation bar (created in progress)
 ├── lib/
-│   ├── auth.ts                       # ✅ Auth helper functions
+│   ├── auth.ts                       # ✅ Auth helpers (query Supabase for roles)
+│   ├── role-management.ts            # ✅ Role management (no Clerk sync)
 │   └── supabase/
 │       ├── client.ts                 # ✅ Client-side Supabase (for future use)
 │       └── server.ts                 # ✅ Server-side Supabase (supabaseAdmin)
@@ -793,22 +714,25 @@ project-root/
 
 ## 🎯 Critical Decisions Summary
 
-| Decision                   | Choice                         | Rationale                                        |
-| -------------------------- | ------------------------------ | ------------------------------------------------ |
-| **Data Access Pattern**    | Service Role (server-side)     | Simpler, more secure, easier to maintain         |
-| **Client Data Access**     | Server-side with filtering     | Users access own data via filtered queries       |
-| **RLS Policies**           | Disabled                       | Not needed with Service Role                     |
-| **User Table Structure**   | Unified table with roles array | Handles role transitions, single source of truth |
-| **Authentication**         | Clerk                          | Industry standard, OAuth support                 |
-| **Role Storage**           | Supabase + Clerk metadata      | Supabase is source of truth, synced to Clerk     |
-| **Client Notes**           | Separate table                 | Better audit trail, performance, queryability    |
-| **Unregistered Clients**   | clerk_user_id nullable         | Supports walk-in clients, admin-created records  |
-| **Photo Storage**          | Supabase Storage               | Integrated with database, simple permissions     |
-| **Photo Upload**           | Server-side (Service Role)     | Secure, no body size limits                      |
-| **Team Access to Notes**   | Full CRUD access               | Team members need client history for service     |
-| **Client Access to Notes** | No access                      | Privacy, professionalism, industry standard      |
-| **Server Actions**         | Preferred for all mutations    | Type-safe, simpler, better DX                    |
-| **Type Management**        | Simplified, minimal types      | Easy to maintain, less boilerplate               |
+| Decision                   | Choice                            | Rationale                                           |
+| -------------------------- | --------------------------------- | --------------------------------------------------- |
+| **Data Access Pattern**    | Service Role (server-side)        | Simpler, more secure, easier to maintain            |
+| **Authorization Pattern**  | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing |
+| **Role Storage**           | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler     |
+| **Role Changes**           | Immediate (no re-auth)            | Better UX, middleware queries DB on each request    |
+| **Client Data Access**     | Server-side with filtering        | Users access own data via filtered queries          |
+| **RLS Policies**           | Disabled                          | Not needed with Service Role                        |
+| **User Table Structure**   | Unified table with roles array    | Handles role transitions, single source of truth    |
+| **Authentication**         | Clerk                             | Industry standard, OAuth support, handles auth only |
+| **Client Notes**           | Separate table                    | Better audit trail, performance, queryability       |
+| **Unregistered Clients**   | clerk_user_id nullable            | Supports walk-in clients, admin-created records     |
+| **Photo Storage**          | Supabase Storage                  | Integrated with database, simple permissions        |
+| **Photo Upload**           | Server-side (Service Role)        | Secure, no body size limits                         |
+| **Team Access to Notes**   | Full CRUD access                  | Team members need client history for service        |
+| **Client Access to Notes** | No access                         | Privacy, professionalism, industry standard         |
+| **Server Actions**         | Preferred for all mutations       | Type-safe, simpler, better DX                       |
+| **Type Management**        | Simplified, minimal types         | Easy to maintain, less boilerplate                  |
+| **Performance Trade-off**  | +5-10ms per request (DB query)    | Worth it for simplicity and instant updates         |
 
 ---
 
@@ -844,46 +768,76 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
 
 - ✅ Completed Phase 1: Foundation
 - ✅ Completed Phase 2: Authentication & Onboarding
-- ✅ Implemented Service Role architecture (server-side for all operations)
-- ✅ Removed JWT client-side dependency
-- ✅ Created auth helper functions for DRY code
-- ✅ Built complete onboarding flow with server-side photo upload
-- ✅ Implemented profile editing with server-side data loading
-- ✅ Set up role syncing between Supabase and Clerk
-- ✅ Configured middleware for route protection
-- 🎯 Ready to start Phase 3: Admin Panel
+- ✅ **Completed Phase 2.5: Major Architecture Simplification**
+  - Removed all role syncing between Clerk and Supabase
+  - Roles now stored ONLY in Supabase (single source of truth)
+  - Auth helpers query Supabase for roles on every request
+  - Middleware queries Supabase for authorization checks
+  - Role changes take effect immediately (no sign out/in needed!)
+  - Simplified codebase: removed `lib/clerk-sync.ts`, `lib/role-sync.ts`, `app/actions/sync-roles.ts`
+  - Created `lib/role-management.ts` for simple role updates
+  - Updated webhook to NOT sync roles back to Clerk
+  - Team member management now works with instant role updates
+- 🎯 In Progress: Phase 3 - Admin Panel
+  - Created team member list page
+  - Created add team member form with account claiming
+  - Next: Client management pages
 
-**Architecture Decision:**
+**Architecture Decision - MAJOR CHANGE:**
 
-- Chose **Service Role (server-side)** over **JWT (client-side)** for simplicity, security, and maintainability
-- All data access goes through server components and server actions
-- Security enforced via server-side filtering and role checks
-- RLS policies not used (Service Role bypasses them)
+- **Previous:** Roles synced between Clerk metadata and Supabase (complex, JWT caching issues)
+- **Current:** Roles stored ONLY in Supabase, queried on each request (simple, instant updates!)
+- **Benefit:**
+  - 50% less code to maintain
+  - No more "sign out and sign in again" messages
+  - Role changes effective immediately
+  - Single source of truth
+  - Industry standard pattern: "Clerk for authn, DB for authz"
 
 ---
 
-## 🔮 Future Considerations
+## 🔮 Comparison: Before vs After
 
-### If You Need JWT Client-Side Later
+### Before (Complex)
 
-JWT with RLS might be useful for:
+```
+Admin changes role:
+1. Update Supabase ✍️
+2. Sync to Clerk metadata ✍️
+3. User signs out ✍️
+4. User signs in ✍️
+5. New JWT issued with roles ✍️
+6. Middleware reads JWT ✍️
+7. ✅ Access granted
 
-- Real-time collaborative features (multiple users editing simultaneously)
-- Client-side subscriptions (live updates)
-- Mobile app with offline sync
-- Public-facing features with automatic permission enforcement
+Problems:
+- Multiple steps
+- User friction
+- JWT caching issues
+- Two sources of truth
+- Sync failures possible
+```
 
-**Setup would require:**
+### After (Simple!)
 
-- Clerk JWT template configuration
-- Supabase JWT issuer configuration
-- RLS policies created
-- Helper functions for JWT claims
+```
+Admin changes role:
+1. Update Supabase ✍️
+2. User refreshes page ✍️
+3. Middleware queries Supabase ✍️
+4. ✅ Access granted immediately!
 
-**Current Status:** Not needed for current requirements. Service Role meets all needs.
+Benefits:
+- Single step
+- No user action needed
+- No caching issues
+- Single source of truth
+- Always consistent
+```
 
 ---
 
 **Document Status:** Living document - update as architecture evolves  
 **Next Review:** After Phase 3 completion (Admin Panel)  
-**Architecture:** Server-Side with Service Role (Finalized)
+**Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
+**Last Major Change:** Removed role syncing, simplified authorization pattern

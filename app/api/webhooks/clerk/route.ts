@@ -3,7 +3,6 @@ import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { WebhookEvent } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { clerkClient } from '@clerk/nextjs/server';
 
 export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -60,12 +59,9 @@ export async function POST(req: Request) {
       .eq('email', email)
       .maybeSingle();
 
-    let roles = ['client']; // Default role
-
     if (existingUser) {
-      // Update existing user with Clerk ID (account claiming)
-      // Keep existing roles
-      roles = existingUser.roles || ['client'];
+      // Account claiming: User exists, link to Clerk
+      console.log(`🔗 Account claiming: ${email} → ${id}`);
 
       const { error } = await supabaseAdmin
         .from('users')
@@ -84,9 +80,13 @@ export async function POST(req: Request) {
         return new Response('Error updating user', { status: 500 });
       }
 
-      console.log(`✅ User ${existingUser.id} claimed existing account`);
+      console.log(
+        `✅ User ${
+          existingUser.id
+        } claimed account with roles: ${existingUser.roles.join(', ')}`
+      );
     } else {
-      // Insert new user into Supabase using admin client
+      // New user: Create in Supabase with default role
       const { error } = await supabaseAdmin.from('users').insert({
         clerk_user_id: id,
         email: email,
@@ -103,21 +103,7 @@ export async function POST(req: Request) {
         return new Response('Error creating user', { status: 500 });
       }
 
-      console.log(`✅ User ${id} created successfully`);
-    }
-
-    // Sync roles to Clerk metadata
-    try {
-      const client = await clerkClient();
-      await client.users.updateUserMetadata(id, {
-        publicMetadata: {
-          roles: roles,
-        },
-      });
-      console.log(`✅ Synced roles to Clerk metadata: ${roles.join(', ')}`);
-    } catch (error) {
-      console.error('Error syncing roles to Clerk:', error);
-      // Don't fail the webhook if role sync fails
+      console.log(`✅ New user ${id} created with role: client`);
     }
   }
 
@@ -140,30 +126,6 @@ export async function POST(req: Request) {
       return new Response('Error updating user', { status: 500 });
     }
 
-    // Sync roles from Supabase to Clerk
-    try {
-      const { data: user } = await supabaseAdmin
-        .from('users')
-        .select('roles')
-        .eq('clerk_user_id', id)
-        .single();
-
-      if (user) {
-        const client = await clerkClient();
-        await client.users.updateUserMetadata(id, {
-          publicMetadata: {
-            roles: user.roles,
-          },
-        });
-        console.log(
-          `✅ Synced roles to Clerk metadata: ${user.roles.join(', ')}`
-        );
-      }
-    } catch (error) {
-      console.error('Error syncing roles to Clerk:', error);
-      // Don't fail the webhook if role sync fails
-    }
-
     console.log(`✅ User ${id} updated successfully`);
   }
 
@@ -171,7 +133,6 @@ export async function POST(req: Request) {
     const { id } = evt.data;
 
     // Soft delete: remove clerk_user_id and mark as not registered
-    // This preserves booking history and notes
     const { error } = await supabaseAdmin
       .from('users')
       .update({
