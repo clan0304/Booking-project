@@ -41,3 +41,16 @@ export interface TeamMember {
   created_at: string;
   updated_at: string;
 }
+
+export interface Venue {
+  id: string;
+  name: string;
+  address: string;
+  phone_number: string | null;
+  photo_url: string | null;
+  slug: string;
+  is_listed: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
