@@ -27,7 +27,7 @@
 - **Database:** Supabase (PostgreSQL)
 - **Authentication:** Clerk (Email/Password + Google OAuth)
 - **Authorization:** Supabase (roles stored in database only)
-- **Storage:** Supabase Storage (for user photos)
+- **Storage:** Supabase Storage (for user photos, venue photos)
 - **Data Access:** Service Role (server-side) for all operations
 
 ---
@@ -195,9 +195,9 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 2. **Supabase Configuration**
 
    - Service Role key in environment variables
-   - Storage bucket: `user-photos` (public read)
-   - Tables: users, client_notes, team_members
-   - Index on `clerk_user_id` for fast lookups
+   - Storage buckets: `user-photos`, `venue-photos` (public read)
+   - Tables: users, client_notes, team_members, venues
+   - Indexes on `clerk_user_id`, `slug` for fast lookups
 
 3. **Clerk Webhooks**
    - Events: `user.created`, `user.updated`, `user.deleted`
@@ -242,18 +242,32 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 - One-to-one relationship with users table
 - **RLS:** Disabled
 
-**4. Supabase Storage Bucket**
+**4. Venues Table** ✅ NEW
 
-- Bucket: `user-photos`
-- Public read access
-- Server-side upload/delete (via Service Role)
-- Path structure: `{clerk_user_id}/{timestamp}-{filename}`
+- Stores salon/venue locations for marketplace
+- Fields: id, name, address, phone_number (nullable), photo_url (nullable), slug (unique), is_listed, created_by, timestamps
+- Slug format: `venue-name-123456` (auto-generated, 6 unique digits)
+- Indexes on: slug, is_listed, created_at
+- **RLS:** Disabled
+- **Purpose:** Multi-location support, each venue gets unique booking URL
+
+**5. Supabase Storage Buckets**
+
+- **`user-photos`**: User profile photos
+  - Public read access
+  - Server-side upload/delete (via Service Role)
+  - Path: `{clerk_user_id}/{timestamp}-{filename}`
+- **`venue-photos`**: Venue/location photos
+  - Public read access
+  - Server-side upload/delete (via Service Role)
+  - Path: `venues/{timestamp}-{filename}`
 
 ### Why This Structure?
 
 - **Unified users table:** Handles role transitions seamlessly
 - **Separate notes table:** Better performance, audit trail, and queryability
 - **Team members extension:** Keeps user data normalized while allowing role-specific fields
+- **Venues table:** Supports multi-location businesses, unique booking URLs per venue
 - **No RLS policies:** Simpler maintenance, security enforced in application code
 - **Roles in database only:** No syncing complexity, instant updates
 
@@ -276,6 +290,7 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 │ View notes       │ ❌      │ ✅      │ ✅           │
 │ Manage notes     │ ❌      │ ✅      │ ✅           │
 │ Manage roles     │ ❌      │ ❌      │ ✅           │
+│ Manage venues    │ ❌      │ ❌      │ ✅           │
 │ Admin panel      │ ❌      │ ✅      │ ✅           │
 └──────────────────┴─────────┴─────────┴──────────────┘
 ```
@@ -305,10 +320,10 @@ const clients = await supabaseAdmin
 // ✅ Returns all clients with alert notes
 // ✅ Team member role verified server-side
 
-// ADMIN: Full access
+// ADMIN: Full access to venues
 await requireAdmin();
-const users = await supabaseAdmin.from('users').select('*');
-// ✅ Returns all users, all fields
+const venues = await supabaseAdmin.from('venues').select('*');
+// ✅ Returns all venues
 // ✅ Admin role verified server-side
 ```
 
@@ -329,7 +344,7 @@ const users = await supabaseAdmin.from('users').select('*');
 - Update client alert notes (allergies, preferences)
 - View other team member profiles
 - Access booking calendar (future feature)
-- Cannot manage user roles or team member records
+- Cannot manage user roles, team member records, or venues
 
 **Admin**
 
@@ -338,6 +353,7 @@ const users = await supabaseAdmin.from('users').select('*');
 - Add team members and manage their profiles
 - Manage all client notes
 - Change user roles (changes effective immediately!)
+- **Manage venues/locations** (create, edit, delete, list/unlist)
 - All team member capabilities plus system administration
 
 ### Why Clients Can't See Their Own Notes
@@ -438,6 +454,29 @@ Server Action: Update profile
   - Cannot modify: roles, alert_note
   ↓
 Success → Refresh page with updated data
+```
+
+### Workflow 5: Admin Manages Venues ✅ NEW
+
+```
+Admin → Navigate to /admin/marketplace
+  ↓
+View all venues (listed/unlisted)
+  ↓
+Click "Add Venue" button
+  ↓
+Fill form: name, address, phone, photo
+  ↓
+Server Action: Create venue
+  - Verify admin access (requireAdmin)
+  - Upload photo to venue-photos bucket
+  - Auto-generate unique slug (name-123456)
+  - Store venue in database
+  ↓
+✅ Venue created with booking URL
+Format: yourdomain.com/venue-name-123456
+  ↓
+Admin can edit/delete/list/unlist venue anytime
 ```
 
 ---
@@ -621,12 +660,23 @@ export async function addRoleToUser(userId: string, role: UserRole) {
 - [x] Updated team member management
 - [x] Instant role changes (no sign out/in needed!)
 
-### Phase 3: Admin Panel (IN PROGRESS) 🎯
+### Phase 3: Admin Panel ✅ (COMPLETED)
 
-- [x] Team member list view
-- [x] "Add Team Member" form with account claiming
-- [x] Role management utilities
-- [ ] Admin dashboard layout with navigation
+- [x] Admin dashboard layout with navigation (Fresha-inspired)
+- [x] Sidebar with icon navigation (11 menu items)
+- [x] Top navbar with search, notifications, user menu
+- [x] Admin layout wrapper with sticky header/sidebar
+- [x] **Marketplace/Venues Management** (Admin only)
+  - [x] Venues database table with auto-slug generation
+  - [x] Create, read, update, delete venues
+  - [x] Venue photo uploads
+  - [x] Search venues by name/address
+  - [x] Filter by status (All, Listed, Unlisted)
+  - [x] Sort by newest, oldest, name
+  - [x] Add/Edit modals with photo preview
+  - [x] Unique booking URLs (format: `domain.com/venue-name-123456`)
+  - [x] Fixed hydration errors
+- [ ] Team member management pages
 - [ ] Client list page with search/filter
 - [ ] "Add Client" form with validation
 - [ ] Client detail page
@@ -653,6 +703,7 @@ export async function addRoleToUser(userId: string, role: UserRole) {
 - [ ] Email notifications
 - [ ] SMS reminders
 - [ ] Booking confirmations
+- [ ] Public booking pages (using venue slugs)
 
 ---
 
@@ -667,7 +718,9 @@ project-root/
 │   ├── actions/
 │   │   ├── onboarding.ts             # ✅ Onboarding server action
 │   │   ├── profile.ts                # ✅ Profile update server action
-│   │   └── team-members.ts           # ✅ Team member management (simplified)
+│   │   ├── admin.ts                  # ✅ Admin operations (users, roles)
+│   │   ├── team-members.ts           # ✅ Team member management
+│   │   └── venues.ts                 # ✅ Venue CRUD operations
 │   ├── api/
 │   │   └── webhooks/
 │   │       └── clerk/
@@ -679,10 +732,13 @@ project-root/
 │   ├── dashboard/
 │   │   └── page.tsx                  # ✅ Client dashboard
 │   ├── admin/
+│   │   ├── layout.tsx                # ✅ Admin layout wrapper
 │   │   ├── page.tsx                  # ✅ Admin dashboard
+│   │   ├── marketplace/
+│   │   │   └── page.tsx              # ✅ Venues management
 │   │   ├── team/
-│   │   │   ├── page.tsx              # ✅ Team member list
-│   │   │   └── add/page.tsx          # ✅ Add team member form
+│   │   │   ├── page.tsx              # Team member list (TODO)
+│   │   │   └── add/page.tsx          # Add team member (TODO)
 │   │   └── clients/
 │   │       ├── page.tsx              # Client list (TODO)
 │   │       ├── add/page.tsx          # Add client form (TODO)
@@ -694,9 +750,18 @@ project-root/
 │   │   └── page.tsx                  # ✅ 403 page
 │   └── middleware.ts                 # ✅ Route protection (queries Supabase)
 ├── components/
+│   ├── admin/
+│   │   ├── sidebar.tsx               # ✅ Admin sidebar navigation
+│   │   ├── navbar.tsx                # ✅ Admin top navbar
+│   │   ├── admin-layout.tsx          # ✅ Layout wrapper
+│   │   ├── page-header.tsx           # ✅ Reusable page header
+│   │   └── marketplace/
+│   │       ├── marketplace-client.tsx # ✅ Marketplace main component
+│   │       ├── venue-card.tsx        # ✅ Venue display card
+│   │       ├── add-venue-modal.tsx   # ✅ Add venue modal
+│   │       └── edit-venue-modal.tsx  # ✅ Edit/delete venue modal
 │   ├── profile-form.tsx              # ✅ Profile form component
-│   ├── add-team-member-form.tsx      # ✅ Team member form
-│   └── navbar.tsx                    # ✅ Navigation bar (created in progress)
+│   └── add-team-member-form.tsx      # Team member form (TODO)
 ├── lib/
 │   ├── auth.ts                       # ✅ Auth helpers (query Supabase for roles)
 │   ├── role-management.ts            # ✅ Role management (no Clerk sync)
@@ -704,10 +769,11 @@ project-root/
 │       ├── client.ts                 # ✅ Client-side Supabase (for future use)
 │       └── server.ts                 # ✅ Server-side Supabase (supabaseAdmin)
 ├── types/
-│   └── database.ts                   # ✅ Simplified TypeScript types
+│   └── database.ts                   # ✅ TypeScript types (User, Venue, etc.)
 └── supabase/
     └── migrations/
-        └── 001_initial_schema.sql    # ✅ Database schema
+        ├── 001_initial_schema.sql    # ✅ Users, notes, team members
+        └── 002_venues.sql            # ✅ Venues table + slug generator
 ```
 
 ---
@@ -733,6 +799,8 @@ project-root/
 | **Server Actions**         | Preferred for all mutations       | Type-safe, simpler, better DX                       |
 | **Type Management**        | Simplified, minimal types         | Easy to maintain, less boilerplate                  |
 | **Performance Trade-off**  | +5-10ms per request (DB query)    | Worth it for simplicity and instant updates         |
+| **Venue Slugs**            | Auto-generated (name-6digits)     | Unique, short, SEO-friendly booking URLs            |
+| **Multi-location Support** | Venues table                      | Each location gets unique booking page              |
 
 ---
 
@@ -778,10 +846,25 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
   - Created `lib/role-management.ts` for simple role updates
   - Updated webhook to NOT sync roles back to Clerk
   - Team member management now works with instant role updates
-- 🎯 In Progress: Phase 3 - Admin Panel
-  - Created team member list page
-  - Created add team member form with account claiming
-  - Next: Client management pages
+- ✅ **Completed Phase 3: Admin Panel Foundation**
+  - Created Fresha-inspired admin interface
+  - Dark sidebar with 11 icon-based navigation items
+  - Top navbar with search, notifications, and user menu
+  - Responsive admin layout with sticky header/sidebar
+  - Page header component for consistent page titles
+- ✅ **Completed Marketplace/Venues Management**
+  - Full CRUD operations for venues (admin only)
+  - Venues table with auto-generated unique slugs
+  - Slug format: `venue-name-123456` (name + 6 digits)
+  - Photo uploads to `venue-photos` storage bucket
+  - Search, filter (All/Listed/Unlisted), and sort functionality
+  - Add/Edit modals with photo preview and validation
+  - Unique booking URLs per venue for future booking system
+  - Fixed React hydration errors with useEffect pattern
+- 🎯 In Progress: Phase 3 - Team & Client Management
+  - Next: Team member list and management pages
+  - Next: Client list with search/filter
+  - Next: Client detail pages with notes
 
 **Architecture Decision - MAJOR CHANGE:**
 
@@ -837,7 +920,43 @@ Benefits:
 
 ---
 
+## 🎨 UI/UX Design Principles
+
+### Admin Interface (Fresha-Inspired)
+
+**Color Palette:**
+
+- Primary: `#6C5CE7` (Purple) - Active states, CTAs
+- Dark: `#0a0a0a` - Sidebar background
+- Light: `#ffffff` - Content background
+- Gray: `#f9fafb` - Page background
+
+**Navigation:**
+
+- Icon-based sidebar (80px width)
+- Hover tooltips for menu items
+- Active state with purple background
+- Sticky positioning for sidebar and header
+
+**Modals:**
+
+- Scrollable content area
+- Sticky header and footer
+- Photo upload with preview
+- Validation feedback
+- Loading states on submission
+
+**Forms:**
+
+- Consistent input styling
+- Clear required field indicators
+- Inline validation
+- Photo upload with drag & drop visual
+- Responsive button states
+
+---
+
 **Document Status:** Living document - update as architecture evolves  
-**Next Review:** After Phase 3 completion (Admin Panel)  
+**Next Review:** After Team & Client Management completion  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Removed role syncing, simplified authorization pattern
+**Last Major Change:** Completed Marketplace/Venues Management System
