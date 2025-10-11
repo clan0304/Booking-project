@@ -2,6 +2,8 @@
 import { requireAdmin } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { TeamListClient } from '@/components/admin/team/team-list-client';
+import { TeamTabs } from '@/components/admin/team/team-tabs';
+import { ScheduledShiftsPlaceholder } from '@/components/admin/team/scheduled-shifts-placeholder';
 
 export default async function TeamPage() {
   await requireAdmin();
@@ -43,5 +45,17 @@ export default async function TeamPage() {
         : member.team_members, // Already an object or null
     })) || [];
 
-  return <TeamListClient initialTeamMembers={transformedTeamMembers} />;
+  return (
+    <div className="flex flex-col h-full">
+      {/* Tabs */}
+      <div className="flex-1 overflow-hidden mt-6">
+        <TeamTabs
+          teamMembersContent={
+            <TeamListClient initialTeamMembers={transformedTeamMembers} />
+          }
+          scheduledShiftsContent={<ScheduledShiftsPlaceholder />}
+        />
+      </div>
+    </div>
+  );
 }
