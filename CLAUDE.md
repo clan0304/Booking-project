@@ -27,7 +27,7 @@
 - **Database:** Supabase (PostgreSQL)
 - **Authentication:** Clerk (Email/Password + Google OAuth)
 - **Authorization:** Supabase (roles stored in database only)
-- **Storage:** Supabase Storage (for user photos, venue photos)
+- **Storage:** Supabase Storage (for user photos, team member photos, venue photos)
 - **Data Access:** Service Role (server-side) for all operations
 
 ---
@@ -195,7 +195,7 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 2. **Supabase Configuration**
 
    - Service Role key in environment variables
-   - Storage buckets: `user-photos`, `venue-photos` (public read)
+   - Storage buckets: `user-photos`, `team-member-photos`, `venue-photos` (all public read)
    - Tables: users, client_notes, team_members, venues
    - Indexes on `clerk_user_id`, `slug` for fast lookups
 
@@ -242,7 +242,7 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 - One-to-one relationship with users table
 - **RLS:** Disabled
 
-**4. Venues Table** ✅ NEW
+**4. Venues Table**
 
 - Stores salon/venue locations for marketplace
 - Fields: id, name, address, phone_number (nullable), photo_url (nullable), slug (unique), is_listed, created_by, timestamps
@@ -257,6 +257,10 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
   - Public read access
   - Server-side upload/delete (via Service Role)
   - Path: `{clerk_user_id}/{timestamp}-{filename}`
+- **`team-member-photos`**: Team member profile photos
+  - Public read access
+  - Server-side upload/delete (via Service Role)
+  - Path: `{timestamp}-{random}.{ext}`
 - **`venue-photos`**: Venue/location photos
   - Public read access
   - Server-side upload/delete (via Service Role)
@@ -279,20 +283,21 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Operation       │ Client  │ Team    │ Admin        │
-├──────────────────┼─────────┼─────────┼──────────────┤
-│ View own profile │ ✅      │ ✅      │ ✅           │
-│ Edit own profile │ ✅      │ ✅      │ ✅           │
-│ View all users   │ ❌      │ ✅      │ ✅           │
-│ Edit any user    │ ❌      │ ❌      │ ✅           │
-│ View alert_note  │ ❌      │ ✅      │ ✅           │
-│ Edit alert_note  │ ❌      │ ✅      │ ✅           │
-│ View notes       │ ❌      │ ✅      │ ✅           │
-│ Manage notes     │ ❌      │ ✅      │ ✅           │
-│ Manage roles     │ ❌      │ ❌      │ ✅           │
-│ Manage venues    │ ❌      │ ❌      │ ✅           │
-│ Admin panel      │ ❌      │ ✅      │ ✅           │
-└──────────────────┴─────────┴─────────┴──────────────┘
+│  Operation         │ Client  │ Team    │ Admin      │
+├────────────────────┼─────────┼─────────┼────────────┤
+│ View own profile   │ ✅      │ ✅      │ ✅         │
+│ Edit own profile   │ ✅      │ ✅      │ ✅         │
+│ View all users     │ ❌      │ ✅      │ ✅         │
+│ Edit any user      │ ❌      │ ❌      │ ✅         │
+│ View alert_note    │ ❌      │ ✅      │ ✅         │
+│ Edit alert_note    │ ❌      │ ✅      │ ✅         │
+│ View notes         │ ❌      │ ✅      │ ✅         │
+│ Manage notes       │ ❌      │ ✅      │ ✅         │
+│ Manage roles       │ ❌      │ ❌      │ ✅         │
+│ Manage team        │ ❌      │ ❌      │ ✅         │
+│ Manage venues      │ ❌      │ ❌      │ ✅         │
+│ Admin panel        │ ❌      │ ✅      │ ✅         │
+└────────────────────┴─────────┴─────────┴────────────┘
 ```
 
 ### Permission Enforcement
@@ -320,10 +325,13 @@ const clients = await supabaseAdmin
 // ✅ Returns all clients with alert notes
 // ✅ Team member role verified server-side
 
-// ADMIN: Full access to venues
+// ADMIN: Manage team members
 await requireAdmin();
-const venues = await supabaseAdmin.from('venues').select('*');
-// ✅ Returns all venues
+const teamMembers = await supabaseAdmin
+  .from('users')
+  .select(`*, team_members(*)`)
+  .contains('roles', ['team_member']);
+// ✅ Returns all team members with full details
 // ✅ Admin role verified server-side
 ```
 
@@ -342,7 +350,7 @@ const venues = await supabaseAdmin.from('venues').select('*');
 - View all client profiles including alert notes
 - Create, read, update, delete client notes
 - Update client alert notes (allergies, preferences)
-- View other team member profiles
+- View other team member profiles (public info only)
 - Access booking calendar (future feature)
 - Cannot manage user roles, team member records, or venues
 
@@ -350,7 +358,9 @@ const venues = await supabaseAdmin.from('venues').select('*');
 
 - Full access to all features
 - Create/update/delete any user
-- Add team members and manage their profiles
+- **Add team members and manage their profiles**
+- **Toggle team member active/inactive status**
+- **Access public team API data**
 - Manage all client notes
 - Change user roles (changes effective immediately!)
 - **Manage venues/locations** (create, edit, delete, list/unlist)
@@ -393,22 +403,31 @@ Server Action: Update user (Service Role)
 Redirect to dashboard
 ```
 
-### Workflow 2: Admin Adds Team Member
+### Workflow 2: Admin Adds Team Member ✅ UPDATED
 
 ```
-Admin → Fill out "Add Team Member" form
+Admin → Navigate to /admin/team
   ↓
-Check if email exists in database
+Click "Add Team Member" button
+  ↓
+Fill form: email, name, phone, position, bio, photo
+  ↓
+Server Action checks if email exists
   ↓
 IF user exists:
   - Add 'team_member' to roles array
-  - Update Supabase only (no Clerk sync!)
-  - Changes effective immediately!
+  - Create/update team_members record
+  - Set is_active: true
+  - Upload photo if provided
   ↓
 IF user doesn't exist:
   - Create unregistered user
   - roles: ['client', 'team_member']
   - clerk_user_id: null
+  - Create team_members record (is_active: true)
+  - Upload photo if provided
+  ↓
+✅ Team member added and active immediately!
   ↓
 User can register later (account claiming)
   ↓
@@ -417,7 +436,31 @@ Webhook links Clerk ID to existing record
 Roles preserved, access granted immediately!
 ```
 
-### Workflow 3: Admin Changes User Roles
+### Workflow 3: Admin Manages Team Members ✅ NEW
+
+```
+Admin → View team member list at /admin/team
+  ↓
+Search/Filter: All, Active, Inactive
+  ↓
+Actions available:
+  1. Edit → Opens modal with current info
+     - Update name, phone, position, bio, photo
+     - Email cannot be changed
+
+  2. Activate/Deactivate → Toggle status
+     - Changes team_members.is_active
+     - Inactive members hidden from public API
+
+  3. Remove → Remove team_member role
+     - Role removed from users.roles
+     - team_members.is_active set to false
+     - User keeps other roles (e.g., client)
+  ↓
+✅ All changes effective immediately!
+```
+
+### Workflow 4: Admin Changes User Roles
 
 ```
 Admin → Update user roles in database
@@ -435,7 +478,7 @@ Middleware queries Supabase for new roles
 (No sign out/in required!)
 ```
 
-### Workflow 4: Client Edits Profile
+### Workflow 5: Client Edits Profile
 
 ```
 Client → Go to /profile
@@ -456,7 +499,7 @@ Server Action: Update profile
 Success → Refresh page with updated data
 ```
 
-### Workflow 5: Admin Manages Venues ✅ NEW
+### Workflow 6: Admin Manages Venues
 
 ```
 Admin → Navigate to /admin/marketplace
@@ -477,6 +520,27 @@ Server Action: Create venue
 Format: yourdomain.com/venue-name-123456
   ↓
 Admin can edit/delete/list/unlist venue anytime
+```
+
+### Workflow 7: Public Team API Access ✅ NEW
+
+```
+Public user → Access /api/public/team
+  ↓
+Server queries active team members
+  ↓
+Filters data to ONLY public fields:
+  - id
+  - first_name
+  - photo_url
+  ↓
+Returns only active team members
+  ↓
+✅ Response cached for 5 minutes
+  ↓
+Private data protected:
+  - Email, phone, last name NOT exposed
+  - Inactive members NOT returned
 ```
 
 ---
@@ -534,6 +598,28 @@ export async function someOperation() {
 3. **Server-Side Filtering** - Explicit queries ensure data isolation
 4. **Validation** - Check input data before database operations
 5. **Audit Trail** - Log all sensitive operations
+
+### Privacy Protection in Public APIs
+
+**Team Member Public API:**
+
+```typescript
+// ✅ SAFE: Only exposes non-sensitive fields
+{
+  id: "uuid",
+  first_name: "John",
+  photo_url: "https://..."
+}
+
+// ❌ NEVER exposed to public API:
+// - email
+// - last_name
+// - phone_number
+// - roles
+// - position
+// - bio
+// - any other user data
+```
 
 ---
 
@@ -624,6 +710,28 @@ export async function addRoleToUser(userId: string, role: UserRole) {
 }
 ```
 
+### Data Transformation Pattern ✅ NEW
+
+**Handling Supabase Relations:**
+
+```typescript
+// Supabase returns one-to-one relations as arrays
+// Transform to single object for cleaner type safety
+
+const { data: teamMembers } = await supabaseAdmin
+  .from('users')
+  .select(`*, team_members(*)`)
+  .contains('roles', ['team_member']);
+
+// Transform array to object
+const transformed = teamMembers?.map((member) => ({
+  ...member,
+  team_members: Array.isArray(member.team_members)
+    ? member.team_members[0] || null
+    : member.team_members,
+}));
+```
+
 ---
 
 ## 🚀 Development Roadmap
@@ -676,7 +784,16 @@ export async function addRoleToUser(userId: string, role: UserRole) {
   - [x] Add/Edit modals with photo preview
   - [x] Unique booking URLs (format: `domain.com/venue-name-123456`)
   - [x] Fixed hydration errors
-- [ ] Team member management pages
+- [x] **Team Member Management** ✅ NEW
+  - [x] Team list page with search/filter
+  - [x] Add team member modal with photo upload
+  - [x] Edit team member modal
+  - [x] Toggle active/inactive status
+  - [x] Remove team member role
+  - [x] Public API endpoint (`/api/public/team`)
+  - [x] Privacy protection (only id, first_name, photo_url exposed)
+  - [x] Stats dashboard (total, active, inactive)
+  - [x] Account claiming support for unregistered members
 - [ ] Client list page with search/filter
 - [ ] "Add Client" form with validation
 - [ ] Client detail page
@@ -722,9 +839,12 @@ project-root/
 │   │   ├── team-members.ts           # ✅ Team member management
 │   │   └── venues.ts                 # ✅ Venue CRUD operations
 │   ├── api/
-│   │   └── webhooks/
-│   │       └── clerk/
-│   │           └── route.ts          # ✅ Clerk webhook (no role sync!)
+│   │   ├── webhooks/
+│   │   │   └── clerk/
+│   │   │       └── route.ts          # ✅ Clerk webhook (no role sync!)
+│   │   └── public/
+│   │       └── team/
+│   │           └── route.ts          # ✅ Public team API endpoint
 │   ├── onboarding/
 │   │   └── page.tsx                  # ✅ Onboarding flow
 │   ├── profile/
@@ -737,8 +857,7 @@ project-root/
 │   │   ├── marketplace/
 │   │   │   └── page.tsx              # ✅ Venues management
 │   │   ├── team/
-│   │   │   ├── page.tsx              # Team member list (TODO)
-│   │   │   └── add/page.tsx          # Add team member (TODO)
+│   │   │   └── page.tsx              # ✅ Team member list
 │   │   └── clients/
 │   │       ├── page.tsx              # Client list (TODO)
 │   │       ├── add/page.tsx          # Add client form (TODO)
@@ -755,13 +874,15 @@ project-root/
 │   │   ├── navbar.tsx                # ✅ Admin top navbar
 │   │   ├── admin-layout.tsx          # ✅ Layout wrapper
 │   │   ├── page-header.tsx           # ✅ Reusable page header
-│   │   └── marketplace/
-│   │       ├── marketplace-client.tsx # ✅ Marketplace main component
-│   │       ├── venue-card.tsx        # ✅ Venue display card
-│   │       ├── add-venue-modal.tsx   # ✅ Add venue modal
-│   │       └── edit-venue-modal.tsx  # ✅ Edit/delete venue modal
-│   ├── profile-form.tsx              # ✅ Profile form component
-│   └── add-team-member-form.tsx      # Team member form (TODO)
+│   │   ├── marketplace/
+│   │   │   ├── marketplace-client.tsx # ✅ Marketplace main component
+│   │   │   ├── venue-card.tsx        # ✅ Venue display card
+│   │   │   ├── add-venue-modal.tsx   # ✅ Add venue modal
+│   │   │   └── edit-venue-modal.tsx  # ✅ Edit/delete venue modal
+│   │   └── team/
+│   │       ├── team-list-client.tsx  # ✅ Team list component
+│   │       └── team-member-modal.tsx # ✅ Add/Edit team member modal
+│   └── profile-form.tsx              # ✅ Profile form component
 ├── lib/
 │   ├── auth.ts                       # ✅ Auth helpers (query Supabase for roles)
 │   ├── role-management.ts            # ✅ Role management (no Clerk sync)
@@ -769,7 +890,7 @@ project-root/
 │       ├── client.ts                 # ✅ Client-side Supabase (for future use)
 │       └── server.ts                 # ✅ Server-side Supabase (supabaseAdmin)
 ├── types/
-│   └── database.ts                   # ✅ TypeScript types (User, Venue, etc.)
+│   └── database.ts                   # ✅ TypeScript types (User, Venue, TeamMember, etc.)
 └── supabase/
     └── migrations/
         ├── 001_initial_schema.sql    # ✅ Users, notes, team members
@@ -801,6 +922,8 @@ project-root/
 | **Performance Trade-off**  | +5-10ms per request (DB query)    | Worth it for simplicity and instant updates         |
 | **Venue Slugs**            | Auto-generated (name-6digits)     | Unique, short, SEO-friendly booking URLs            |
 | **Multi-location Support** | Venues table                      | Each location gets unique booking page              |
+| **Public API Security**    | Whitelist fields only             | Only expose id, first_name, photo_url publicly      |
+| **Team Member Relations**  | Transform array to object         | Better type safety and cleaner component code       |
 
 ---
 
@@ -861,10 +984,25 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
   - Add/Edit modals with photo preview and validation
   - Unique booking URLs per venue for future booking system
   - Fixed React hydration errors with useEffect pattern
-- 🎯 In Progress: Phase 3 - Team & Client Management
-  - Next: Team member list and management pages
-  - Next: Client list with search/filter
-  - Next: Client detail pages with notes
+- ✅ **Completed Team Member Management System** 🎉 NEW
+  - Full team member CRUD operations (admin only)
+  - Add team member with photo upload
+  - Edit team member details and photo
+  - Toggle active/inactive status
+  - Remove team member role
+  - Search and filter (All/Active/Inactive)
+  - Stats dashboard (total, active, inactive)
+  - Account claiming support for unregistered members
+  - Public API endpoint at `/api/public/team`
+  - Privacy protection: only exposes id, first_name, photo_url
+  - Separate storage bucket: `team-member-photos`
+  - Fixed Supabase relation type issues (array to object transformation)
+  - Team member modal with add/edit modes
+  - Comprehensive team member list with all actions
+- 🎯 Next: Phase 3 - Client Management
+  - Client list with search/filter
+  - Add client form
+  - Client detail pages with notes
 
 **Architecture Decision - MAJOR CHANGE:**
 
@@ -954,9 +1092,49 @@ Benefits:
 - Photo upload with drag & drop visual
 - Responsive button states
 
+**Lists & Tables:**
+
+- Search and filter controls
+- Action buttons with icons
+- Status badges (Active/Inactive/Unregistered)
+- Hover states for better UX
+- Stats cards at the top
+
+---
+
+## 🛡️ Security Best Practices Implemented
+
+### Team Member Management Security
+
+1. **Admin-Only Access**
+
+   - All team member operations require `requireAdmin()`
+   - Middleware protects `/admin/team` route
+   - Server actions verify admin role before execution
+
+2. **Privacy Protection**
+
+   - Public API only exposes: id, first_name, photo_url
+   - Email, phone, last name protected from public access
+   - Inactive members hidden from public API
+   - Team member details only visible to admin
+
+3. **Data Validation**
+
+   - Photo size limit: 5MB
+   - File type validation (images only)
+   - Required field validation (email, first name)
+   - Email uniqueness checks
+
+4. **Server-Side Processing**
+   - All operations use Service Role
+   - Photo uploads server-side only
+   - No client-side data manipulation
+   - Explicit filtering and validation
+
 ---
 
 **Document Status:** Living document - update as architecture evolves  
-**Next Review:** After Team & Client Management completion  
+**Next Review:** After Client Management completion  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Completed Marketplace/Venues Management System
+**Last Major Change:** Completed Team Member Management System with Public API

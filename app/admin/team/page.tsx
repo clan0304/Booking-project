@@ -34,5 +34,14 @@ export default async function TeamPage() {
     console.error('Error fetching team members:', error);
   }
 
-  return <TeamListClient initialTeamMembers={teamMembers || []} />;
+  // Transform team_members from array to single object (one-to-one relationship)
+  const transformedTeamMembers =
+    teamMembers?.map((member) => ({
+      ...member,
+      team_members: Array.isArray(member.team_members)
+        ? member.team_members[0] || null // Take first item or null if empty
+        : member.team_members, // Already an object or null
+    })) || [];
+
+  return <TeamListClient initialTeamMembers={transformedTeamMembers} />;
 }
