@@ -4,6 +4,7 @@
 import { requireAdmin } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { generateShiftDates } from '@/lib/shift-helpers';
 import type { ShiftInput, ConflictResolution } from '@/lib/shift-helpers';
 
 /**
@@ -14,18 +15,44 @@ export async function createRepeatingShifts(formData: FormData) {
   try {
     await requireAdmin();
 
-    // Parse form data
+    // Parse form data - CRITICAL: Keep dates as strings, never convert to Date objects
     const teamMemberId = formData.get('teamMemberId') as string;
     const venueId = formData.get('venueId') as string;
-    const shiftsJson = formData.get('shifts') as string;
+    const startDate = formData.get('startDate') as string; // YYYY-MM-DD string
+    const endDate = formData.get('endDate') as string; // YYYY-MM-DD string
+    const daysJson = formData.get('days') as string;
+    const startTime = formData.get('startTime') as string;
+    const endTime = formData.get('endTime') as string;
     const conflictResolution =
       (formData.get('conflictResolution') as ConflictResolution) || 'skip';
 
-    if (!teamMemberId || !venueId || !shiftsJson) {
+    if (
+      !teamMemberId ||
+      !venueId ||
+      !startDate ||
+      !endDate ||
+      !daysJson ||
+      !startTime ||
+      !endTime
+    ) {
       return { success: false, error: 'Missing required fields' };
     }
 
-    const shifts: ShiftInput[] = JSON.parse(shiftsJson);
+    const days: number[] = JSON.parse(daysJson);
+
+    if (days.length === 0) {
+      return { success: false, error: 'No days selected' };
+    }
+
+    // Generate shifts using UTC-safe functions
+    // The dates are kept as strings throughout, no timezone conversion!
+    const shifts: ShiftInput[] = generateShiftDates({
+      days,
+      startTime,
+      endTime,
+      startDate, // Pure YYYY-MM-DD string
+      endDate, // Pure YYYY-MM-DD string
+    });
 
     if (shifts.length === 0) {
       return { success: false, error: 'No shifts to create' };
@@ -34,23 +61,23 @@ export async function createRepeatingShifts(formData: FormData) {
     // Handle conflict resolution
     if (conflictResolution === 'replace') {
       // Delete existing shifts in date range
-      const startDate = shifts[0].shift_date;
-      const endDate = shifts[shifts.length - 1].shift_date;
+      const firstDate = shifts[0].shift_date;
+      const lastDate = shifts[shifts.length - 1].shift_date;
 
       await supabaseAdmin
         .from('shifts')
         .delete()
         .eq('team_member_id', teamMemberId)
         .eq('venue_id', venueId)
-        .gte('shift_date', startDate)
-        .lte('shift_date', endDate);
+        .gte('shift_date', firstDate)
+        .lte('shift_date', lastDate);
     }
 
-    // Prepare shift records
+    // Prepare shift records - dates are already strings in YYYY-MM-DD format
     const shiftRecords = shifts.map((shift) => ({
       team_member_id: teamMemberId,
       venue_id: venueId,
-      shift_date: shift.shift_date,
+      shift_date: shift.shift_date, // Already YYYY-MM-DD string
       start_time: shift.start_time,
       end_time: shift.end_time,
     }));

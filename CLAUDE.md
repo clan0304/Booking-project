@@ -29,6 +29,7 @@
 - **Authorization:** Supabase (roles stored in database only)
 - **Storage:** Supabase Storage (for user photos, team member photos, venue photos)
 - **Data Access:** Service Role (server-side) for all operations
+- **Timezone Handling:** UTC-safe date/time utilities for Melbourne (UTC+10/+11)
 
 ---
 
@@ -57,162 +58,17 @@
    - Role changes take effect immediately (no sign out/in required!)
 
 4. **Server-Side Data Access Pattern**
+
    - **All operations use Service Role** (`supabaseAdmin`)
    - Server-side filtering ensures users only access their data
    - Auth checks via `requireAuth()`, `requireStaff()`, `requireAdmin()`
    - RLS policies disabled (Service Role bypasses them anyway)
 
-### Architecture Flow
-
-```
-┌─────────────────────────────────────────────────┐
-│         Authentication Flow                      │
-├─────────────────────────────────────────────────┤
-│                                                  │
-│  User Sign-up/Sign-in                           │
-│         ↓                                        │
-│    Clerk Authentication ✅                      │
-│         ↓                                        │
-│    Clerk Webhook Trigger                        │
-│         ↓                                        │
-│  Supabase Users Table (Create/Update)           │
-│    - Stores user data + roles                   │
-│    - NO sync back to Clerk!                     │
-│         ↓                                        │
-│  Onboarding (if needed)                         │
-│         ↓                                        │
-│  Dashboard                                       │
-│                                                  │
-└─────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────┐
-│         Authorization Flow (NEW!)                │
-├─────────────────────────────────────────────────┤
-│                                                  │
-│  User accesses protected route                  │
-│         ↓                                        │
-│  Middleware queries Supabase for roles          │
-│    - Single DB query (~5-10ms)                  │
-│    - Reads from users.roles column              │
-│         ↓                                        │
-│  Check permissions                               │
-│         ↓                                        │
-│  Allow or Redirect                               │
-│                                                  │
-│  ✅ Instant role changes!                       │
-│  ✅ No JWT caching issues!                      │
-│  ✅ Single source of truth!                     │
-│                                                  │
-└─────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────┐
-│         Data Access Pattern                      │
-├─────────────────────────────────────────────────┤
-│                                                  │
-│  SERVER-SIDE ONLY (All Users)                   │
-│         ↓                                        │
-│  1. Server Component/Action                     │
-│         ↓                                        │
-│  2. Auth Check (requireAuth/requireStaff)       │
-│    - Queries Supabase for user + roles          │
-│         ↓                                        │
-│  3. Service Role Query (supabaseAdmin)          │
-│         ↓                                        │
-│  4. Explicit Filtering by User/Role             │
-│         ↓                                        │
-│  5. Return Filtered Data                        │
-│                                                  │
-│  ✅ Simple, Secure, Easy to Maintain            │
-│                                                  │
-└─────────────────────────────────────────────────┘
-```
-
-### Why This Architecture?
-
-**Key Benefits:**
-
-- ✅ **Simpler**: No role syncing between systems
-- ✅ **More Secure**: Server-side code can't be inspected/modified by users
-- ✅ **Easier to Debug**: Single source of truth for roles
-- ✅ **Better for Business Logic**: Complex validations, calculations
-- ✅ **Faster Development**: No sync utilities to maintain
-- ✅ **Instant Updates**: Role changes take effect immediately without re-authentication
-
-**Security via Server-Side Filtering:**
-
-```typescript
-// Client viewing own profile - filtered by their ID
-const { userId } = await requireAuth();
-const user = await supabaseAdmin
-  .from('users')
-  .select('*')
-  .eq('clerk_user_id', userId) // ✅ Only their data
-  .maybeSingle();
-
-// Admin viewing all users - no filter
-await requireAdmin();
-const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (admin verified)
-```
-
----
-
-## 🔐 Authentication Strategy
-
-### Clerk + Supabase Integration Method
-
-**Current Approach:** Clerk for Authentication, Supabase for Authorization
-
-**How It Works:**
-
-1. **User Authentication (Clerk)**
-
-   - Clerk handles sign-in/sign-up
-   - JWT token stored in browser (for Clerk sessions)
-   - Server extracts `userId` from Clerk session
-
-2. **User Authorization (Supabase)**
-
-   - All role checks query Supabase directly
-   - Middleware: One DB query per protected route
-   - Auth helpers: Query Supabase for user + roles
-   - Single source of truth: `users.roles` column
-
-3. **Role Management**
-   - Roles stored ONLY in Supabase `users.roles` array
-   - NO syncing to Clerk metadata
-   - Middleware checks roles by querying Supabase
-   - Role changes effective immediately (no sign out needed!)
-
-### Setup Requirements
-
-1. **Clerk Configuration**
-
-   - Email/Password authentication enabled
-   - Google OAuth enabled
-   - Webhook endpoint configured
-   - NO JWT template needed!
-
-2. **Supabase Configuration**
-
-   - Service Role key in environment variables
-   - Storage buckets: `user-photos`, `team-member-photos`, `venue-photos` (all public read)
-   - Tables: users, client_notes, team_members, venues
-   - Indexes on `clerk_user_id`, `slug` for fast lookups
-
-3. **Clerk Webhooks**
-   - Events: `user.created`, `user.updated`, `user.deleted`
-   - Endpoint: `/api/webhooks/clerk`
-   - Syncs user data (email, name, photo) to Supabase
-   - Does NOT sync roles (roles stay in Supabase only!)
-
-### Two User Types
-
-| Type                    | clerk_user_id | is_registered | Can Sign In? | Created By                   |
-| ----------------------- | ------------- | ------------- | ------------ | ---------------------------- |
-| **Registered User**     | ✅ Present    | `true`        | ✅ Yes       | Self sign-up or Admin invite |
-| **Unregistered Client** | ❌ `null`     | `false`       | ❌ No        | Admin manual entry           |
-
-**Key Insight:** Unregistered clients exist in the database for record-keeping but cannot authenticate until they claim their account.
+5. **Timezone-Safe Date Handling** ✅ NEW
+   - All dates stored as YYYY-MM-DD strings (no timezone)
+   - UTC-safe parsing prevents timezone conversion bugs
+   - Works correctly in Melbourne (UTC+10/+11) year-round
+   - Handles daylight saving time transitions automatically
 
 ---
 
@@ -251,7 +107,36 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 - **RLS:** Disabled
 - **Purpose:** Multi-location support, each venue gets unique booking URL
 
-**5. Supabase Storage Buckets**
+**5. Venue Operating Hours Table** ✅ NEW
+
+- Stores regular business hours for each venue
+- Fields: id, venue_id (FK), day_of_week (0-6), start_time, end_time, is_closed
+- Unique constraint: (venue_id, day_of_week)
+- **Purpose:** Define when venue is open/closed each day of week
+
+**6. Team Member Venues Table** ✅ NEW
+
+- Junction table for team member assignments to venues
+- Fields: id, team_member_id (FK to users), venue_id (FK), is_active
+- Unique constraint: (team_member_id, venue_id)
+- **Purpose:** Track which team members work at which venues
+
+**7. Shifts Table** ✅ NEW
+
+- Stores individual work shifts for team members
+- Fields: id, team_member_id (FK), venue_id (FK), shift_date (date), start_time, end_time, notes, created_by
+- Unique constraint: (team_member_id, venue_id, shift_date)
+- Indexes on: shift_date, team_member_id, venue_id
+- **Purpose:** Schedule management and availability tracking
+
+**8. Venue Closed Days Table** ✅ NEW
+
+- Stores dates when venue is closed (holidays, special events)
+- Fields: id, venue_id (FK), closed_date (date), reason, is_recurring, recurrence_rule, created_by
+- Unique constraint: (venue_id, closed_date)
+- **Purpose:** Mark venue closures, prevent bookings on closed days
+
+**9. Supabase Storage Buckets**
 
 - **`user-photos`**: User profile photos
   - Public read access
@@ -272,464 +157,111 @@ const users = await supabaseAdmin.from('users').select('*'); // ✅ All data (ad
 - **Separate notes table:** Better performance, audit trail, and queryability
 - **Team members extension:** Keeps user data normalized while allowing role-specific fields
 - **Venues table:** Supports multi-location businesses, unique booking URLs per venue
+- **Scheduling tables:** Flexible shift management with venue assignments
+- **Closed days tracking:** Prevents conflicts and handles special closures
 - **No RLS policies:** Simpler maintenance, security enforced in application code
 - **Roles in database only:** No syncing complexity, instant updates
 
 ---
 
-## 👥 User Types & Permissions
-
-### Access Control Matrix
-
-```
-┌──────────────────────────────────────────────────────┐
-│  Operation         │ Client  │ Team    │ Admin      │
-├────────────────────┼─────────┼─────────┼────────────┤
-│ View own profile   │ ✅      │ ✅      │ ✅         │
-│ Edit own profile   │ ✅      │ ✅      │ ✅         │
-│ View all users     │ ❌      │ ✅      │ ✅         │
-│ Edit any user      │ ❌      │ ❌      │ ✅         │
-│ View alert_note    │ ❌      │ ✅      │ ✅         │
-│ Edit alert_note    │ ❌      │ ✅      │ ✅         │
-│ View notes         │ ❌      │ ✅      │ ✅         │
-│ Manage notes       │ ❌      │ ✅      │ ✅         │
-│ Manage roles       │ ❌      │ ❌      │ ✅         │
-│ Manage team        │ ❌      │ ❌      │ ✅         │
-│ Manage venues      │ ❌      │ ❌      │ ✅         │
-│ Admin panel        │ ❌      │ ✅      │ ✅         │
-└────────────────────┴─────────┴─────────┴────────────┘
-```
-
-### Permission Enforcement
-
-**Server-Side Filtering Examples:**
-
-```typescript
-// CLIENT: View own profile only
-const { userId } = await requireAuth();
-const user = await supabaseAdmin
-  .from('users')
-  .select('first_name, last_name, phone_number, birthday, photo_url')
-  .eq('clerk_user_id', userId)
-  .maybeSingle();
-// ✅ Returns only their data
-// ❌ No roles, no alert_note, no other users
-
-// TEAM MEMBER: View all clients
-await requireStaff();
-const clients = await supabaseAdmin
-  .from('users')
-  .select('*, alert_note')
-  .contains('roles', ['client'])
-  .order('created_at', { ascending: false });
-// ✅ Returns all clients with alert notes
-// ✅ Team member role verified server-side
-
-// ADMIN: Manage team members
-await requireAdmin();
-const teamMembers = await supabaseAdmin
-  .from('users')
-  .select(`*, team_members(*)`)
-  .contains('roles', ['team_member']);
-// ✅ Returns all team members with full details
-// ✅ Admin role verified server-side
-```
-
-### Role Capabilities
-
-**Client**
-
-- View and edit their own profile (name, phone, birthday, photo)
-- Book appointments (future feature)
-- Cannot see internal notes or alerts about themselves
-- Cannot see other users
-- Server filters all queries by their user ID
-
-**Team Member**
-
-- View all client profiles including alert notes
-- Create, read, update, delete client notes
-- Update client alert notes (allergies, preferences)
-- View other team member profiles (public info only)
-- Access booking calendar (future feature)
-- Cannot manage user roles, team member records, or venues
-
-**Admin**
-
-- Full access to all features
-- Create/update/delete any user
-- **Add team members and manage their profiles**
-- **Toggle team member active/inactive status**
-- **Access public team API data**
-- Manage all client notes
-- Change user roles (changes effective immediately!)
-- **Manage venues/locations** (create, edit, delete, list/unlist)
-- All team member capabilities plus system administration
-
-### Why Clients Can't See Their Own Notes
-
-- **Privacy & Professionalism:** Internal notes may contain sensitive observations
-- **Industry Standard:** Matches how professional salon systems (like Fresha) operate
-- **Team Communication:** Notes are for staff-to-staff communication
-
----
-
 ## 🔄 Key Workflows
 
-### Workflow 1: Self Sign-up (Email/Password)
+### Workflow 8: Admin Manages Shifts ✅ NEW
 
 ```
-User → Sign up with email/password
+Admin → Navigate to /admin/team → Scheduled Shifts tab
   ↓
-Clerk creates account
+Select venue from dropdown
   ↓
-Webhook → Create user in Supabase (Service Role)
-  - clerk_user_id: set
-  - is_registered: true
-  - roles: ['client']
-  - onboarding_completed: false
+View week calendar (Mon-Sun)
+  - Displays all team members assigned to venue
+  - Shows existing shifts for each day
   ↓
-(NO sync back to Clerk!)
+Click "Set Schedule" for a team member
   ↓
-Redirect to /onboarding
+Repeating Shifts Modal Opens:
+  - Select date range (start/end)
+  - Select days of week (Mon-Fri default)
+  - Set shift hours (10:00 AM - 6:00 PM default)
+  - Handle conflicts (skip or replace existing)
   ↓
-User fills: phone number, photo (optional)
+Server Action: createRepeatingShifts()
+  - Generates shifts using UTC-safe date functions
+  - Dates remain as YYYY-MM-DD strings (no conversion!)
+  - Checks for existing shifts
+  - Inserts new shifts or skips conflicts
   ↓
-Server Action: Upload photo (Service Role)
-  ↓
-Server Action: Update user (Service Role)
-  - onboarding_completed: true
-  ↓
-Redirect to dashboard
+✅ Shifts saved correctly to database
+✅ Calendar refreshes with new shifts
+✅ No timezone conversion bugs!
 ```
 
-### Workflow 2: Admin Adds Team Member ✅ UPDATED
+### Workflow 9: Assign Team Members to Venue ✅ NEW
 
 ```
-Admin → Navigate to /admin/team
+Admin → Click "Assign Team" button
   ↓
-Click "Add Team Member" button
+Modal shows unassigned team members
   ↓
-Fill form: email, name, phone, position, bio, photo
+Select one or multiple team members
   ↓
-Server Action checks if email exists
+Server Action: Bulk assign to venue
+  - Creates team_member_venues records
+  - Sets is_active: true
   ↓
-IF user exists:
-  - Add 'team_member' to roles array
-  - Create/update team_members record
-  - Set is_active: true
-  - Upload photo if provided
-  ↓
-IF user doesn't exist:
-  - Create unregistered user
-  - roles: ['client', 'team_member']
-  - clerk_user_id: null
-  - Create team_members record (is_active: true)
-  - Upload photo if provided
-  ↓
-✅ Team member added and active immediately!
-  ↓
-User can register later (account claiming)
-  ↓
-Webhook links Clerk ID to existing record
-  ↓
-Roles preserved, access granted immediately!
-```
-
-### Workflow 3: Admin Manages Team Members ✅ NEW
-
-```
-Admin → View team member list at /admin/team
-  ↓
-Search/Filter: All, Active, Inactive
-  ↓
-Actions available:
-  1. Edit → Opens modal with current info
-     - Update name, phone, position, bio, photo
-     - Email cannot be changed
-
-  2. Activate/Deactivate → Toggle status
-     - Changes team_members.is_active
-     - Inactive members hidden from public API
-
-  3. Remove → Remove team_member role
-     - Role removed from users.roles
-     - team_members.is_active set to false
-     - User keeps other roles (e.g., client)
-  ↓
-✅ All changes effective immediately!
-```
-
-### Workflow 4: Admin Changes User Roles
-
-```
-Admin → Update user roles in database
-  ↓
-Server Action: Update roles in Supabase
-  - Only updates users.roles column
-  - NO sync to Clerk needed!
-  ↓
-User refreshes page
-  ↓
-Middleware queries Supabase for new roles
-  ↓
-✅ New permissions active immediately!
-  ↓
-(No sign out/in required!)
-```
-
-### Workflow 5: Client Edits Profile
-
-```
-Client → Go to /profile
-  ↓
-Server Component: Load user data
-  - requireAuth() verifies authentication
-  - Query filtered by user's clerk_user_id
-  - Returns only their data (no roles, no alert_note)
-  ↓
-Client → Update form and submit
-  ↓
-Server Action: Update profile
-  - Verify authentication
-  - Upload photo if provided (Service Role)
-  - Update allowed fields only
-  - Cannot modify: roles, alert_note
-  ↓
-Success → Refresh page with updated data
-```
-
-### Workflow 6: Admin Manages Venues
-
-```
-Admin → Navigate to /admin/marketplace
-  ↓
-View all venues (listed/unlisted)
-  ↓
-Click "Add Venue" button
-  ↓
-Fill form: name, address, phone, photo
-  ↓
-Server Action: Create venue
-  - Verify admin access (requireAdmin)
-  - Upload photo to venue-photos bucket
-  - Auto-generate unique slug (name-123456)
-  - Store venue in database
-  ↓
-✅ Venue created with booking URL
-Format: yourdomain.com/venue-name-123456
-  ↓
-Admin can edit/delete/list/unlist venue anytime
-```
-
-### Workflow 7: Public Team API Access ✅ NEW
-
-```
-Public user → Access /api/public/team
-  ↓
-Server queries active team members
-  ↓
-Filters data to ONLY public fields:
-  - id
-  - first_name
-  - photo_url
-  ↓
-Returns only active team members
-  ↓
-✅ Response cached for 5 minutes
-  ↓
-Private data protected:
-  - Email, phone, last name NOT exposed
-  - Inactive members NOT returned
-```
-
----
-
-## 🔒 Security Principles
-
-### Authentication Security
-
-✅ **DO:**
-
-- Use `supabaseAdmin` (Service Role) for all database operations
-- Always verify authentication with `requireAuth()` in server components/actions
-- Always verify roles with `requireStaff()` or `requireAdmin()` for protected operations
-- Filter queries by user ID for personal data (`.eq('clerk_user_id', userId)`)
-- Store Service Role key in environment variables (never expose to client)
-- Verify Clerk webhook signatures
-- Use Server Actions for all data mutations
-
-❌ **DON'T:**
-
-- Never expose SUPABASE_SERVICE_ROLE_KEY to client-side code
-- Don't trust client-side data without server validation
-- Don't skip authentication checks in server actions
-- Don't allow users to query data without proper filtering
-- Don't store passwords or secrets in code repository
-- Don't sync roles to Clerk (keep them in Supabase only!)
-
-### Data Access Security
-
-**Pattern for All Operations:**
-
-```typescript
-// 1. Server Component or Server Action
-'use server';
-
-export async function someOperation() {
-  // 2. Verify authentication and role
-  const { userId, roles } = await requireAuth(); // Queries Supabase
-
-  // 3. Use Service Role with explicit filtering
-  const data = await supabaseAdmin
-    .from('table')
-    .select('*')
-    .eq('clerk_user_id', userId); // Filter by authenticated user
-
-  // 4. Return only appropriate data
-  return data;
-}
-```
-
-**Security Layers:**
-
-1. **Middleware** - Queries Supabase for roles, protects routes
-2. **Auth Helpers** - Verify user identity and fetch permissions from DB
-3. **Server-Side Filtering** - Explicit queries ensure data isolation
-4. **Validation** - Check input data before database operations
-5. **Audit Trail** - Log all sensitive operations
-
-### Privacy Protection in Public APIs
-
-**Team Member Public API:**
-
-```typescript
-// ✅ SAFE: Only exposes non-sensitive fields
-{
-  id: "uuid",
-  first_name: "John",
-  photo_url: "https://..."
-}
-
-// ❌ NEVER exposed to public API:
-// - email
-// - last_name
-// - phone_number
-// - roles
-// - position
-// - bio
-// - any other user data
+✅ Team members now appear in calendar
+✅ Can create shifts for assigned members
 ```
 
 ---
 
 ## 💻 Implementation Patterns
 
-### Auth Helper Pattern
+### Timezone-Safe Date Handling Pattern ✅ NEW
 
-**Centralized auth functions:**
+**Critical for Melbourne (UTC+10/+11):**
 
 ```typescript
-// lib/auth.ts - Queries Supabase for roles
-export async function getCurrentUser() {
-  const { userId } = await auth();
-  if (!userId) return null;
+// lib/shift-helpers.ts
 
-  // Fetch roles from Supabase (single source of truth)
-  const { data: user } = await supabaseAdmin
-    .from('users')
-    .select('id, roles')
-    .eq('clerk_user_id', userId)
-    .maybeSingle();
-
-  if (!user) return null;
-
-  return { userId, supabaseUserId: user.id, roles: user.roles };
+// ALWAYS parse dates in UTC to avoid timezone bugs
+function parseUTCDate(dateStr: string): Date {
+  return new Date(dateStr + 'T00:00:00Z'); // Z = UTC!
 }
 
-export async function requireAuth() {
-  const user = await getCurrentUser();
-  if (!user) redirect('/sign-in');
-  return user;
+// ALWAYS use UTC methods
+export function getDayOfWeek(dateStr: string): number {
+  const date = parseUTCDate(dateStr);
+  return date.getUTCDay(); // Not .getDay()!
 }
 
-export async function requireStaff() {
-  const user = await requireAuth();
-  const hasAccess = user.roles.some((r) =>
-    ['admin', 'team_member'].includes(r)
-  );
-  if (!hasAccess) redirect('/unauthorized');
-  return user;
-}
-
-export async function requireAdmin() {
-  const user = await requireAuth();
-  if (!user.roles.includes('admin')) redirect('/unauthorized');
-  return user;
+// ALWAYS format dates in UTC
+export function formatDate(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 ```
 
-**Benefits:**
+**Why This Matters:**
 
-- DRY principle
-- Consistent auth checks
-- Easy to test
-- Type-safe
-- Centralized redirect logic
-- Single DB query per auth check
+- Database stores dates as `YYYY-MM-DD` (no timezone)
+- JavaScript `new Date("2025-10-15")` interprets as local time
+- In Melbourne, this can shift the date by 1 day in UTC
+- Using UTC methods ensures dates stay correct year-round
+- Handles daylight saving transitions automatically
 
-### Role Management Pattern
-
-```typescript
-// lib/role-management.ts - Simple role management
-export async function updateUserRoles(userId: string, newRoles: UserRole[]) {
-  // Just update Supabase - no sync needed!
-  const { error } = await supabaseAdmin
-    .from('users')
-    .update({ roles: newRoles })
-    .eq('id', userId);
-
-  if (error) return { success: false, error: 'Failed to update roles' };
-
-  // ✅ Changes effective immediately on next request!
-  return { success: true };
-}
-
-export async function addRoleToUser(userId: string, role: UserRole) {
-  // Get current roles
-  const { data: user } = await supabaseAdmin
-    .from('users')
-    .select('roles')
-    .eq('id', userId)
-    .single();
-
-  if (user.roles.includes(role)) return { success: true };
-
-  const newRoles = [...user.roles, role];
-  return await updateUserRoles(userId, newRoles);
-}
-```
-
-### Data Transformation Pattern ✅ NEW
-
-**Handling Supabase Relations:**
+**Example Bug Without UTC:**
 
 ```typescript
-// Supabase returns one-to-one relations as arrays
-// Transform to single object for cleaner type safety
+// ❌ WRONG: Timezone-dependent
+const date = new Date('2025-10-15T00:00:00'); // Melbourne time!
+date.getDay(); // Returns wrong day in UTC!
 
-const { data: teamMembers } = await supabaseAdmin
-  .from('users')
-  .select(`*, team_members(*)`)
-  .contains('roles', ['team_member']);
-
-// Transform array to object
-const transformed = teamMembers?.map((member) => ({
-  ...member,
-  team_members: Array.isArray(member.team_members)
-    ? member.team_members[0] || null
-    : member.team_members,
-}));
+// ✅ CORRECT: UTC-explicit
+const date = new Date('2025-10-15T00:00:00Z'); // UTC!
+date.getUTCDay(); // Always correct!
 ```
 
 ---
@@ -774,7 +306,7 @@ const transformed = teamMembers?.map((member) => ({
 - [x] Sidebar with icon navigation (11 menu items)
 - [x] Top navbar with search, notifications, user menu
 - [x] Admin layout wrapper with sticky header/sidebar
-- [x] **Marketplace/Venues Management** (Admin only)
+- [x] **Marketplace/Venues Management**
   - [x] Venues database table with auto-slug generation
   - [x] Create, read, update, delete venues
   - [x] Venue photo uploads
@@ -783,8 +315,7 @@ const transformed = teamMembers?.map((member) => ({
   - [x] Sort by newest, oldest, name
   - [x] Add/Edit modals with photo preview
   - [x] Unique booking URLs (format: `domain.com/venue-name-123456`)
-  - [x] Fixed hydration errors
-- [x] **Team Member Management** ✅ NEW
+- [x] **Team Member Management**
   - [x] Team list page with search/filter
   - [x] Add team member modal with photo upload
   - [x] Edit team member modal
@@ -794,20 +325,55 @@ const transformed = teamMembers?.map((member) => ({
   - [x] Privacy protection (only id, first_name, photo_url exposed)
   - [x] Stats dashboard (total, active, inactive)
   - [x] Account claiming support for unregistered members
+
+### Phase 3.5: Scheduling System ✅ (COMPLETED) 🎉 NEW
+
+- [x] **Database Schema**
+  - [x] Venue operating hours table
+  - [x] Team member venues junction table
+  - [x] Shifts table with unique constraints
+  - [x] Venue closed days table
+  - [x] Database functions and triggers
+- [x] **Timezone-Safe Date Utilities**
+  - [x] UTC-safe date parsing (Melbourne UTC+10/+11)
+  - [x] Week calculation (Mon-Sun format)
+  - [x] Date range formatting
+  - [x] Day of week calculations
+  - [x] Handles daylight saving time
+- [x] **Server Actions**
+  - [x] Create/update/delete shifts
+  - [x] Repeating shifts pattern generation
+  - [x] Conflict detection and resolution
+  - [x] Venue hours management
+  - [x] Team-venue assignments
+  - [x] Closed days management
+- [x] **UI Components**
+  - [x] Venue selector dropdown
+  - [x] Week navigator (prev/next/this week)
+  - [x] Calendar grid view (Mon-Sun)
+  - [x] Team member row with shifts
+  - [x] Assign venue modal (bulk assign)
+  - [x] Repeating shifts modal
+  - [x] Set Schedule button functionality
+- [x] **Bug Fixes**
+  - [x] Fixed timezone conversion bugs
+  - [x] Fixed calendar week display (Sat-Fri → Mon-Sun)
+  - [x] Fixed date range calculation (6 days → 7 days)
+  - [x] Fixed shift dates off by 1 day
+  - [x] Fixed Set Schedule button not opening modal
+  - [x] Fixed TypeScript type errors
+  - [x] Fixed useEffect dependency warnings
+
+### Phase 4: Client Management (NEXT)
+
 - [ ] Client list page with search/filter
 - [ ] "Add Client" form with validation
 - [ ] Client detail page
 - [ ] Client notes CRUD interface
 - [ ] Alert note management
-
-### Phase 4: Client Management (FUTURE)
-
-- [ ] Advanced client search and filtering
-- [ ] Bulk operations (export, delete)
 - [ ] Client tags/categories
 - [ ] Client communication history
 - [ ] Booking history view
-- [ ] Client preferences management
 
 ### Phase 5: Booking System (FUTURE)
 
@@ -815,8 +381,7 @@ const transformed = teamMembers?.map((member) => ({
 - [ ] Service categories
 - [ ] Appointment booking schema
 - [ ] Booking flow for clients
-- [ ] Calendar view for team
-- [ ] Availability management
+- [ ] Availability management based on shifts
 - [ ] Email notifications
 - [ ] SMS reminders
 - [ ] Booking confirmations
@@ -837,119 +402,87 @@ project-root/
 │   │   ├── profile.ts                # ✅ Profile update server action
 │   │   ├── admin.ts                  # ✅ Admin operations (users, roles)
 │   │   ├── team-members.ts           # ✅ Team member management
-│   │   └── venues.ts                 # ✅ Venue CRUD operations
+│   │   ├── venues.ts                 # ✅ Venue CRUD operations
+│   │   ├── shifts.ts                 # ✅ Shift CRUD + repeating shifts
+│   │   ├── venue-hours.ts            # ✅ Venue hours management
+│   │   ├── team-venue-assignments.ts # ✅ Team-venue relationships
+│   │   └── venue-closed-days.ts      # ✅ Closed days management
 │   ├── api/
 │   │   ├── webhooks/
 │   │   │   └── clerk/
-│   │   │       └── route.ts          # ✅ Clerk webhook (no role sync!)
+│   │   │       └── route.ts          # ✅ Clerk webhook
 │   │   └── public/
 │   │       └── team/
-│   │           └── route.ts          # ✅ Public team API endpoint
-│   ├── onboarding/
-│   │   └── page.tsx                  # ✅ Onboarding flow
-│   ├── profile/
-│   │   └── page.tsx                  # ✅ Profile page (server component)
-│   ├── dashboard/
-│   │   └── page.tsx                  # ✅ Client dashboard
+│   │           └── route.ts          # ✅ Public team API
 │   ├── admin/
 │   │   ├── layout.tsx                # ✅ Admin layout wrapper
 │   │   ├── page.tsx                  # ✅ Admin dashboard
 │   │   ├── marketplace/
 │   │   │   └── page.tsx              # ✅ Venues management
 │   │   ├── team/
-│   │   │   └── page.tsx              # ✅ Team member list
+│   │   │   └── page.tsx              # ✅ Team + Scheduling tabs
 │   │   └── clients/
-│   │       ├── page.tsx              # Client list (TODO)
-│   │       ├── add/page.tsx          # Add client form (TODO)
-│   │       └── [id]/page.tsx         # Client detail (TODO)
-│   ├── sign-in/
-│   │   └── [[...sign-in]]/
-│   │       └── page.tsx              # ✅ Sign-in/Sign-up page
-│   ├── unauthorized/
-│   │   └── page.tsx                  # ✅ 403 page
-│   └── middleware.ts                 # ✅ Route protection (queries Supabase)
+│   │       └── page.tsx              # Client list (TODO)
+│   └── middleware.ts                 # ✅ Route protection
 ├── components/
 │   ├── admin/
-│   │   ├── sidebar.tsx               # ✅ Admin sidebar navigation
-│   │   ├── navbar.tsx                # ✅ Admin top navbar
+│   │   ├── sidebar.tsx               # ✅ Admin sidebar
+│   │   ├── navbar.tsx                # ✅ Admin navbar
 │   │   ├── admin-layout.tsx          # ✅ Layout wrapper
-│   │   ├── page-header.tsx           # ✅ Reusable page header
-│   │   ├── marketplace/
-│   │   │   ├── marketplace-client.tsx # ✅ Marketplace main component
-│   │   │   ├── venue-card.tsx        # ✅ Venue display card
-│   │   │   ├── add-venue-modal.tsx   # ✅ Add venue modal
-│   │   │   └── edit-venue-modal.tsx  # ✅ Edit/delete venue modal
+│   │   ├── marketplace/              # ✅ Venue components
 │   │   └── team/
-│   │       ├── team-list-client.tsx  # ✅ Team list component
-│   │       └── team-member-modal.tsx # ✅ Add/Edit team member modal
-│   └── profile-form.tsx              # ✅ Profile form component
+│   │       ├── team-list-client.tsx  # ✅ Team member list
+│   │       ├── team-tabs.tsx         # ✅ Team/Scheduling tabs
+│   │       ├── scheduled-shifts-client.tsx # ✅ Calendar grid
+│   │       ├── venue-selector.tsx    # ✅ Venue dropdown
+│   │       ├── week-navigator.tsx    # ✅ Week navigation
+│   │       ├── assign-venue-modal.tsx # ✅ Assign team modal
+│   │       └── repeating-shifts-modal.tsx # ✅ Set schedule modal
+│   └── profile-form.tsx              # ✅ Profile form
 ├── lib/
-│   ├── auth.ts                       # ✅ Auth helpers (query Supabase for roles)
-│   ├── role-management.ts            # ✅ Role management (no Clerk sync)
+│   ├── auth.ts                       # ✅ Auth helpers
+│   ├── role-management.ts            # ✅ Role management
+│   ├── shift-helpers.ts              # ✅ UTC-safe date utilities
 │   └── supabase/
-│       ├── client.ts                 # ✅ Client-side Supabase (for future use)
-│       └── server.ts                 # ✅ Server-side Supabase (supabaseAdmin)
+│       ├── client.ts                 # ✅ Client-side Supabase
+│       └── server.ts                 # ✅ Server-side Supabase
 ├── types/
-│   └── database.ts                   # ✅ TypeScript types (User, Venue, TeamMember, etc.)
+│   └── database.ts                   # ✅ TypeScript types
 └── supabase/
     └── migrations/
-        ├── 001_initial_schema.sql    # ✅ Users, notes, team members
-        └── 002_venues.sql            # ✅ Venues table + slug generator
+        ├── 001_initial_schema.sql    # ✅ Users, notes, team
+        ├── 002_venues.sql            # ✅ Venues + slug generator
+        └── 003_scheduling_system.sql # ✅ Shifts, hours, assignments
 ```
 
 ---
 
 ## 🎯 Critical Decisions Summary
 
-| Decision                   | Choice                            | Rationale                                           |
-| -------------------------- | --------------------------------- | --------------------------------------------------- |
-| **Data Access Pattern**    | Service Role (server-side)        | Simpler, more secure, easier to maintain            |
-| **Authorization Pattern**  | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing |
-| **Role Storage**           | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler     |
-| **Role Changes**           | Immediate (no re-auth)            | Better UX, middleware queries DB on each request    |
-| **Client Data Access**     | Server-side with filtering        | Users access own data via filtered queries          |
-| **RLS Policies**           | Disabled                          | Not needed with Service Role                        |
-| **User Table Structure**   | Unified table with roles array    | Handles role transitions, single source of truth    |
-| **Authentication**         | Clerk                             | Industry standard, OAuth support, handles auth only |
-| **Client Notes**           | Separate table                    | Better audit trail, performance, queryability       |
-| **Unregistered Clients**   | clerk_user_id nullable            | Supports walk-in clients, admin-created records     |
-| **Photo Storage**          | Supabase Storage                  | Integrated with database, simple permissions        |
-| **Photo Upload**           | Server-side (Service Role)        | Secure, no body size limits                         |
-| **Team Access to Notes**   | Full CRUD access                  | Team members need client history for service        |
-| **Client Access to Notes** | No access                         | Privacy, professionalism, industry standard         |
-| **Server Actions**         | Preferred for all mutations       | Type-safe, simpler, better DX                       |
-| **Type Management**        | Simplified, minimal types         | Easy to maintain, less boilerplate                  |
-| **Performance Trade-off**  | +5-10ms per request (DB query)    | Worth it for simplicity and instant updates         |
-| **Venue Slugs**            | Auto-generated (name-6digits)     | Unique, short, SEO-friendly booking URLs            |
-| **Multi-location Support** | Venues table                      | Each location gets unique booking page              |
-| **Public API Security**    | Whitelist fields only             | Only expose id, first_name, photo_url publicly      |
-| **Team Member Relations**  | Transform array to object         | Better type safety and cleaner component code       |
-
----
-
-## 🔧 Environment Variables
-
-```env
-# Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxxxx
-CLERK_SECRET_KEY=sk_test_xxxxx
-CLERK_WEBHOOK_SECRET=whsec_xxxxx
-
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGc...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
-```
-
----
-
-## 📖 References
-
-- [Next.js App Router Docs](https://nextjs.org/docs/app)
-- [Next.js Server Actions](https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations)
-- [Clerk Documentation](https://clerk.com/docs)
-- [Supabase Documentation](https://supabase.com/docs)
-- [shadcn/ui Component Library](https://ui.shadcn.com/)
+| Decision                   | Choice                            | Rationale                                            |
+| -------------------------- | --------------------------------- | ---------------------------------------------------- |
+| **Data Access Pattern**    | Service Role (server-side)        | Simpler, more secure, easier to maintain             |
+| **Authorization Pattern**  | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing  |
+| **Role Storage**           | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler      |
+| **Role Changes**           | Immediate (no re-auth)            | Better UX, middleware queries DB on each request     |
+| **Client Data Access**     | Server-side with filtering        | Users access own data via filtered queries           |
+| **RLS Policies**           | Disabled                          | Not needed with Service Role                         |
+| **User Table Structure**   | Unified table with roles array    | Handles role transitions, single source of truth     |
+| **Authentication**         | Clerk                             | Industry standard, OAuth support, handles auth only  |
+| **Timezone Handling**      | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11), handles DST |
+| **Date Storage**           | YYYY-MM-DD strings                | No timezone, consistent across all systems           |
+| **Date Parsing**           | Always add 'Z' suffix             | Forces UTC interpretation, no local timezone issues  |
+| **Date Methods**           | Use getUTCDay(), setUTCDate()     | Ensures consistent behavior regardless of local time |
+| **Week Format**            | Monday-Sunday (ISO 8601)          | Industry standard, aligns with business week         |
+| **Shift Constraints**      | Unique per team/venue/date        | Prevents double-booking, ensures data integrity      |
+| **Team-Venue Assignments** | Junction table with is_active     | Flexible multi-venue support, preserves history      |
+| **Closed Days**            | Separate table with recurrence    | Supports one-time and recurring closures             |
+| **Conflict Resolution**    | User choice (skip or replace)     | Flexible, prevents accidental data loss              |
+| **Calendar View**          | Weekly grid Mon-Sun               | Standard business view, matches team expectations    |
+| **Performance Trade-off**  | +5-10ms per request (DB query)    | Worth it for simplicity and instant updates          |
+| **Venue Slugs**            | Auto-generated (name-6digits)     | Unique, short, SEO-friendly booking URLs             |
+| **Multi-location Support** | Venues table + assignments        | Each location gets unique booking page               |
+| **Public API Security**    | Whitelist fields only             | Only expose id, first_name, photo_url publicly       |
 
 ---
 
@@ -957,184 +490,75 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
 
 **October 2025:**
 
-- ✅ Completed Phase 1: Foundation
-- ✅ Completed Phase 2: Authentication & Onboarding
-- ✅ **Completed Phase 2.5: Major Architecture Simplification**
-  - Removed all role syncing between Clerk and Supabase
-  - Roles now stored ONLY in Supabase (single source of truth)
-  - Auth helpers query Supabase for roles on every request
-  - Middleware queries Supabase for authorization checks
-  - Role changes take effect immediately (no sign out/in needed!)
-  - Simplified codebase: removed `lib/clerk-sync.ts`, `lib/role-sync.ts`, `app/actions/sync-roles.ts`
-  - Created `lib/role-management.ts` for simple role updates
-  - Updated webhook to NOT sync roles back to Clerk
-  - Team member management now works with instant role updates
-- ✅ **Completed Phase 3: Admin Panel Foundation**
-  - Created Fresha-inspired admin interface
-  - Dark sidebar with 11 icon-based navigation items
-  - Top navbar with search, notifications, and user menu
-  - Responsive admin layout with sticky header/sidebar
-  - Page header component for consistent page titles
-- ✅ **Completed Marketplace/Venues Management**
-  - Full CRUD operations for venues (admin only)
-  - Venues table with auto-generated unique slugs
-  - Slug format: `venue-name-123456` (name + 6 digits)
-  - Photo uploads to `venue-photos` storage bucket
-  - Search, filter (All/Listed/Unlisted), and sort functionality
-  - Add/Edit modals with photo preview and validation
-  - Unique booking URLs per venue for future booking system
-  - Fixed React hydration errors with useEffect pattern
-- ✅ **Completed Team Member Management System** 🎉 NEW
-  - Full team member CRUD operations (admin only)
-  - Add team member with photo upload
-  - Edit team member details and photo
-  - Toggle active/inactive status
-  - Remove team member role
-  - Search and filter (All/Active/Inactive)
-  - Stats dashboard (total, active, inactive)
-  - Account claiming support for unregistered members
-  - Public API endpoint at `/api/public/team`
-  - Privacy protection: only exposes id, first_name, photo_url
-  - Separate storage bucket: `team-member-photos`
-  - Fixed Supabase relation type issues (array to object transformation)
-  - Team member modal with add/edit modes
-  - Comprehensive team member list with all actions
-- 🎯 Next: Phase 3 - Client Management
-  - Client list with search/filter
-  - Add client form
-  - Client detail pages with notes
+- ✅ **Completed Phase 3.5: Scheduling System** 🎉
+  - Built complete shift management system with calendar view
+  - Implemented repeating shifts with conflict detection
+  - Created team-venue assignment system
+  - Added venue operating hours management
+  - Implemented venue closed days tracking
+  - Built week navigation (Mon-Sun format)
+  - Calendar grid showing all team members and their shifts
+  - "Set Schedule" button opens modal for repeating shifts
+  - Bulk team assignment to venues
+- ✅ **Fixed Critical Timezone Bugs**
+  - Discovered Melbourne timezone (UTC+10/+11) was causing date shifts
+  - Implemented UTC-safe date parsing throughout application
+  - All dates now parsed with 'Z' suffix to force UTC interpretation
+  - Changed all date methods to UTC versions (getUTCDay, setUTCDate, etc.)
+  - Fixed calendar week display (was showing Sat-Fri, now Mon-Sun)
+  - Fixed date range showing only 6 days (now correctly shows 7)
+  - Fixed shifts saving 1 day earlier than selected
+  - Handles daylight saving time transitions automatically
+- ✅ **Technical Improvements**
+  - Created `lib/shift-helpers.ts` with 30+ UTC-safe date utilities
+  - Implemented proper TypeScript types for scheduling
+  - Fixed all useEffect dependency warnings
+  - Fixed Supabase ambiguous relationship errors
+  - Added refresh mechanism for real-time calendar updates
+  - Optimized database queries with proper indexes
+- ✅ **Database Additions**
+  - Added 4 new tables: venue_operating_hours, team_member_venues, shifts, venue_closed_days
+  - Created unique constraints to prevent conflicts
+  - Added indexes for performance optimization
+  - Implemented database functions and triggers
 
-**Architecture Decision - MAJOR CHANGE:**
+**Architecture Highlights:**
 
-- **Previous:** Roles synced between Clerk metadata and Supabase (complex, JWT caching issues)
-- **Current:** Roles stored ONLY in Supabase, queried on each request (simple, instant updates!)
-- **Benefit:**
-  - 50% less code to maintain
-  - No more "sign out and sign in again" messages
-  - Role changes effective immediately
-  - Single source of truth
-  - Industry standard pattern: "Clerk for authn, DB for authz"
+- **Timezone-Safe by Design**: All date handling uses UTC methods to prevent bugs in Melbourne (UTC+10/+11)
+- **Flexible Scheduling**: Repeating shifts with conflict resolution options
+- **Multi-Venue Support**: Team members can work at multiple venues
+- **Calendar View**: Industry-standard Mon-Sun weekly view
+- **Real-Time Updates**: Changes reflected immediately without page reload
 
 ---
 
-## 🔮 Comparison: Before vs After
+## 🔮 Lessons Learned
 
-### Before (Complex)
+### Timezone Handling in Melbourne
 
-```
-Admin changes role:
-1. Update Supabase ✍️
-2. Sync to Clerk metadata ✍️
-3. User signs out ✍️
-4. User signs in ✍️
-5. New JWT issued with roles ✍️
-6. Middleware reads JWT ✍️
-7. ✅ Access granted
+**Problem Discovered:**
 
-Problems:
-- Multiple steps
-- User friction
-- JWT caching issues
-- Two sources of truth
-- Sync failures possible
-```
+- JavaScript `new Date("2025-10-15T00:00:00")` interprets as local Melbourne time
+- When converted to UTC, date could shift by 10-11 hours
+- Caused calendar to show wrong days and shifts to save 1 day off
 
-### After (Simple!)
+**Solution Implemented:**
 
-```
-Admin changes role:
-1. Update Supabase ✍️
-2. User refreshes page ✍️
-3. Middleware queries Supabase ✍️
-4. ✅ Access granted immediately!
+- Always parse dates with UTC: `new Date("2025-10-15T00:00:00Z")`
+- Always use UTC methods: `getUTCDay()`, `setUTCDate()`, `getUTCFullYear()`
+- Never use local timezone methods: `getDay()`, `setDate()`, `getFullYear()`
+- Keep dates as YYYY-MM-DD strings throughout application
+- No Date object conversions in browser or server until final display
 
-Benefits:
-- Single step
-- No user action needed
-- No caching issues
-- Single source of truth
-- Always consistent
-```
+**Key Principle:**
 
----
+> "When working with dates in databases, always think in UTC, never in local time."
 
-## 🎨 UI/UX Design Principles
-
-### Admin Interface (Fresha-Inspired)
-
-**Color Palette:**
-
-- Primary: `#6C5CE7` (Purple) - Active states, CTAs
-- Dark: `#0a0a0a` - Sidebar background
-- Light: `#ffffff` - Content background
-- Gray: `#f9fafb` - Page background
-
-**Navigation:**
-
-- Icon-based sidebar (80px width)
-- Hover tooltips for menu items
-- Active state with purple background
-- Sticky positioning for sidebar and header
-
-**Modals:**
-
-- Scrollable content area
-- Sticky header and footer
-- Photo upload with preview
-- Validation feedback
-- Loading states on submission
-
-**Forms:**
-
-- Consistent input styling
-- Clear required field indicators
-- Inline validation
-- Photo upload with drag & drop visual
-- Responsive button states
-
-**Lists & Tables:**
-
-- Search and filter controls
-- Action buttons with icons
-- Status badges (Active/Inactive/Unregistered)
-- Hover states for better UX
-- Stats cards at the top
-
----
-
-## 🛡️ Security Best Practices Implemented
-
-### Team Member Management Security
-
-1. **Admin-Only Access**
-
-   - All team member operations require `requireAdmin()`
-   - Middleware protects `/admin/team` route
-   - Server actions verify admin role before execution
-
-2. **Privacy Protection**
-
-   - Public API only exposes: id, first_name, photo_url
-   - Email, phone, last name protected from public access
-   - Inactive members hidden from public API
-   - Team member details only visible to admin
-
-3. **Data Validation**
-
-   - Photo size limit: 5MB
-   - File type validation (images only)
-   - Required field validation (email, first name)
-   - Email uniqueness checks
-
-4. **Server-Side Processing**
-   - All operations use Service Role
-   - Photo uploads server-side only
-   - No client-side data manipulation
-   - Explicit filtering and validation
+This applies to ANY timezone, not just Melbourne! The issue affects all locations during daylight saving transitions.
 
 ---
 
 **Document Status:** Living document - update as architecture evolves  
 **Next Review:** After Client Management completion  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Completed Team Member Management System with Public API
+**Last Major Change:** Completed Scheduling System with Timezone-Safe Date Handling (Phase 3.5)

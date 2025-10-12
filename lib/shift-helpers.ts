@@ -1,5 +1,6 @@
 // lib/shift-helpers.ts
 // Date and time utility functions for shift management
+// FIXED: Timezone-safe for Melbourne (UTC+10/+11)
 
 // =====================================================
 // LOCAL TYPES (only used in scheduling)
@@ -22,14 +23,30 @@ export interface ShiftInput {
 export type ConflictResolution = 'skip' | 'replace';
 
 // =====================================================
+// INTERNAL HELPER
+// =====================================================
+
+/**
+ * Parse date string as UTC date
+ * CRITICAL: Always add 'Z' to force UTC interpretation
+ * This prevents timezone conversion issues in Melbourne
+ */
+function parseUTCDate(dateStr: string): Date {
+  return new Date(dateStr + 'T00:00:00Z');
+}
+
+// =====================================================
 // DATE UTILITIES
 // =====================================================
 
 /**
- * Format date as YYYY-MM-DD
+ * Format date as YYYY-MM-DD (UTC-safe)
  */
 export function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -44,7 +61,7 @@ export function getToday(): string {
  */
 export function getTomorrow(): string {
   const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   return formatDate(tomorrow);
 }
 
@@ -52,8 +69,8 @@ export function getTomorrow(): string {
  * Add days to a date string
  */
 export function addDays(dateStr: string, days: number): string {
-  const date = new Date(dateStr + 'T00:00:00');
-  date.setDate(date.getDate() + days);
+  const date = parseUTCDate(dateStr);
+  date.setUTCDate(date.getUTCDate() + days);
   return formatDate(date);
 }
 
@@ -68,8 +85,8 @@ export function addWeeks(dateStr: string, weeks: number): string {
  * Get the Monday of the week containing the given date
  */
 export function getStartOfWeek(dateStr?: string): string {
-  const date = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
-  const day = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const date = dateStr ? parseUTCDate(dateStr) : new Date();
+  const day = date.getUTCDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 
   // Calculate days to subtract to get to Monday
   // If Sunday (0), go back 6 days to get previous Monday
@@ -78,7 +95,7 @@ export function getStartOfWeek(dateStr?: string): string {
   // etc.
   const daysToMonday = day === 0 ? 6 : day - 1;
 
-  date.setDate(date.getDate() - daysToMonday);
+  date.setUTCDate(date.getUTCDate() - daysToMonday);
   return formatDate(date);
 }
 
@@ -94,9 +111,9 @@ export function getEndOfWeek(dateStr?: string): string {
  * Check if date is in the past
  */
 export function isPastDate(dateStr: string): boolean {
-  const date = new Date(dateStr + 'T00:00:00');
+  const date = parseUTCDate(dateStr);
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
   return date < today;
 }
 
@@ -135,8 +152,8 @@ export function getFullDayName(dayOfWeek: number): string {
  * Get day of week (0-6) from date string
  */
 export function getDayOfWeek(dateStr: string): number {
-  const date = new Date(dateStr + 'T00:00:00');
-  return date.getDay();
+  const date = parseUTCDate(dateStr);
+  return date.getUTCDay();
 }
 
 /**
@@ -170,14 +187,20 @@ export function getWeekRange(weekStart: string): {
  * Format date range for display (Mon-Sun)
  */
 export function formatDateRange(startDate: string, endDate: string): string {
-  const start = new Date(startDate + 'T00:00:00');
-  const end = new Date(endDate + 'T00:00:00');
+  const start = parseUTCDate(startDate);
+  const end = parseUTCDate(endDate);
 
-  const startMonth = start.toLocaleString('en-US', { month: 'short' });
-  const endMonth = end.toLocaleString('en-US', { month: 'short' });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
-  const year = end.getFullYear();
+  const startMonth = start.toLocaleString('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+  const endMonth = end.toLocaleString('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+  const startDay = start.getUTCDate();
+  const endDay = end.getUTCDate();
+  const year = end.getUTCFullYear();
 
   if (startMonth === endMonth) {
     // Same month: "Oct 13-19, 2025"
@@ -292,11 +315,11 @@ export function generateShiftDates(pattern: ShiftPattern): ShiftInput[] {
   const shifts: ShiftInput[] = [];
   const { days, startTime, endTime, startDate, endDate } = pattern;
 
-  const currentDate = new Date(startDate + 'T00:00:00');
-  const endDateObj = new Date(endDate + 'T00:00:00');
+  const currentDate = parseUTCDate(startDate);
+  const endDateObj = parseUTCDate(endDate);
 
   while (currentDate <= endDateObj) {
-    const dayOfWeek = currentDate.getDay();
+    const dayOfWeek = currentDate.getUTCDay();
 
     // Check if this day is in the selected days
     if (days.includes(dayOfWeek)) {
@@ -308,7 +331,7 @@ export function generateShiftDates(pattern: ShiftPattern): ShiftInput[] {
     }
 
     // Move to next day
-    currentDate.setDate(currentDate.getDate() + 1);
+    currentDate.setUTCDate(currentDate.getUTCDate() + 1);
   }
 
   return shifts;
@@ -359,8 +382,8 @@ export function isValidDateRange(
   startDate: string,
   endDate: string
 ): { valid: boolean; error?: string } {
-  const start = new Date(startDate + 'T00:00:00');
-  const end = new Date(endDate + 'T00:00:00');
+  const start = parseUTCDate(startDate);
+  const end = parseUTCDate(endDate);
 
   if (end < start) {
     return { valid: false, error: 'End date must be after start date' };
@@ -417,10 +440,16 @@ export function validateShiftPattern(pattern: ShiftPattern): {
  * Format date for display (e.g., "Mon, Oct 6")
  */
 export function formatDateDisplay(dateStr: string): string {
-  const date = new Date(dateStr + 'T00:00:00');
-  const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-  const month = date.toLocaleDateString('en-US', { month: 'short' });
-  const day = date.getDate();
+  const date = parseUTCDate(dateStr);
+  const dayName = date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    timeZone: 'UTC',
+  });
+  const month = date.toLocaleDateString('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+  const day = date.getUTCDate();
   return `${dayName}, ${month} ${day}`;
 }
 
@@ -428,12 +457,13 @@ export function formatDateDisplay(dateStr: string): string {
  * Format date for display with year (e.g., "Mon, Oct 6, 2025")
  */
 export function formatDateDisplayWithYear(dateStr: string): string {
-  const date = new Date(dateStr + 'T00:00:00');
+  const date = parseUTCDate(dateStr);
   return date.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+    timeZone: 'UTC',
   });
 }
 

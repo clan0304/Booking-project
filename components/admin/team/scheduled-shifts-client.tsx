@@ -340,6 +340,7 @@ export function ScheduledShiftsClient({
 
       {showShiftModal && selectedTeamMember && selectedVenue && (
         <RepeatingShiftsModal
+          isOpen={showShiftModal}
           teamMemberId={selectedTeamMember.id}
           teamMemberName={`${selectedTeamMember.first_name} ${
             selectedTeamMember.last_name || ''

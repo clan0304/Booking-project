@@ -1,86 +1,95 @@
+// components/admin/team/repeating-shifts-modal.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Calendar, AlertCircle } from 'lucide-react';
+import { useState } from 'react';
+import { X } from 'lucide-react';
 import {
   createRepeatingShifts,
   checkExistingShifts,
 } from '@/app/actions/shifts';
-import { getClosedDays } from '@/app/actions/venue-closed-days';
-import { getVenueHours } from '@/app/actions/venue-hours';
-import {
-  generateShiftDates,
-  filterClosedDays,
-  validateShiftPattern,
-  getToday,
-  getTomorrow,
-  addWeeks,
-  getFullDayName,
-  type ShiftPattern,
-  type ConflictResolution,
-} from '@/lib/shift-helpers';
-import type { VenueOperatingHours } from '@/types/database';
+import { getToday, addWeeks, validateShiftPattern } from '@/lib/shift-helpers';
+import type { ShiftPattern, ConflictResolution } from '@/lib/shift-helpers';
 
 interface RepeatingShiftsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   teamMemberId: string;
   teamMemberName: string;
   venueId: string;
   venueName: string;
-  onClose: () => void;
   onSuccess: () => void;
 }
 
 export function RepeatingShiftsModal({
+  isOpen,
+  onClose,
   teamMemberId,
   teamMemberName,
   venueId,
   venueName,
-  onClose,
   onSuccess,
 }: RepeatingShiftsModalProps) {
+  const today = getToday();
+  const fourWeeksLater = addWeeks(today, 4);
+
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(fourWeeksLater);
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5]); // Mon-Fri
   const [startTime, setStartTime] = useState('10:00');
   const [endTime, setEndTime] = useState('18:00');
-  const [startDate, setStartDate] = useState(getTomorrow());
-  const [endDate, setEndDate] = useState(addWeeks(getTomorrow(), 4)); // 4 weeks
   const [conflictResolution, setConflictResolution] =
     useState<ConflictResolution>('skip');
+  const [existingCount, setExistingCount] = useState(0);
+  const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [venueHours, setVenueHours] = useState<VenueOperatingHours[]>([]);
-  const [existingShiftCount, setExistingShiftCount] = useState(0);
-  const [previewCount, setPreviewCount] = useState(0);
 
-  // Load venue hours
-  useEffect(() => {
-    const loadVenueHours = async () => {
-      const result = await getVenueHours(venueId);
-      if (result.success && result.data) {
-        setVenueHours(result.data as VenueOperatingHours[]);
-      }
-    };
-    loadVenueHours();
-  }, [venueId]);
+  const dayButtons = [
+    { label: 'Sun', value: 0 },
+    { label: 'Mon', value: 1 },
+    { label: 'Tue', value: 2 },
+    { label: 'Wed', value: 3 },
+    { label: 'Thu', value: 4 },
+    { label: 'Fri', value: 5 },
+    { label: 'Sat', value: 6 },
+  ];
 
-  // Check existing shifts when date range or days change
-  useEffect(() => {
-    const checkExisting = async () => {
+  const toggleDay = (day: number) => {
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()
+    );
+  };
+
+  // Check for conflicts when dates or days change
+  const checkConflicts = async () => {
+    if (selectedDays.length === 0) return;
+
+    setIsCheckingConflicts(true);
+    try {
       const result = await checkExistingShifts(
         teamMemberId,
         venueId,
         startDate,
         endDate
       );
-      if (result.success) {
-        setExistingShiftCount(result.count || 0);
-      }
-    };
-    checkExisting();
-  }, [teamMemberId, venueId, startDate, endDate]);
 
-  // Calculate preview count when pattern changes
-  useEffect(() => {
-    const calculatePreview = async () => {
+      if (result.success) {
+        setExistingCount(result.count || 0);
+      }
+    } catch (err) {
+      console.error('Error checking conflicts:', err);
+    } finally {
+      setIsCheckingConflicts(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsSubmitting(true);
+
+    try {
+      // Validate pattern
       const pattern: ShiftPattern = {
         days: selectedDays,
         startTime,
@@ -89,80 +98,22 @@ export function RepeatingShiftsModal({
         endDate,
       };
 
-      const shifts = generateShiftDates(pattern);
-
-      // Get closed days
-      const closedResult = await getClosedDays(venueId, startDate, endDate);
-      if (closedResult.success && closedResult.data) {
-        const closedDates = closedResult.data.map((d) => d.closed_date);
-        const filteredShifts = filterClosedDays(shifts, closedDates);
-        setPreviewCount(filteredShifts.length);
-      } else {
-        setPreviewCount(shifts.length);
-      }
-    };
-
-    if (selectedDays.length > 0 && startDate && endDate) {
-      calculatePreview();
-    }
-  }, [selectedDays, startTime, endTime, startDate, endDate, venueId]);
-
-  const handleDayToggle = (day: number) => {
-    setSelectedDays((prev) => {
-      if (prev.includes(day)) {
-        return prev.filter((d) => d !== day);
-      } else {
-        return [...prev, day].sort();
-      }
-    });
-  };
-
-  const handleUseVenueHours = (day: number) => {
-    const dayHours = venueHours.find((h) => h.day_of_week === day);
-    if (dayHours && !dayHours.is_closed) {
-      setStartTime(dayHours.start_time || '09:00');
-      setEndTime(dayHours.end_time || '18:00');
-    }
-  };
-
-  const handleSubmit = async () => {
-    setError('');
-
-    // Validate pattern
-    const pattern: ShiftPattern = {
-      days: selectedDays,
-      startTime,
-      endTime,
-      startDate,
-      endDate,
-    };
-
-    const validation = validateShiftPattern(pattern);
-    if (!validation.valid) {
-      setError(validation.errors.join('. '));
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      // Generate shifts
-      const shifts = generateShiftDates(pattern);
-
-      // Get closed days and filter
-      const closedResult = await getClosedDays(venueId, startDate, endDate);
-      let filteredShifts = shifts;
-
-      if (closedResult.success && closedResult.data) {
-        const closedDates = closedResult.data.map((d) => d.closed_date);
-        filteredShifts = filterClosedDays(shifts, closedDates);
+      const validation = validateShiftPattern(pattern);
+      if (!validation.valid) {
+        setError(validation.errors.join(', '));
+        setIsSubmitting(false);
+        return;
       }
 
-      // Submit
+      // Create FormData - CRITICAL: Send dates as plain strings
       const formData = new FormData();
       formData.append('teamMemberId', teamMemberId);
       formData.append('venueId', venueId);
-      formData.append('shifts', JSON.stringify(filteredShifts));
+      formData.append('startDate', startDate); // Keep as string!
+      formData.append('endDate', endDate); // Keep as string!
+      formData.append('days', JSON.stringify(selectedDays));
+      formData.append('startTime', startTime);
+      formData.append('endTime', endTime);
       formData.append('conflictResolution', conflictResolution);
 
       const result = await createRepeatingShifts(formData);
@@ -174,21 +125,22 @@ export function RepeatingShiftsModal({
         setError(result.error || 'Failed to create shifts');
       }
     } catch (err) {
-      setError(`${err} An unexpected error occurred`);
+      console.error('Error creating shifts:', err);
+      setError('An unexpected error occurred');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-lg shadow-xl">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="sticky top-0 border-b bg-white px-6 py-4 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">
+            <h2 className="text-2xl font-bold text-gray-900">
               Set Repeating Shifts
             </h2>
             <p className="text-sm text-gray-600 mt-1">
@@ -197,214 +149,230 @@ export function RepeatingShiftsModal({
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-gray-400 hover:text-gray-600"
+            disabled={isSubmitting}
           >
-            <X className="h-5 w-5" />
+            <X className="h-6 w-6" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
           {/* Date Range */}
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-900">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
               Date Range
-            </label>
-            <div className="grid grid-cols-2 gap-3">
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-gray-600 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Start Date
                 </label>
                 <input
                   type="date"
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  min={getToday()}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  onChange={(e) => {
+                    // CRITICAL: Keep as string, never convert to Date object
+                    setStartDate(e.target.value);
+                  }}
+                  onBlur={checkConflicts}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  required
+                  disabled={isSubmitting}
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-600 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   End Date
                 </label>
                 <input
                   type="date"
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  min={startDate}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  onChange={(e) => {
+                    // CRITICAL: Keep as string, never convert to Date object
+                    setEndDate(e.target.value);
+                  }}
+                  onBlur={checkConflicts}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  required
+                  disabled={isSubmitting}
                 />
               </div>
             </div>
           </div>
 
-          {/* Days Selection */}
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-900">
+          {/* Days of Week */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
               Days of Week
-            </label>
+            </h3>
             <div className="grid grid-cols-7 gap-2">
-              {dayNames.map((day, index) => {
-                const isSelected = selectedDays.includes(index);
-                return (
-                  <button
-                    key={index}
-                    onClick={() => handleDayToggle(index)}
-                    className={`py-3 rounded-lg font-medium text-sm transition-all ${
-                      isSelected
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {day}
-                  </button>
-                );
-              })}
+              {dayButtons.map((day) => (
+                <button
+                  key={day.value}
+                  type="button"
+                  onClick={() => {
+                    toggleDay(day.value);
+                    // Small delay to ensure state is updated before checking conflicts
+                    setTimeout(checkConflicts, 100);
+                  }}
+                  className={`px-4 py-3 rounded-lg font-medium transition-colors ${
+                    selectedDays.includes(day.value)
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  disabled={isSubmitting}
+                >
+                  {day.label}
+                </button>
+              ))}
             </div>
+            {selectedDays.length === 0 && (
+              <p className="text-sm text-red-600 mt-2">
+                Please select at least one day
+              </p>
+            )}
           </div>
 
-          {/* Time Selection */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="block text-sm font-medium text-gray-900">
+          {/* Shift Hours */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
                 Shift Hours
-              </label>
+              </h3>
               <button
-                onClick={() => handleUseVenueHours(selectedDays[0] || 1)}
-                className="text-xs text-purple-600 hover:text-purple-700 font-medium"
+                type="button"
+                className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+                onClick={() => {
+                  // Use venue hours feature (future implementation)
+                  alert('Venue hours feature coming soon!');
+                }}
               >
                 Use Venue Hours
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-gray-600 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Start Time
                 </label>
                 <input
                   type="time"
                   value={startTime}
                   onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  required
+                  disabled={isSubmitting}
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-600 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   End Time
                 </label>
                 <input
                   type="time"
                   value={endTime}
                   onChange={(e) => setEndTime(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  required
+                  disabled={isSubmitting}
                 />
               </div>
             </div>
           </div>
 
-          {/* Conflict Resolution */}
-          {existingShiftCount > 0 && (
-            <div className="space-y-3">
-              <label className="block text-sm font-medium text-gray-900">
-                Existing Shifts Detected
-              </label>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <div className="flex gap-2">
-                  <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                  <div className="text-sm text-yellow-800">
-                    Found {existingShiftCount} existing shift(s) in this date
-                    range. How would you like to handle them?
+          {/* Conflict Detection */}
+          {existingCount > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-400 flex items-center justify-center">
+                  <span className="text-white text-sm font-bold">!</span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-yellow-800 font-medium mb-3">
+                    Found {existingCount} existing shift(s) in this date range.
+                    How would you like to handle them?
+                  </p>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="conflictResolution"
+                        value="skip"
+                        checked={conflictResolution === 'skip'}
+                        onChange={(e) =>
+                          setConflictResolution(
+                            e.target.value as ConflictResolution
+                          )
+                        }
+                        className="text-purple-600"
+                        disabled={isSubmitting}
+                      />
+                      <span className="text-sm text-gray-700">
+                        Skip existing dates (keep old shifts)
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="conflictResolution"
+                        value="replace"
+                        checked={conflictResolution === 'replace'}
+                        onChange={(e) =>
+                          setConflictResolution(
+                            e.target.value as ConflictResolution
+                          )
+                        }
+                        className="text-purple-600"
+                        disabled={isSubmitting}
+                      />
+                      <span className="text-sm text-gray-700">
+                        Replace with new shifts (delete old shifts)
+                      </span>
+                    </label>
                   </div>
                 </div>
               </div>
-              <div className="space-y-2">
-                <label className="flex items-start gap-3 p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="conflict"
-                    value="skip"
-                    checked={conflictResolution === 'skip'}
-                    onChange={(e) =>
-                      setConflictResolution(
-                        e.target.value as ConflictResolution
-                      )
-                    }
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">
-                      Skip Existing (Recommended)
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Keep existing shifts, only add new ones
-                    </div>
-                  </div>
-                </label>
-                <label className="flex items-start gap-3 p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="conflict"
-                    value="replace"
-                    checked={conflictResolution === 'replace'}
-                    onChange={(e) =>
-                      setConflictResolution(
-                        e.target.value as ConflictResolution
-                      )
-                    }
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">Replace All</div>
-                    <div className="text-sm text-gray-600">
-                      Delete existing shifts and create new ones
-                    </div>
-                  </div>
-                </label>
-              </div>
             </div>
           )}
 
-          {/* Preview */}
-          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 text-purple-900">
-              <Calendar className="h-5 w-5" />
-              <span className="font-medium">
-                Will create {previewCount} shift(s)
-              </span>
-            </div>
-            {previewCount > 0 && (
-              <div className="text-sm text-purple-700 mt-1">
-                {selectedDays.map((day) => getFullDayName(day)).join(', ')} from{' '}
-                {startTime} to {endTime}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="p-6 border-t border-gray-200">
+          {/* Error Message */}
           {error && (
-            <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-800 text-sm">
-              {error}
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-sm text-red-800">{error}</p>
             </div>
           )}
-          <div className="flex gap-3">
+
+          {/* Footer */}
+          <div className="sticky bottom-0 border-t bg-white pt-4 flex gap-4">
             <button
+              type="button"
               onClick={onClose}
+              className="flex-1 px-6 py-3 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium"
               disabled={isSubmitting}
-              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Cancel
             </button>
             <button
-              onClick={handleSubmit}
-              disabled={isSubmitting || previewCount === 0}
-              className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              type="submit"
+              className="flex-1 px-6 py-3 rounded-lg bg-purple-600 text-white hover:bg-purple-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={
+                isSubmitting || selectedDays.length === 0 || isCheckingConflicts
+              }
             >
-              {isSubmitting ? 'Creating...' : `Create ${previewCount} Shifts`}
+              {isSubmitting
+                ? 'Creating...'
+                : `Create ${
+                    selectedDays.length *
+                    Math.ceil(
+                      (new Date(endDate).getTime() -
+                        new Date(startDate).getTime()) /
+                        (7 * 24 * 60 * 60 * 1000)
+                    )
+                  } Shifts`}
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );
