@@ -3,13 +3,13 @@ import { requireAdmin } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { TeamListClient } from '@/components/admin/team/team-list-client';
 import { TeamTabs } from '@/components/admin/team/team-tabs';
-import { ScheduledShiftsPlaceholder } from '@/components/admin/team/scheduled-shifts-placeholder';
+import { ScheduledShiftsClient } from '@/components/admin/team/scheduled-shifts-client';
 
 export default async function TeamPage() {
   await requireAdmin();
 
   // Fetch all team members with their team_members data
-  const { data: teamMembers, error } = await supabaseAdmin
+  const { data: teamMembers, error: teamError } = await supabaseAdmin
     .from('users')
     .select(
       `
@@ -32,8 +32,8 @@ export default async function TeamPage() {
     .contains('roles', ['team_member'])
     .order('first_name', { ascending: true });
 
-  if (error) {
-    console.error('Error fetching team members:', error);
+  if (teamError) {
+    console.error('Error fetching team members:', teamError);
   }
 
   // Transform team_members from array to single object (one-to-one relationship)
@@ -41,19 +41,31 @@ export default async function TeamPage() {
     teamMembers?.map((member) => ({
       ...member,
       team_members: Array.isArray(member.team_members)
-        ? member.team_members[0] || null // Take first item or null if empty
-        : member.team_members, // Already an object or null
+        ? member.team_members[0] || null
+        : member.team_members,
     })) || [];
+
+  // Fetch all venues for scheduling
+  const { data: venues, error: venuesError } = await supabaseAdmin
+    .from('venues')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (venuesError) {
+    console.error('Error fetching venues:', venuesError);
+  }
 
   return (
     <div className="flex flex-col h-full">
       {/* Tabs */}
-      <div className="flex-1 overflow-hidden mt-6">
+      <div className="flex-1 overflow-hidden">
         <TeamTabs
           teamMembersContent={
             <TeamListClient initialTeamMembers={transformedTeamMembers} />
           }
-          scheduledShiftsContent={<ScheduledShiftsPlaceholder />}
+          scheduledShiftsContent={
+            <ScheduledShiftsClient initialVenues={venues || []} />
+          }
         />
       </div>
     </div>

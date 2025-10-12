@@ -1,11 +1,9 @@
-// components/admin/team/team-tabs.tsx
 'use client';
 
 import { useState } from 'react';
-import { cn } from '@/lib/utils';
+import { Users, Calendar } from 'lucide-react';
 
 interface TeamTabsProps {
-  children: React.ReactNode;
   teamMembersContent: React.ReactNode;
   scheduledShiftsContent: React.ReactNode;
 }
@@ -13,41 +11,50 @@ interface TeamTabsProps {
 export function TeamTabs({
   teamMembersContent,
   scheduledShiftsContent,
-}: Omit<TeamTabsProps, 'children'>) {
-  const [activeTab, setActiveTab] = useState<'members' | 'shifts'>('members');
-
-  const tabs = [
-    { id: 'members', label: 'Team members' },
-    { id: 'shifts', label: 'Scheduled shifts' },
-  ] as const;
+}: TeamTabsProps) {
+  const [activeTab, setActiveTab] = useState<'members' | 'schedule'>(
+    'schedule'
+  );
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tab Navigation */}
-      <div className="border-b border-gray-200 bg-white">
-        <nav className="flex space-x-8 px-8" aria-label="Tabs">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors',
-                activeTab === tab.id
-                  ? 'border-[#6C5CE7] text-gray-900'
-                  : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-              )}
-              aria-current={activeTab === tab.id ? 'page' : undefined}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-gray-200 mb-6">
+        <button
+          onClick={() => setActiveTab('members')}
+          className={`flex items-center gap-2 px-4 py-3 font-medium transition-colors relative ${
+            activeTab === 'members'
+              ? 'text-purple-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <Users className="h-4 w-4" />
+          <span>Team Members</span>
+          {activeTab === 'members' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600" />
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('schedule')}
+          className={`flex items-center gap-2 px-4 py-3 font-medium transition-colors relative ${
+            activeTab === 'schedule'
+              ? 'text-purple-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <Calendar className="h-4 w-4" />
+          <span>Scheduled Shifts</span>
+          {activeTab === 'schedule' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600" />
+          )}
+        </button>
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-hidden">
         {activeTab === 'members' && teamMembersContent}
-        {activeTab === 'shifts' && scheduledShiftsContent}
+        {activeTab === 'schedule' && scheduledShiftsContent}
       </div>
     </div>
   );

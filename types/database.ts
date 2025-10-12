@@ -54,3 +54,47 @@ export interface Venue {
   created_at: string;
   updated_at: string;
 }
+
+export interface VenueOperatingHours {
+  id: string;
+  venue_id: string;
+  day_of_week: number; // 0=Sunday, 1=Monday, ..., 6=Saturday
+  start_time: string | null; // HH:MM format
+  end_time: string | null; // HH:MM format
+  is_closed: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamMemberVenue {
+  id: string;
+  team_member_id: string;
+  venue_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Shift {
+  id: string;
+  team_member_id: string;
+  venue_id: string;
+  shift_date: string; // YYYY-MM-DD format
+  start_time: string; // HH:MM format
+  end_time: string; // HH:MM format
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
+export interface VenueClosedDay {
+  id: string;
+  venue_id: string;
+  closed_date: string; // YYYY-MM-DD format
+  reason: string | null;
+  is_recurring: boolean;
+  recurrence_rule: string | null; // e.g., "WEEKLY:0" for Sunday
+  created_at: string;
+  created_by: string | null;
+}
