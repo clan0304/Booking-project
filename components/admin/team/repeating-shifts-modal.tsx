@@ -119,8 +119,8 @@ export function RepeatingShiftsModal({
       const result = await createRepeatingShifts(formData);
 
       if (result.success) {
-        onSuccess();
         onClose();
+        onSuccess();
       } else {
         setError(result.error || 'Failed to create shifts');
       }
@@ -360,16 +360,7 @@ export function RepeatingShiftsModal({
                 isSubmitting || selectedDays.length === 0 || isCheckingConflicts
               }
             >
-              {isSubmitting
-                ? 'Creating...'
-                : `Create ${
-                    selectedDays.length *
-                    Math.ceil(
-                      (new Date(endDate).getTime() -
-                        new Date(startDate).getTime()) /
-                        (7 * 24 * 60 * 60 * 1000)
-                    )
-                  } Shifts`}
+              {isSubmitting ? 'Creating...' : 'Create Shifts'}
             </button>
           </div>
         </form>

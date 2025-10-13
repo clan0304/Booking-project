@@ -1,11 +1,13 @@
+// components/admin/team/scheduled-shifts-client.tsx
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { Users, Calendar } from 'lucide-react';
+import { Users, Calendar, Plus } from 'lucide-react';
 import { VenueSelector } from './venue-selector';
 import { WeekNavigator } from './week-navigator';
 import { AssignVenueModal } from './assign-venue-modal';
 import { RepeatingShiftsModal } from './repeating-shifts-modal';
+import { SingleShiftModal } from './single-shift-modal';
 import {
   getTeamMembersByVenue,
   getUnassignedTeamMembers,
@@ -16,7 +18,7 @@ import type { Venue } from '@/types/database';
 import Image from 'next/image';
 
 // =====================================================
-// LOCAL TYPES (matching actual query results)
+// LOCAL TYPES
 // =====================================================
 
 interface TeamMemberWithShifts {
@@ -36,7 +38,6 @@ interface UnassignedMember {
   email: string;
 }
 
-// Simplified - only what we actually use from query results
 interface QueryShift {
   id: string;
   team_member_id: string;
@@ -73,17 +74,21 @@ export function ScheduledShiftsClient({
   const [teamMembers, setTeamMembers] = useState<TeamMemberWithShifts[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAssignModal, setShowAssignModal] = useState(false);
-  const [showShiftModal, setShowShiftModal] = useState(false);
+  const [showRepeatingShiftModal, setShowRepeatingShiftModal] = useState(false);
+  const [showSingleShiftModal, setShowSingleShiftModal] = useState(false);
   const [selectedTeamMember, setSelectedTeamMember] =
     useState<TeamMemberWithShifts | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [selectedShift, setSelectedShift] = useState<QueryShift | null>(null);
   const [unassignedMembers, setUnassignedMembers] = useState<
     UnassignedMember[]
   >([]);
-  const [refreshKey, setRefreshKey] = useState(0); // Add refresh trigger
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [hoveredCell, setHoveredCell] = useState<string | null>(null); // "memberId-date"
+  const [contextMenuCell, setContextMenuCell] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const selectedVenue = venues.find((v) => v.id === selectedVenueId);
-
-  // Memoize weekRange to avoid recreating on every render
   const weekRange = useMemo(() => getWeekRange(weekStart), [weekStart]);
 
   // Load team members and shifts
@@ -93,18 +98,15 @@ export function ScheduledShiftsClient({
     const loadData = async () => {
       setIsLoading(true);
 
-      // Load team members
       const membersResult = await getTeamMembersByVenue(selectedVenueId);
 
       if (membersResult.success && membersResult.data) {
-        // Load shifts for the week
         const shiftsResult = await getShiftsByWeek(
           selectedVenueId,
           weekRange.start,
           weekRange.end
         );
 
-        // Map shifts to team members
         const shiftsData = (
           shiftsResult.success ? shiftsResult.data || [] : []
         ) as QueryShift[];
@@ -119,7 +121,6 @@ export function ScheduledShiftsClient({
           shiftsByMember[shift.team_member_id][shift.shift_date] = shift;
         });
 
-        // Build team members with shifts
         const assignments = membersResult.data as {
           id: string;
           is_active: boolean;
@@ -127,13 +128,11 @@ export function ScheduledShiftsClient({
         }[];
 
         const membersWithShifts = assignments.map((assignment) => {
-          // Supabase returns users as an array due to the join
           const user = Array.isArray(assignment.users)
             ? assignment.users[0]
             : assignment.users;
           const memberShifts: { [date: string]: QueryShift | null } = {};
 
-          // Create shift map for all days in week
           weekRange.days.forEach((day) => {
             memberShifts[day.date] =
               shiftsByMember[user.id]?.[day.date] || null;
@@ -153,12 +152,21 @@ export function ScheduledShiftsClient({
       }
 
       setIsLoading(false);
+      setIsRefreshing(false); // Reset refreshing state
     };
 
     loadData();
-  }, [selectedVenueId, weekStart, weekRange, refreshKey]); // Add refreshKey to dependencies
+  }, [selectedVenueId, weekStart, weekRange, refreshKey]);
 
-  // Load unassigned members when opening assign modal
+  // Close context menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => setContextMenuCell(null);
+    if (contextMenuCell) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [contextMenuCell]);
+
   const handleOpenAssignModal = async () => {
     if (!selectedVenueId) return;
 
@@ -169,13 +177,44 @@ export function ScheduledShiftsClient({
     setShowAssignModal(true);
   };
 
-  const handleOpenShiftModal = (member: TeamMemberWithShifts) => {
+  const handleOpenRepeatingShiftModal = (member: TeamMemberWithShifts) => {
     setSelectedTeamMember(member);
-    setShowShiftModal(true);
+    setShowRepeatingShiftModal(true);
+    setContextMenuCell(null);
+  };
+
+  const handleOpenSingleShiftModal = (
+    member: TeamMemberWithShifts,
+    date: string,
+    shift: QueryShift | null
+  ) => {
+    setSelectedTeamMember(member);
+    setSelectedDate(date);
+    setSelectedShift(shift);
+    setShowSingleShiftModal(true);
+    setContextMenuCell(null);
+  };
+
+  const handleShiftCellClick = (
+    e: React.MouseEvent,
+    member: TeamMemberWithShifts,
+    date: string,
+    shift: QueryShift | null
+  ) => {
+    e.stopPropagation();
+
+    if (shift) {
+      // If shift exists, toggle context menu
+      const cellKey = `${member.id}-${date}`;
+      setContextMenuCell(contextMenuCell === cellKey ? null : cellKey);
+    } else {
+      // If no shift, open add shift modal directly
+      handleOpenSingleShiftModal(member, date, null);
+    }
   };
 
   const handleRefresh = () => {
-    // Trigger reload by incrementing refresh key
+    setIsRefreshing(true);
     setRefreshKey((prev) => prev + 1);
   };
 
@@ -244,7 +283,19 @@ export function ScheduledShiftsClient({
           </div>
         </div>
       ) : (
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="border border-gray-200 rounded-lg overflow-hidden relative">
+          {/* Loading Overlay */}
+          {isRefreshing && (
+            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-40 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-10 h-10 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
+                <p className="text-sm text-gray-600 font-medium">
+                  Updating schedule...
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Calendar Header */}
           <div className="grid grid-cols-8 bg-gray-50 border-b border-gray-200">
             <div className="p-3 font-medium text-gray-700 border-r border-gray-200">
@@ -257,7 +308,7 @@ export function ScheduledShiftsClient({
               >
                 <div className="font-medium text-gray-900">{day.dayName}</div>
                 <div className="text-xs text-gray-600 mt-0.5">
-                  {new Date(day.date + 'T00:00:00').getDate()}
+                  {new Date(day.date + 'T00:00:00Z').getUTCDate()}
                 </div>
               </div>
             ))}
@@ -277,8 +328,8 @@ export function ScheduledShiftsClient({
                       src={member.photo_url}
                       alt={member.first_name}
                       className="h-8 w-8 rounded-full object-cover"
-                      width={8}
-                      height={8}
+                      width={32}
+                      height={32}
                     />
                   ) : (
                     <div className="flex items-center justify-center h-8 w-8 rounded-full bg-gray-200 text-gray-600 text-sm font-medium">
@@ -290,7 +341,7 @@ export function ScheduledShiftsClient({
                       {member.first_name} {member.last_name || ''}
                     </div>
                     <button
-                      onClick={() => handleOpenShiftModal(member)}
+                      onClick={() => handleOpenRepeatingShiftModal(member)}
                       className="text-xs text-purple-600 hover:text-purple-700"
                     >
                       Set Schedule
@@ -301,21 +352,90 @@ export function ScheduledShiftsClient({
                 {/* Shift Cells */}
                 {weekRange.days.map((day) => {
                   const shift = member.shifts[day.date];
+                  const cellKey = `${member.id}-${day.date}`;
+                  const isHovered = hoveredCell === cellKey;
+                  const showContextMenu = contextMenuCell === cellKey;
+
                   return (
                     <div
                       key={day.date}
-                      className="p-2 border-r border-gray-200 last:border-r-0"
+                      className="relative p-2 border-r border-gray-200 last:border-r-0 min-h-[60px]"
+                      onMouseEnter={() => setHoveredCell(cellKey)}
+                      onMouseLeave={() => setHoveredCell(null)}
                     >
                       {shift ? (
-                        <div className="bg-green-50 border border-green-200 rounded px-2 py-1 text-xs text-green-900">
-                          <div className="font-medium">
-                            {shift.start_time.slice(0, 5)} -{' '}
-                            {shift.end_time.slice(0, 5)}
-                          </div>
+                        // Cell with shift
+                        <div className="relative">
+                          <button
+                            onClick={(e) =>
+                              handleShiftCellClick(e, member, day.date, shift)
+                            }
+                            className="w-full h-full bg-green-50 border border-green-200 rounded px-2 py-2 text-xs text-green-900 hover:bg-green-100 transition-colors flex flex-col items-center justify-center min-h-[48px]"
+                          >
+                            <div className="font-medium text-center">
+                              {shift.start_time.slice(0, 5)} -{' '}
+                              {shift.end_time.slice(0, 5)}
+                            </div>
+                            {shift.notes && (
+                              <div className="text-green-700 mt-1 truncate text-center w-full">
+                                {shift.notes}
+                              </div>
+                            )}
+                          </button>
+
+                          {/* Context Menu */}
+                          {showContextMenu && (
+                            <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                              <button
+                                onClick={() =>
+                                  handleOpenSingleShiftModal(
+                                    member,
+                                    day.date,
+                                    shift
+                                  )
+                                }
+                                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                              >
+                                Edit this day
+                              </button>
+                              <button
+                                onClick={() =>
+                                  handleOpenRepeatingShiftModal(member)
+                                }
+                                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                              >
+                                Set repeating shifts
+                              </button>
+                              <button
+                                onClick={() =>
+                                  handleOpenSingleShiftModal(
+                                    member,
+                                    day.date,
+                                    shift
+                                  )
+                                }
+                                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 border-t border-gray-100"
+                              >
+                                Delete this shift
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : (
-                        <div className="text-center text-xs text-gray-400">
-                          —
+                        // Empty cell
+                        <div className="flex items-center justify-center h-full">
+                          {isHovered ? (
+                            <button
+                              onClick={(e) =>
+                                handleShiftCellClick(e, member, day.date, null)
+                              }
+                              className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-600 text-white hover:bg-purple-700 transition-all"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <span className="text-gray-300 text-xs">—</span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -338,16 +458,32 @@ export function ScheduledShiftsClient({
         />
       )}
 
-      {showShiftModal && selectedTeamMember && selectedVenue && (
+      {showRepeatingShiftModal && selectedTeamMember && selectedVenue && (
         <RepeatingShiftsModal
-          isOpen={showShiftModal}
+          isOpen={showRepeatingShiftModal}
+          onClose={() => setShowRepeatingShiftModal(false)}
           teamMemberId={selectedTeamMember.id}
           teamMemberName={`${selectedTeamMember.first_name} ${
             selectedTeamMember.last_name || ''
           }`}
           venueId={selectedVenue.id}
           venueName={selectedVenue.name}
-          onClose={() => setShowShiftModal(false)}
+          onSuccess={handleRefresh}
+        />
+      )}
+
+      {showSingleShiftModal && selectedTeamMember && selectedVenue && (
+        <SingleShiftModal
+          isOpen={showSingleShiftModal}
+          onClose={() => setShowSingleShiftModal(false)}
+          teamMemberId={selectedTeamMember.id}
+          teamMemberName={`${selectedTeamMember.first_name} ${
+            selectedTeamMember.last_name || ''
+          }`}
+          venueId={selectedVenue.id}
+          venueName={selectedVenue.name}
+          date={selectedDate}
+          existingShift={selectedShift}
           onSuccess={handleRefresh}
         />
       )}
