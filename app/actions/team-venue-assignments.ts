@@ -376,3 +376,69 @@ export async function bulkUnassignTeamMembers(
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
+
+export async function updateVenueAssignments(
+  venueId: string,
+  selectedTeamMemberIds: string[],
+  previouslyAssignedIds: string[]
+) {
+  try {
+    await requireAdmin();
+
+    // Determine who to assign and who to unassign
+    const toAssign = selectedTeamMemberIds.filter(
+      (id) => !previouslyAssignedIds.includes(id)
+    );
+    const toUnassign = previouslyAssignedIds.filter(
+      (id) => !selectedTeamMemberIds.includes(id)
+    );
+
+    // Assign new members
+    if (toAssign.length > 0) {
+      const assignResult = await bulkAssignTeamMembers(toAssign, venueId);
+      if (!assignResult.success) {
+        return assignResult;
+      }
+    }
+
+    // Unassign removed members
+    if (toUnassign.length > 0) {
+      const { error } = await supabaseAdmin
+        .from('team_member_venues')
+        .update({
+          is_active: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('venue_id', venueId)
+        .in('team_member_id', toUnassign);
+
+      if (error) {
+        console.error('Error unassigning team members:', error);
+        return { success: false, error: 'Failed to unassign team members' };
+      }
+    }
+
+    revalidatePath('/admin/team');
+
+    const message =
+      toAssign.length > 0 && toUnassign.length > 0
+        ? `Assigned ${toAssign.length}, unassigned ${toUnassign.length}`
+        : toAssign.length > 0
+        ? `Assigned ${toAssign.length} member${
+            toAssign.length !== 1 ? 's' : ''
+          }`
+        : toUnassign.length > 0
+        ? `Unassigned ${toUnassign.length} member${
+            toUnassign.length !== 1 ? 's' : ''
+          }`
+        : 'No changes made';
+
+    return {
+      success: true,
+      message,
+    };
+  } catch (error) {
+    console.error('Error updating venue assignments:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}

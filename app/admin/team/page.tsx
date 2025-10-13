@@ -1,9 +1,11 @@
 // app/admin/team/page.tsx
 import { requireAdmin } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { TeamListClient } from '@/components/admin/team/team-list-client';
-import { TeamTabs } from '@/components/admin/team/team-tabs';
-import { ScheduledShiftsClient } from '@/components/admin/team/scheduled-shifts-client';
+import {
+  TeamListClient,
+  TeamTabs,
+  ScheduledShiftsClient,
+} from '@/components/admin/team';
 
 export default async function TeamPage() {
   await requireAdmin();

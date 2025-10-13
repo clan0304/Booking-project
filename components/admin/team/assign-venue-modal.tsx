@@ -1,3 +1,4 @@
+// components/admin/team/assign-venue-modal.tsx
 'use client';
 
 import { useState } from 'react';
@@ -13,10 +14,12 @@ interface TeamMemberOption {
   email: string;
 }
 
+// ✅ FIXED: Added assignedMemberIds prop
 interface AssignVenueModalProps {
   venueId: string;
   venueName: string;
-  availableTeamMembers: TeamMemberOption[];
+  allTeamMembers: TeamMemberOption[];
+  assignedMemberIds: string[]; // ✅ NEW: IDs of already-assigned members
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -24,17 +27,21 @@ interface AssignVenueModalProps {
 export function AssignVenueModal({
   venueId,
   venueName,
-  availableTeamMembers,
+  allTeamMembers,
+  assignedMemberIds, // ✅ NEW: Pre-populate these
   onClose,
   onSuccess,
 }: AssignVenueModalProps) {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // ✅ FIXED: Initialize with already-assigned members
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    new Set(assignedMemberIds)
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // Filter team members by search
-  const filteredMembers = availableTeamMembers.filter((member) => {
+  // ✅ Changed variable name for consistency
+  const filteredMembers = allTeamMembers.filter((member) => {
     const fullName = `${member.first_name} ${
       member.last_name || ''
     }`.toLowerCase();
@@ -144,7 +151,7 @@ export function AssignVenueModal({
             <div className="text-center py-12">
               <User className="h-12 w-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-600">
-                {availableTeamMembers.length === 0
+                {allTeamMembers.length === 0
                   ? 'All team members are already assigned'
                   : 'No team members match your search'}
               </p>

@@ -8,10 +8,7 @@ import { WeekNavigator } from './week-navigator';
 import { AssignVenueModal } from './assign-venue-modal';
 import { RepeatingShiftsModal } from './repeating-shifts-modal';
 import { SingleShiftModal } from './single-shift-modal';
-import {
-  getTeamMembersByVenue,
-  getUnassignedTeamMembers,
-} from '@/app/actions/team-venue-assignments';
+import { getTeamMembersByVenue } from '@/app/actions/team-venue-assignments';
 import { getShiftsByWeek } from '@/app/actions/shifts';
 import { getStartOfWeek, getToday, getWeekRange } from '@/lib/shift-helpers';
 import type { Venue } from '@/types/database';
@@ -30,7 +27,7 @@ interface TeamMemberWithShifts {
   shifts: { [date: string]: QueryShift | null };
 }
 
-interface UnassignedMember {
+interface AllTeamMember {
   id: string;
   first_name: string;
   last_name: string | null;
@@ -53,6 +50,12 @@ interface QueryUser {
   last_name: string | null;
   photo_url: string | null;
   email: string;
+}
+
+interface TeamMemberAssignment {
+  id: string;
+  is_active: boolean;
+  users: QueryUser | QueryUser[];
 }
 
 // =====================================================
@@ -80,11 +83,13 @@ export function ScheduledShiftsClient({
     useState<TeamMemberWithShifts | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedShift, setSelectedShift] = useState<QueryShift | null>(null);
-  const [unassignedMembers, setUnassignedMembers] = useState<
-    UnassignedMember[]
-  >([]);
+
+  // ✅ NEW: Store ALL team members and currently assigned IDs
+  const [allTeamMembers, setAllTeamMembers] = useState<AllTeamMember[]>([]);
+  const [assignedMemberIds, setAssignedMemberIds] = useState<string[]>([]);
+
   const [refreshKey, setRefreshKey] = useState(0);
-  const [hoveredCell, setHoveredCell] = useState<string | null>(null); // "memberId-date"
+  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
   const [contextMenuCell, setContextMenuCell] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -121,16 +126,13 @@ export function ScheduledShiftsClient({
           shiftsByMember[shift.team_member_id][shift.shift_date] = shift;
         });
 
-        const assignments = membersResult.data as {
-          id: string;
-          is_active: boolean;
-          users: QueryUser[];
-        }[];
+        const assignments = membersResult.data as TeamMemberAssignment[];
 
         const membersWithShifts = assignments.map((assignment) => {
-          const user = Array.isArray(assignment.users)
+          const user: QueryUser = Array.isArray(assignment.users)
             ? assignment.users[0]
             : assignment.users;
+
           const memberShifts: { [date: string]: QueryShift | null } = {};
 
           weekRange.days.forEach((day) => {
@@ -152,7 +154,7 @@ export function ScheduledShiftsClient({
       }
 
       setIsLoading(false);
-      setIsRefreshing(false); // Reset refreshing state
+      setIsRefreshing(false);
     };
 
     loadData();
@@ -167,14 +169,35 @@ export function ScheduledShiftsClient({
     }
   }, [contextMenuCell]);
 
+  // ✅ NEW: Fetch ALL team members + currently assigned IDs
   const handleOpenAssignModal = async () => {
     if (!selectedVenueId) return;
 
-    const result = await getUnassignedTeamMembers(selectedVenueId);
-    if (result.success && result.data) {
-      setUnassignedMembers(result.data as UnassignedMember[]);
+    try {
+      // Fetch ALL team members (with team_member role)
+      const response = await fetch('/api/admin/team/all-members');
+      if (response.ok) {
+        const data = await response.json();
+        setAllTeamMembers(data.members || []);
+      }
+
+      // Fetch currently assigned members
+      const assignedResult = await getTeamMembersByVenue(selectedVenueId);
+      if (assignedResult.success && assignedResult.data) {
+        const assignments = assignedResult.data as TeamMemberAssignment[];
+        const assignedIds = assignments.map((assignment) => {
+          const user: QueryUser = Array.isArray(assignment.users)
+            ? assignment.users[0]
+            : assignment.users;
+          return user.id;
+        });
+        setAssignedMemberIds(assignedIds);
+      }
+
+      setShowAssignModal(true);
+    } catch (error) {
+      console.error('Error loading team members:', error);
     }
-    setShowAssignModal(true);
   };
 
   const handleOpenRepeatingShiftModal = (member: TeamMemberWithShifts) => {
@@ -204,11 +227,9 @@ export function ScheduledShiftsClient({
     e.stopPropagation();
 
     if (shift) {
-      // If shift exists, toggle context menu
       const cellKey = `${member.id}-${date}`;
       setContextMenuCell(contextMenuCell === cellKey ? null : cellKey);
     } else {
-      // If no shift, open add shift modal directly
       handleOpenSingleShiftModal(member, date, null);
     }
   };
@@ -364,7 +385,6 @@ export function ScheduledShiftsClient({
                       onMouseLeave={() => setHoveredCell(null)}
                     >
                       {shift ? (
-                        // Cell with shift
                         <div className="relative">
                           <button
                             onClick={(e) =>
@@ -383,7 +403,6 @@ export function ScheduledShiftsClient({
                             )}
                           </button>
 
-                          {/* Context Menu */}
                           {showContextMenu && (
                             <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
                               <button
@@ -422,7 +441,6 @@ export function ScheduledShiftsClient({
                           )}
                         </div>
                       ) : (
-                        // Empty cell
                         <div className="flex items-center justify-center h-full">
                           {isHovered ? (
                             <button
@@ -452,7 +470,8 @@ export function ScheduledShiftsClient({
         <AssignVenueModal
           venueId={selectedVenue.id}
           venueName={selectedVenue.name}
-          availableTeamMembers={unassignedMembers}
+          allTeamMembers={allTeamMembers}
+          assignedMemberIds={assignedMemberIds}
           onClose={() => setShowAssignModal(false)}
           onSuccess={handleRefresh}
         />
