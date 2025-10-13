@@ -3,7 +3,10 @@
 
 import { useState } from 'react';
 import { X, Search, User, UserCheck } from 'lucide-react';
-import { bulkAssignTeamMembers } from '@/app/actions/team-venue-assignments';
+import {
+  bulkAssignTeamMembers,
+  bulkUnassignTeamMembers,
+} from '@/app/actions/team-venue-assignments';
 import Image from 'next/image';
 
 interface TeamMemberOption {
@@ -14,12 +17,11 @@ interface TeamMemberOption {
   email: string;
 }
 
-// ✅ FIXED: Added assignedMemberIds prop
 interface AssignVenueModalProps {
   venueId: string;
   venueName: string;
   allTeamMembers: TeamMemberOption[];
-  assignedMemberIds: string[]; // ✅ NEW: IDs of already-assigned members
+  assignedMemberIds: string[];
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -28,11 +30,11 @@ export function AssignVenueModal({
   venueId,
   venueName,
   allTeamMembers,
-  assignedMemberIds, // ✅ NEW: Pre-populate these
+  assignedMemberIds,
   onClose,
   onSuccess,
 }: AssignVenueModalProps) {
-  // ✅ FIXED: Initialize with already-assigned members
+  // Initialize with already-assigned members
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     new Set(assignedMemberIds)
   );
@@ -40,7 +42,6 @@ export function AssignVenueModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // ✅ Changed variable name for consistency
   const filteredMembers = allTeamMembers.filter((member) => {
     const fullName = `${member.first_name} ${
       member.last_name || ''
@@ -69,27 +70,67 @@ export function AssignVenueModal({
   };
 
   const handleSubmit = async () => {
-    if (selectedIds.size === 0) {
-      setError('Please select at least one team member');
-      return;
-    }
-
     setIsSubmitting(true);
     setError('');
 
-    const result = await bulkAssignTeamMembers(
-      Array.from(selectedIds),
-      venueId
-    );
+    try {
+      const selectedArray = Array.from(selectedIds);
 
-    if (result.success) {
+      // Find members to assign (newly selected)
+      const toAssign = selectedArray.filter(
+        (id) => !assignedMemberIds.includes(id)
+      );
+
+      // Find members to unassign (previously selected, now unchecked)
+      const toUnassign = assignedMemberIds.filter((id) => !selectedIds.has(id));
+
+      console.log('Assignment changes:', {
+        toAssign: toAssign.length,
+        toUnassign: toUnassign.length,
+        selected: selectedArray.length,
+        previouslyAssigned: assignedMemberIds.length,
+      });
+
+      // Unassign removed members FIRST
+      if (toUnassign.length > 0) {
+        console.log('Unassigning members:', toUnassign);
+        const unassignResult = await bulkUnassignTeamMembers(
+          toUnassign,
+          venueId
+        );
+
+        if (!unassignResult.success) {
+          console.error('Unassign failed:', unassignResult.error);
+          setError(unassignResult.error || 'Failed to unassign members');
+          setIsSubmitting(false);
+          return;
+        }
+        console.log('Unassign successful');
+      }
+
+      // Assign new members
+      if (toAssign.length > 0) {
+        console.log('Assigning members:', toAssign);
+        const assignResult = await bulkAssignTeamMembers(toAssign, venueId);
+
+        if (!assignResult.success) {
+          console.error('Assign failed:', assignResult.error);
+          setError(assignResult.error || 'Failed to assign members');
+          setIsSubmitting(false);
+          return;
+        }
+        console.log('Assign successful');
+      }
+
+      // Success - refresh and close
+      console.log('All assignment changes completed successfully');
       onSuccess();
       onClose();
-    } else {
-      setError(result.error || 'Failed to assign team members');
+    } catch (error) {
+      console.error('Error updating assignments:', error);
+      setError('An unexpected error occurred');
+      setIsSubmitting(false);
     }
-
-    setIsSubmitting(false);
   };
 
   return (
@@ -152,7 +193,7 @@ export function AssignVenueModal({
               <User className="h-12 w-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-600">
                 {allTeamMembers.length === 0
-                  ? 'All team members are already assigned'
+                  ? 'No team members found'
                   : 'No team members match your search'}
               </p>
             </div>
@@ -232,14 +273,10 @@ export function AssignVenueModal({
             </button>
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting || selectedIds.size === 0}
+              disabled={isSubmitting}
               className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {isSubmitting
-                ? 'Assigning...'
-                : `Assign ${selectedIds.size} Member${
-                    selectedIds.size !== 1 ? 's' : ''
-                  }`}
+              {isSubmitting ? 'Updating...' : 'Update Assignments'}
             </button>
           </div>
         </div>

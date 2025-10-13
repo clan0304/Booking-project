@@ -1,124 +1,67 @@
 // app/actions/team-venue-assignments.ts
 'use server';
 
-import { requireAdmin } from '@/lib/auth';
+import { requireStaff } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { revalidatePath } from 'next/cache';
 
 /**
- * Get all team members assigned to a venue
+ * Get all team members assigned to a specific venue
  */
 export async function getTeamMembersByVenue(venueId: string) {
   try {
-    await requireAdmin();
+    await requireStaff();
 
-    const { data: assignments, error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('team_member_venues')
       .select(
         `
         id,
         is_active,
-        users!inner (
+        users!team_member_venues_team_member_id_fkey (
           id,
           first_name,
           last_name,
-          photo_url,
           email,
-          team_members (
-            position,
-            is_active
-          )
-        )
-      `
-      )
-      .eq('venue_id', venueId)
-      .eq('is_active', true);
-
-    if (error) {
-      console.error('Error fetching team members:', error);
-      return { success: false, error: 'Failed to fetch team members' };
-    }
-
-    return {
-      success: true,
-      data: assignments || [],
-    };
-  } catch (error) {
-    console.error('Error getting team members by venue:', error);
-    return { success: false, error: 'An unexpected error occurred' };
-  }
-}
-
-/**
- * Get all venues a team member is assigned to
- */
-export async function getVenuesByTeamMember(teamMemberId: string) {
-  try {
-    await requireAdmin();
-
-    const { data: assignments, error } = await supabaseAdmin
-      .from('team_member_venues')
-      .select(
-        `
-        id,
-        is_active,
-        venues!inner (
-          id,
-          name,
-          address,
           photo_url
         )
       `
       )
-      .eq('team_member_id', teamMemberId)
-      .eq('is_active', true);
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .order('users(first_name)', { ascending: true });
 
     if (error) {
-      console.error('Error fetching venues:', error);
-      return { success: false, error: 'Failed to fetch venues' };
+      console.error('Error fetching team members by venue:', error);
+      return { success: false, error: 'Failed to fetch team members' };
     }
 
-    return {
-      success: true,
-      data: assignments || [],
-    };
+    return { success: true, data };
   } catch (error) {
-    console.error('Error getting venues by team member:', error);
+    console.error('Error in getTeamMembersByVenue:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
 
 /**
- * Get team members NOT assigned to a specific venue
+ * Get all team members NOT assigned to a specific venue
  */
 export async function getUnassignedTeamMembers(venueId: string) {
   try {
-    await requireAdmin();
+    await requireStaff();
 
-    // Get all team members
-    const { data: allTeamMembers, error: teamError } = await supabaseAdmin
+    // Get all users with team_member role
+    const { data: allTeamMembers, error: allError } = await supabaseAdmin
       .from('users')
-      .select(
-        `
-        id,
-        first_name,
-        last_name,
-        photo_url,
-        email,
-        team_members (
-          position,
-          is_active
-        )
-      `
-      )
-      .contains('roles', ['team_member']);
+      .select('id, first_name, last_name, email, photo_url')
+      .contains('roles', ['team_member'])
+      .order('first_name', { ascending: true });
 
-    if (teamError) {
-      console.error('Error fetching team members:', teamError);
+    if (allError) {
+      console.error('Error fetching all team members:', allError);
       return { success: false, error: 'Failed to fetch team members' };
     }
 
-    // Get already assigned team members
+    // Get currently assigned team members
     const { data: assigned, error: assignedError } = await supabaseAdmin
       .from('team_member_venues')
       .select('team_member_id')
@@ -126,145 +69,36 @@ export async function getUnassignedTeamMembers(venueId: string) {
       .eq('is_active', true);
 
     if (assignedError) {
-      console.error('Error fetching assignments:', assignedError);
-      return { success: false, error: 'Failed to fetch assignments' };
+      console.error('Error fetching assigned team members:', assignedError);
+      return { success: false, error: 'Failed to fetch assigned members' };
     }
 
+    // Filter out assigned members
     const assignedIds = new Set(assigned?.map((a) => a.team_member_id) || []);
+    const unassigned = allTeamMembers?.filter(
+      (member) => !assignedIds.has(member.id)
+    );
 
-    // Filter out assigned team members
-    const unassigned = allTeamMembers?.filter((tm) => !assignedIds.has(tm.id));
-
-    return {
-      success: true,
-      data: unassigned || [],
-    };
+    return { success: true, data: unassigned || [] };
   } catch (error) {
-    console.error('Error getting unassigned team members:', error);
+    console.error('Error in getUnassignedTeamMembers:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
 
 /**
- * Assign a team member to a venue
- */
-export async function assignTeamMemberToVenue(
-  teamMemberId: string,
-  venueId: string
-) {
-  try {
-    await requireAdmin();
-
-    // Check if already assigned (active or inactive)
-    const { data: existing } = await supabaseAdmin
-      .from('team_member_venues')
-      .select('id, is_active')
-      .eq('team_member_id', teamMemberId)
-      .eq('venue_id', venueId)
-      .maybeSingle();
-
-    if (existing) {
-      if (existing.is_active) {
-        return {
-          success: true,
-          message: 'Team member already assigned to this venue',
-        };
-      }
-
-      // Reactivate
-      const { error } = await supabaseAdmin
-        .from('team_member_venues')
-        .update({
-          is_active: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id);
-
-      if (error) {
-        console.error('Error reactivating assignment:', error);
-        return { success: false, error: 'Failed to assign team member' };
-      }
-    } else {
-      // Create new assignment
-      const { error } = await supabaseAdmin.from('team_member_venues').insert({
-        team_member_id: teamMemberId,
-        venue_id: venueId,
-        is_active: true,
-      });
-
-      if (error) {
-        console.error('Error creating assignment:', error);
-        return { success: false, error: 'Failed to assign team member' };
-      }
-    }
-
-    revalidatePath('/admin/team');
-
-    return {
-      success: true,
-      message: 'Team member assigned successfully',
-    };
-  } catch (error) {
-    console.error('Error assigning team member:', error);
-    return { success: false, error: 'An unexpected error occurred' };
-  }
-}
-
-/**
- * Unassign a team member from a venue
- */
-export async function unassignTeamMemberFromVenue(
-  teamMemberId: string,
-  venueId: string
-) {
-  try {
-    await requireAdmin();
-
-    // Mark as inactive instead of deleting (preserve history)
-    const { error } = await supabaseAdmin
-      .from('team_member_venues')
-      .update({
-        is_active: false,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('team_member_id', teamMemberId)
-      .eq('venue_id', venueId);
-
-    if (error) {
-      console.error('Error unassigning team member:', error);
-      return { success: false, error: 'Failed to unassign team member' };
-    }
-
-    // Note: We don't delete shifts automatically
-    // Admin can choose to delete them separately if needed
-
-    revalidatePath('/admin/team');
-
-    return {
-      success: true,
-      message: 'Team member unassigned successfully',
-    };
-  } catch (error) {
-    console.error('Error unassigning team member:', error);
-    return { success: false, error: 'An unexpected error occurred' };
-  }
-}
-
-/**
- * Bulk assign multiple team members to a venue
+ * Bulk assign team members to a venue
  */
 export async function bulkAssignTeamMembers(
   teamMemberIds: string[],
   venueId: string
 ) {
   try {
-    await requireAdmin();
-
-    if (teamMemberIds.length === 0) {
-      return { success: false, error: 'No team members selected' };
+    if (!teamMemberIds.length) {
+      return { success: false, error: 'No team members provided' };
     }
 
-    // Get existing assignments
+    // Check for existing assignments
     const { data: existing } = await supabaseAdmin
       .from('team_member_venues')
       .select('team_member_id, is_active')
@@ -275,26 +109,28 @@ export async function bulkAssignTeamMembers(
       existing?.map((e) => [e.team_member_id, e.is_active]) || []
     );
 
-    // Prepare assignments
-    const toInsert = [];
-    const toReactivate = [];
+    const toInsert: Array<{
+      team_member_id: string;
+      venue_id: string;
+      is_active: boolean;
+    }> = [];
+    const toReactivate: string[] = [];
 
-    for (const teamMemberId of teamMemberIds) {
-      const isActive = existingMap.get(teamMemberId);
-
-      if (isActive === undefined) {
+    teamMemberIds.forEach((memberId) => {
+      const existingStatus = existingMap.get(memberId);
+      if (existingStatus === undefined) {
         // New assignment
         toInsert.push({
-          team_member_id: teamMemberId,
+          team_member_id: memberId,
           venue_id: venueId,
           is_active: true,
         });
-      } else if (isActive === false) {
-        // Reactivate
-        toReactivate.push(teamMemberId);
+      } else if (existingStatus === false) {
+        // Reactivate existing but inactive assignment
+        toReactivate.push(memberId);
       }
-      // If already active, skip
-    }
+      // If existingStatus === true, already assigned and active, skip
+    });
 
     // Insert new assignments
     if (toInsert.length > 0) {
@@ -303,142 +139,102 @@ export async function bulkAssignTeamMembers(
         .insert(toInsert);
 
       if (insertError) {
-        console.error('Error inserting assignments:', insertError);
+        console.error('Error inserting team member assignments:', insertError);
         return { success: false, error: 'Failed to assign team members' };
       }
     }
 
-    // Reactivate inactive assignments
+    // Reactivate existing assignments
     if (toReactivate.length > 0) {
       const { error: updateError } = await supabaseAdmin
         .from('team_member_venues')
-        .update({
-          is_active: true,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ is_active: true })
         .eq('venue_id', venueId)
         .in('team_member_id', toReactivate);
 
       if (updateError) {
-        console.error('Error reactivating assignments:', updateError);
-        return { success: false, error: 'Failed to assign team members' };
+        console.error('Error reactivating team members:', updateError);
+        return { success: false, error: 'Failed to reactivate team members' };
       }
     }
 
-    revalidatePath('/admin/team');
-
-    return {
-      success: true,
-      message: `Successfully assigned ${teamMemberIds.length} team member(s)`,
-    };
+    return { success: true };
   } catch (error) {
-    console.error('Error bulk assigning team members:', error);
+    console.error('Error in bulkAssignTeamMembers:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
 
 /**
- * Bulk unassign multiple team members from a venue
+ * Bulk unassign team members from a venue
+ * Sets is_active to false instead of deleting records
  */
 export async function bulkUnassignTeamMembers(
   teamMemberIds: string[],
   venueId: string
 ) {
   try {
-    await requireAdmin();
+    await requireStaff();
 
-    if (teamMemberIds.length === 0) {
-      return { success: false, error: 'No team members selected' };
+    if (!teamMemberIds.length) {
+      return { success: false, error: 'No team members provided' };
     }
 
-    const { error } = await supabaseAdmin
+    console.log('Unassigning team members:', {
+      teamMemberIds,
+      venueId,
+      count: teamMemberIds.length,
+    });
+
+    // Set is_active to false for these assignments
+    const { data, error } = await supabaseAdmin
       .from('team_member_venues')
-      .update({
-        is_active: false,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ is_active: false })
       .eq('venue_id', venueId)
-      .in('team_member_id', teamMemberIds);
+      .in('team_member_id', teamMemberIds)
+      .select();
 
     if (error) {
       console.error('Error unassigning team members:', error);
       return { success: false, error: 'Failed to unassign team members' };
     }
 
-    revalidatePath('/admin/team');
+    console.log('Successfully unassigned:', data?.length || 0, 'members');
 
-    return {
-      success: true,
-      message: `Successfully unassigned ${teamMemberIds.length} team member(s)`,
-    };
+    return { success: true, data };
   } catch (error) {
-    console.error('Error bulk unassigning team members:', error);
+    console.error('Error in bulkUnassignTeamMembers:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
 
-export async function updateVenueAssignments(
-  venueId: string,
-  selectedTeamMemberIds: string[],
-  previouslyAssignedIds: string[]
+/**
+ * Check if a team member is assigned to a venue
+ */
+export async function isTeamMemberAssignedToVenue(
+  teamMemberId: string,
+  venueId: string
 ) {
   try {
-    await requireAdmin();
+    await requireStaff();
 
-    // Determine who to assign and who to unassign
-    const toAssign = selectedTeamMemberIds.filter(
-      (id) => !previouslyAssignedIds.includes(id)
-    );
-    const toUnassign = previouslyAssignedIds.filter(
-      (id) => !selectedTeamMemberIds.includes(id)
-    );
+    const { data, error } = await supabaseAdmin
+      .from('team_member_venues')
+      .select('id')
+      .eq('team_member_id', teamMemberId)
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .single();
 
-    // Assign new members
-    if (toAssign.length > 0) {
-      const assignResult = await bulkAssignTeamMembers(toAssign, venueId);
-      if (!assignResult.success) {
-        return assignResult;
-      }
+    if (error && error.code !== 'PGRST116') {
+      // PGRST116 is "not found" error, which is expected
+      console.error('Error checking team member assignment:', error);
+      return { success: false, error: 'Failed to check assignment' };
     }
 
-    // Unassign removed members
-    if (toUnassign.length > 0) {
-      const { error } = await supabaseAdmin
-        .from('team_member_venues')
-        .update({
-          is_active: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('venue_id', venueId)
-        .in('team_member_id', toUnassign);
-
-      if (error) {
-        console.error('Error unassigning team members:', error);
-        return { success: false, error: 'Failed to unassign team members' };
-      }
-    }
-
-    revalidatePath('/admin/team');
-
-    const message =
-      toAssign.length > 0 && toUnassign.length > 0
-        ? `Assigned ${toAssign.length}, unassigned ${toUnassign.length}`
-        : toAssign.length > 0
-        ? `Assigned ${toAssign.length} member${
-            toAssign.length !== 1 ? 's' : ''
-          }`
-        : toUnassign.length > 0
-        ? `Unassigned ${toUnassign.length} member${
-            toUnassign.length !== 1 ? 's' : ''
-          }`
-        : 'No changes made';
-
-    return {
-      success: true,
-      message,
-    };
+    return { success: true, isAssigned: !!data };
   } catch (error) {
-    console.error('Error updating venue assignments:', error);
+    console.error('Error in isTeamMemberAssignedToVenue:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
