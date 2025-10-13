@@ -64,7 +64,7 @@
    - Auth checks via `requireAuth()`, `requireStaff()`, `requireAdmin()`
    - RLS policies disabled (Service Role bypasses them anyway)
 
-5. **Timezone-Safe Date Handling** ✅ NEW
+5. **Timezone-Safe Date Handling** ✅
    - All dates stored as YYYY-MM-DD strings (no timezone)
    - UTC-safe parsing prevents timezone conversion bugs
    - Works correctly in Melbourne (UTC+10/+11) year-round
@@ -107,21 +107,22 @@
 - **RLS:** Disabled
 - **Purpose:** Multi-location support, each venue gets unique booking URL
 
-**5. Venue Operating Hours Table** ✅ NEW
+**5. Venue Operating Hours Table** ✅
 
 - Stores regular business hours for each venue
 - Fields: id, venue_id (FK), day_of_week (0-6), start_time, end_time, is_closed
 - Unique constraint: (venue_id, day_of_week)
 - **Purpose:** Define when venue is open/closed each day of week
 
-**6. Team Member Venues Table** ✅ NEW
+**6. Team Member Venues Table** ✅
 
 - Junction table for team member assignments to venues
 - Fields: id, team_member_id (FK to users), venue_id (FK), is_active
 - Unique constraint: (team_member_id, venue_id)
 - **Purpose:** Track which team members work at which venues
+- **Note:** Uses `is_active` for soft deletes (preserves assignment history)
 
-**7. Shifts Table** ✅ NEW
+**7. Shifts Table** ✅
 
 - Stores individual work shifts for team members
 - Fields: id, team_member_id (FK), venue_id (FK), shift_date (date), start_time, end_time, notes, created_by
@@ -129,7 +130,7 @@
 - Indexes on: shift_date, team_member_id, venue_id
 - **Purpose:** Schedule management and availability tracking
 
-**8. Venue Closed Days Table** ✅ NEW
+**8. Venue Closed Days Table** ✅
 
 - Stores dates when venue is closed (holidays, special events)
 - Fields: id, venue_id (FK), closed_date (date), reason, is_recurring, recurrence_rule, created_by
@@ -159,6 +160,7 @@
 - **Venues table:** Supports multi-location businesses, unique booking URLs per venue
 - **Scheduling tables:** Flexible shift management with venue assignments
 - **Closed days tracking:** Prevents conflicts and handles special closures
+- **Soft deletes:** `is_active` flag preserves assignment history for auditing
 - **No RLS policies:** Simpler maintenance, security enforced in application code
 - **Roles in database only:** No syncing complexity, instant updates
 
@@ -166,7 +168,7 @@
 
 ## 🔄 Key Workflows
 
-### Workflow 8: Admin Manages Shifts ✅ NEW
+### Workflow 8: Admin Manages Shifts ✅
 
 ```
 Admin → Navigate to /admin/team → Scheduled Shifts tab
@@ -196,28 +198,46 @@ Server Action: createRepeatingShifts()
 ✅ No timezone conversion bugs!
 ```
 
-### Workflow 9: Assign Team Members to Venue ✅ NEW
+### Workflow 9: Assign/Unassign Team Members to Venue ✅
 
 ```
 Admin → Click "Assign Team" button
   ↓
-Modal shows unassigned team members
+System fetches:
+  - ALL team members (via /api/admin/team/all-members)
+  - Currently assigned member IDs for this venue
   ↓
-Select one or multiple team members
+Modal opens showing ALL team members:
+  - ✅ Checked = Already assigned
+  - ☐ Unchecked = Not assigned
+  - Search/filter functionality
+  - Select All / Deselect All buttons
   ↓
-Server Action: Bulk assign to venue
-  - Creates team_member_venues records
-  - Sets is_active: true
+Admin makes changes:
+  - Check boxes → Assign new members
+  - Uncheck boxes → Unassign members
+  - Can do both in one operation
   ↓
-✅ Team members now appear in calendar
-✅ Can create shifts for assigned members
+Click "Update Assignments"
+  ↓
+System calculates changes:
+  - toAssign = newly checked members
+  - toUnassign = newly unchecked members
+  ↓
+Server Actions execute in order:
+  1. bulkUnassignTeamMembers() - sets is_active: false
+  2. bulkAssignTeamMembers() - sets is_active: true
+  ↓
+✅ Calendar refreshes showing updated team
+✅ Modal shows correct states on reopen
+✅ Assignment history preserved in database
 ```
 
 ---
 
 ## 💻 Implementation Patterns
 
-### Timezone-Safe Date Handling Pattern ✅ NEW
+### Timezone-Safe Date Handling Pattern ✅
 
 **Critical for Melbourne (UTC+10/+11):**
 
@@ -326,7 +346,7 @@ date.getUTCDay(); // Always correct!
   - [x] Stats dashboard (total, active, inactive)
   - [x] Account claiming support for unregistered members
 
-### Phase 3.5: Scheduling System ✅ (COMPLETED) 🎉 NEW
+### Phase 3.5: Scheduling System ✅ (COMPLETED) 🎉
 
 - [x] **Database Schema**
   - [x] Venue operating hours table
@@ -345,24 +365,42 @@ date.getUTCDay(); // Always correct!
   - [x] Repeating shifts pattern generation
   - [x] Conflict detection and resolution
   - [x] Venue hours management
-  - [x] Team-venue assignments
+  - [x] Team-venue assignments (assign/unassign)
+  - [x] Bulk operations for multiple team members
   - [x] Closed days management
+- [x] **API Endpoints**
+  - [x] `/api/admin/team/all-members` - Fetch all team members
+  - [x] `/api/public/team` - Public team data (privacy-safe)
 - [x] **UI Components**
   - [x] Venue selector dropdown
   - [x] Week navigator (prev/next/this week)
   - [x] Calendar grid view (Mon-Sun)
   - [x] Team member row with shifts
-  - [x] Assign venue modal (bulk assign)
+  - [x] Assign venue modal (show all members, pre-check assigned)
   - [x] Repeating shifts modal
+  - [x] Single shift modal (add/edit/delete)
   - [x] Set Schedule button functionality
-- [x] **Bug Fixes**
+  - [x] Context menu for shift actions
+- [x] **Assignment System Enhancements** 🆕
+  - [x] Show ALL team members in assignment modal
+  - [x] Pre-check already assigned members
+  - [x] Unassign by unchecking (sets is_active: false)
+  - [x] Assign and unassign in single operation
+  - [x] Search/filter all members
+  - [x] Select All / Deselect All functionality
+  - [x] Comprehensive logging for debugging
+  - [x] Real-time calendar refresh after changes
+- [x] **Bug Fixes & Improvements**
   - [x] Fixed timezone conversion bugs
   - [x] Fixed calendar week display (Sat-Fri → Mon-Sun)
   - [x] Fixed date range calculation (6 days → 7 days)
   - [x] Fixed shift dates off by 1 day
   - [x] Fixed Set Schedule button not opening modal
-  - [x] Fixed TypeScript type errors
+  - [x] Fixed TypeScript type errors (no more `any` types)
   - [x] Fixed useEffect dependency warnings
+  - [x] Fixed unassignment not working (added bulkUnassignTeamMembers)
+  - [x] Fixed modal not showing correct checkbox states
+  - [x] Fixed assignment order (unassign first, then assign)
 
 ### Phase 4: Client Management (NEXT)
 
@@ -405,12 +443,16 @@ project-root/
 │   │   ├── venues.ts                 # ✅ Venue CRUD operations
 │   │   ├── shifts.ts                 # ✅ Shift CRUD + repeating shifts
 │   │   ├── venue-hours.ts            # ✅ Venue hours management
-│   │   ├── team-venue-assignments.ts # ✅ Team-venue relationships
+│   │   ├── team-venue-assignments.ts # ✅ Assign/unassign team to venues
 │   │   └── venue-closed-days.ts      # ✅ Closed days management
 │   ├── api/
 │   │   ├── webhooks/
 │   │   │   └── clerk/
 │   │   │       └── route.ts          # ✅ Clerk webhook
+│   │   ├── admin/
+│   │   │   └── team/
+│   │   │       └── all-members/
+│   │   │           └── route.ts      # ✅ Fetch all team members API
 │   │   └── public/
 │   │       └── team/
 │   │           └── route.ts          # ✅ Public team API
@@ -432,12 +474,14 @@ project-root/
 │   │   ├── marketplace/              # ✅ Venue components
 │   │   └── team/
 │   │       ├── team-list-client.tsx  # ✅ Team member list
+│   │       ├── team-member-modal.tsx # ✅ Add/Edit team modal
 │   │       ├── team-tabs.tsx         # ✅ Team/Scheduling tabs
 │   │       ├── scheduled-shifts-client.tsx # ✅ Calendar grid
 │   │       ├── venue-selector.tsx    # ✅ Venue dropdown
 │   │       ├── week-navigator.tsx    # ✅ Week navigation
-│   │       ├── assign-venue-modal.tsx # ✅ Assign team modal
-│   │       └── repeating-shifts-modal.tsx # ✅ Set schedule modal
+│   │       ├── assign-venue-modal.tsx # ✅ Assign/unassign team modal
+│   │       ├── repeating-shifts-modal.tsx # ✅ Set schedule modal
+│   │       └── single-shift-modal.tsx # ✅ Add/edit/delete shift modal
 │   └── profile-form.tsx              # ✅ Profile form
 ├── lib/
 │   ├── auth.ts                       # ✅ Auth helpers
@@ -475,7 +519,9 @@ project-root/
 | **Date Methods**           | Use getUTCDay(), setUTCDate()     | Ensures consistent behavior regardless of local time |
 | **Week Format**            | Monday-Sunday (ISO 8601)          | Industry standard, aligns with business week         |
 | **Shift Constraints**      | Unique per team/venue/date        | Prevents double-booking, ensures data integrity      |
-| **Team-Venue Assignments** | Junction table with is_active     | Flexible multi-venue support, preserves history      |
+| **Team-Venue Assignments** | Soft delete (is_active flag)      | Preserves history, allows reactivation, auditing     |
+| **Assignment Modal**       | Show ALL members, pre-check       | Better UX, single modal for all operations           |
+| **Unassignment**           | Set is_active: false              | Preserves history, maintains referential integrity   |
 | **Closed Days**            | Separate table with recurrence    | Supports one-time and recurring closures             |
 | **Conflict Resolution**    | User choice (skip or replace)     | Flexible, prevents accidental data loss              |
 | **Calendar View**          | Weekly grid Mon-Sun               | Standard business view, matches team expectations    |
@@ -483,6 +529,7 @@ project-root/
 | **Venue Slugs**            | Auto-generated (name-6digits)     | Unique, short, SEO-friendly booking URLs             |
 | **Multi-location Support** | Venues table + assignments        | Each location gets unique booking page               |
 | **Public API Security**    | Whitelist fields only             | Only expose id, first_name, photo_url publicly       |
+| **TypeScript Types**       | Explicit interfaces, no `any`     | Type safety, better IDE support, fewer bugs          |
 
 ---
 
@@ -491,6 +538,7 @@ project-root/
 **October 2025:**
 
 - ✅ **Completed Phase 3.5: Scheduling System** 🎉
+
   - Built complete shift management system with calendar view
   - Implemented repeating shifts with conflict detection
   - Created team-venue assignment system
@@ -500,7 +548,21 @@ project-root/
   - Calendar grid showing all team members and their shifts
   - "Set Schedule" button opens modal for repeating shifts
   - Bulk team assignment to venues
+
+- ✅ **Enhanced Assignment System** 🆕
+
+  - Created `/api/admin/team/all-members` endpoint for fetching all team members
+  - Updated assignment modal to show ALL team members (not just unassigned)
+  - Pre-check boxes for already assigned members
+  - Allow unassignment by unchecking (sets `is_active: false`)
+  - Single modal for both assign and unassign operations
+  - Added comprehensive console logging for debugging
+  - Fixed `bulkUnassignTeamMembers` function implementation
+  - Fixed operation order (unassign first, then assign)
+  - Real-time calendar refresh after changes
+
 - ✅ **Fixed Critical Timezone Bugs**
+
   - Discovered Melbourne timezone (UTC+10/+11) was causing date shifts
   - Implemented UTC-safe date parsing throughout application
   - All dates now parsed with 'Z' suffix to force UTC interpretation
@@ -509,26 +571,36 @@ project-root/
   - Fixed date range showing only 6 days (now correctly shows 7)
   - Fixed shifts saving 1 day earlier than selected
   - Handles daylight saving time transitions automatically
+
 - ✅ **Technical Improvements**
+
   - Created `lib/shift-helpers.ts` with 30+ UTC-safe date utilities
-  - Implemented proper TypeScript types for scheduling
+  - Implemented proper TypeScript types for scheduling (eliminated all `any` types)
+  - Added proper interface types: `TeamMemberAssignment`, `QueryUser`, `QueryShift`
   - Fixed all useEffect dependency warnings
   - Fixed Supabase ambiguous relationship errors
   - Added refresh mechanism for real-time calendar updates
   - Optimized database queries with proper indexes
+  - Improved error handling with early returns
+  - Added user-friendly loading states and overlays
+
 - ✅ **Database Additions**
   - Added 4 new tables: venue_operating_hours, team_member_venues, shifts, venue_closed_days
   - Created unique constraints to prevent conflicts
   - Added indexes for performance optimization
-  - Implemented database functions and triggers
+  - Implemented soft delete pattern with `is_active` flag
+  - Preserved assignment history for auditing
 
 **Architecture Highlights:**
 
 - **Timezone-Safe by Design**: All date handling uses UTC methods to prevent bugs in Melbourne (UTC+10/+11)
 - **Flexible Scheduling**: Repeating shifts with conflict resolution options
 - **Multi-Venue Support**: Team members can work at multiple venues
+- **Smart Assignment System**: Single modal handles assign/unassign with pre-checked states
 - **Calendar View**: Industry-standard Mon-Sun weekly view
 - **Real-Time Updates**: Changes reflected immediately without page reload
+- **Type Safety**: Comprehensive TypeScript interfaces, no `any` types
+- **Audit Trail**: Soft deletes preserve assignment history
 
 ---
 
@@ -556,9 +628,49 @@ project-root/
 
 This applies to ANY timezone, not just Melbourne! The issue affects all locations during daylight saving transitions.
 
+### TypeScript Type Safety
+
+**Problem Discovered:**
+
+- Using `any` types in complex data structures led to runtime errors
+- Supabase query results have nested objects that need proper typing
+- Modal state management became error-prone without explicit types
+
+**Solution Implemented:**
+
+- Created explicit interfaces for all database query results
+- Added proper types for component props and state
+- Handled both array and single object returns from Supabase
+- Used type assertions only when necessary with proper validation
+
+**Key Principle:**
+
+> "Invest time in proper TypeScript types upfront—they catch bugs before they reach production."
+
+### Assignment System UX
+
+**Problem Discovered:**
+
+- Original modal only showed unassigned members
+- No way to see who was already assigned
+- Unassigning required separate workflow
+- Poor visibility into team assignments
+
+**Solution Implemented:**
+
+- Show ALL team members in single modal
+- Pre-check assigned members for visual feedback
+- Allow both assign and unassign in one operation
+- Added search and select all functionality
+- Comprehensive logging for debugging
+
+**Key Principle:**
+
+> "Users prefer a single interface that shows complete state rather than multiple fragmented views."
+
 ---
 
 **Document Status:** Living document - update as architecture evolves  
 **Next Review:** After Client Management completion  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Completed Scheduling System with Timezone-Safe Date Handling (Phase 3.5)
+**Last Major Change:** Enhanced Assignment System with TypeScript Improvements (Phase 3.5 Refinements)
