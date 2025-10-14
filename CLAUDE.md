@@ -142,7 +142,7 @@
 - **`user-photos`**: User profile photos
   - Public read access
   - Server-side upload/delete (via Service Role)
-  - Path: `{clerk_user_id}/{timestamp}-{filename}`
+  - Path: `{clerk_user_id}/{timestamp}-{filename}` or `clients/{timestamp}-{filename}`
 - **`team-member-photos`**: Team member profile photos
   - Public read access
   - Server-side upload/delete (via Service Role)
@@ -163,126 +163,6 @@
 - **Soft deletes:** `is_active` flag preserves assignment history for auditing
 - **No RLS policies:** Simpler maintenance, security enforced in application code
 - **Roles in database only:** No syncing complexity, instant updates
-
----
-
-## 🔄 Key Workflows
-
-### Workflow 8: Admin Manages Shifts ✅
-
-```
-Admin → Navigate to /admin/team → Scheduled Shifts tab
-  ↓
-Select venue from dropdown
-  ↓
-View week calendar (Mon-Sun)
-  - Displays all team members assigned to venue
-  - Shows existing shifts for each day
-  ↓
-Click "Set Schedule" for a team member
-  ↓
-Repeating Shifts Modal Opens:
-  - Select date range (start/end)
-  - Select days of week (Mon-Fri default)
-  - Set shift hours (10:00 AM - 6:00 PM default)
-  - Handle conflicts (skip or replace existing)
-  ↓
-Server Action: createRepeatingShifts()
-  - Generates shifts using UTC-safe date functions
-  - Dates remain as YYYY-MM-DD strings (no conversion!)
-  - Checks for existing shifts
-  - Inserts new shifts or skips conflicts
-  ↓
-✅ Shifts saved correctly to database
-✅ Calendar refreshes with new shifts
-✅ No timezone conversion bugs!
-```
-
-### Workflow 9: Assign/Unassign Team Members to Venue ✅
-
-```
-Admin → Click "Assign Team" button
-  ↓
-System fetches:
-  - ALL team members (via /api/admin/team/all-members)
-  - Currently assigned member IDs for this venue
-  ↓
-Modal opens showing ALL team members:
-  - ✅ Checked = Already assigned
-  - ☐ Unchecked = Not assigned
-  - Search/filter functionality
-  - Select All / Deselect All buttons
-  ↓
-Admin makes changes:
-  - Check boxes → Assign new members
-  - Uncheck boxes → Unassign members
-  - Can do both in one operation
-  ↓
-Click "Update Assignments"
-  ↓
-System calculates changes:
-  - toAssign = newly checked members
-  - toUnassign = newly unchecked members
-  ↓
-Server Actions execute in order:
-  1. bulkUnassignTeamMembers() - sets is_active: false
-  2. bulkAssignTeamMembers() - sets is_active: true
-  ↓
-✅ Calendar refreshes showing updated team
-✅ Modal shows correct states on reopen
-✅ Assignment history preserved in database
-```
-
----
-
-## 💻 Implementation Patterns
-
-### Timezone-Safe Date Handling Pattern ✅
-
-**Critical for Melbourne (UTC+10/+11):**
-
-```typescript
-// lib/shift-helpers.ts
-
-// ALWAYS parse dates in UTC to avoid timezone bugs
-function parseUTCDate(dateStr: string): Date {
-  return new Date(dateStr + 'T00:00:00Z'); // Z = UTC!
-}
-
-// ALWAYS use UTC methods
-export function getDayOfWeek(dateStr: string): number {
-  const date = parseUTCDate(dateStr);
-  return date.getUTCDay(); // Not .getDay()!
-}
-
-// ALWAYS format dates in UTC
-export function formatDate(date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-```
-
-**Why This Matters:**
-
-- Database stores dates as `YYYY-MM-DD` (no timezone)
-- JavaScript `new Date("2025-10-15")` interprets as local time
-- In Melbourne, this can shift the date by 1 day in UTC
-- Using UTC methods ensures dates stay correct year-round
-- Handles daylight saving transitions automatically
-
-**Example Bug Without UTC:**
-
-```typescript
-// ❌ WRONG: Timezone-dependent
-const date = new Date('2025-10-15T00:00:00'); // Melbourne time!
-date.getDay(); // Returns wrong day in UTC!
-
-// ✅ CORRECT: UTC-explicit
-const date = new Date('2025-10-15T00:00:00Z'); // UTC!
-date.getUTCDay(); // Always correct!
-```
 
 ---
 
@@ -346,7 +226,7 @@ date.getUTCDay(); // Always correct!
   - [x] Stats dashboard (total, active, inactive)
   - [x] Account claiming support for unregistered members
 
-### Phase 3.5: Scheduling System ✅ (COMPLETED) 🎉
+### Phase 3.5: Scheduling System ✅ (COMPLETED)
 
 - [x] **Database Schema**
   - [x] Venue operating hours table
@@ -368,47 +248,67 @@ date.getUTCDay(); // Always correct!
   - [x] Team-venue assignments (assign/unassign)
   - [x] Bulk operations for multiple team members
   - [x] Closed days management
-- [x] **API Endpoints**
-  - [x] `/api/admin/team/all-members` - Fetch all team members
-  - [x] `/api/public/team` - Public team data (privacy-safe)
 - [x] **UI Components**
   - [x] Venue selector dropdown
   - [x] Week navigator (prev/next/this week)
   - [x] Calendar grid view (Mon-Sun)
   - [x] Team member row with shifts
-  - [x] Assign venue modal (show all members, pre-check assigned)
+  - [x] Assign venue modal
   - [x] Repeating shifts modal
   - [x] Single shift modal (add/edit/delete)
-  - [x] Set Schedule button functionality
   - [x] Context menu for shift actions
-- [x] **Assignment System Enhancements** 🆕
-  - [x] Show ALL team members in assignment modal
-  - [x] Pre-check already assigned members
-  - [x] Unassign by unchecking (sets is_active: false)
-  - [x] Assign and unassign in single operation
-  - [x] Search/filter all members
-  - [x] Select All / Deselect All functionality
-  - [x] Comprehensive logging for debugging
-  - [x] Real-time calendar refresh after changes
-- [x] **Bug Fixes & Improvements**
-  - [x] Fixed timezone conversion bugs
-  - [x] Fixed calendar week display (Sat-Fri → Mon-Sun)
-  - [x] Fixed date range calculation (6 days → 7 days)
-  - [x] Fixed shift dates off by 1 day
-  - [x] Fixed Set Schedule button not opening modal
-  - [x] Fixed TypeScript type errors (no more `any` types)
-  - [x] Fixed useEffect dependency warnings
-  - [x] Fixed unassignment not working (added bulkUnassignTeamMembers)
-  - [x] Fixed modal not showing correct checkbox states
-  - [x] Fixed assignment order (unassign first, then assign)
 
-### Phase 4: Client Management (NEXT)
+### Phase 4: Client Management ✅ (COMPLETED)
 
-- [ ] Client list page with search/filter
-- [ ] "Add Client" form with validation
-- [ ] Client detail page
-- [ ] Client notes CRUD interface
-- [ ] Alert note management
+- [x] **Client List Page**
+  - [x] Table-based layout (Fresha-inspired design)
+  - [x] Search by name, email, phone
+  - [x] Filter by status (All, Registered, Unregistered)
+  - [x] Stats dashboard (Total, Registered, Unregistered, With Alerts)
+  - [x] Profile photos with gradient fallback
+  - [x] Alert note indicators with tooltips
+  - [x] Note count badges
+  - [x] Sales placeholder (£0.00 - ready for Phase 5)
+  - [x] Bulk selection checkboxes (ready for future)
+  - [x] Sortable columns
+  - [x] Created date display
+- [x] **Add Client Functionality**
+  - [x] Add client modal with form validation
+  - [x] Email uniqueness check
+  - [x] Photo upload (optional)
+  - [x] Alert note field for important warnings
+  - [x] Account claiming support (unregistered → registered)
+  - [x] Photo preview and removal
+- [x] **Edit Client Functionality**
+  - [x] Edit client modal
+  - [x] Update all client fields
+  - [x] Email is read-only (cannot be changed)
+  - [x] Photo management (upload/remove)
+  - [x] Alert note updates
+  - [x] Registration status display
+- [x] **Delete Client Functionality**
+  - [x] Delete unregistered clients only
+  - [x] Protection for registered clients (have active accounts)
+  - [x] Photo cleanup on deletion
+  - [x] Confirmation dialog
+- [x] **Client Filtering**
+  - [x] Show only pure clients (users with ONLY 'client' role)
+  - [x] Exclude team members (roles: ['client', 'team_member'])
+  - [x] Exclude admins (roles: ['client', 'admin'])
+  - [x] JavaScript-based filtering for reliability
+- [x] **UI/UX Improvements**
+  - [x] Fresha-inspired table design
+  - [x] Responsive grid layout
+  - [x] Hover effects and transitions
+  - [x] Icon-only action buttons
+  - [x] Gradient avatars for clients without photos
+  - [x] Visual indicators for alerts and notes
+  - [x] Clean, professional appearance
+
+**Still TODO for Phase 4:**
+
+- [ ] Client detail page (individual client view)
+- [ ] Client notes CRUD interface (separate notes table)
 - [ ] Client tags/categories
 - [ ] Client communication history
 - [ ] Booking history view
@@ -440,6 +340,7 @@ project-root/
 │   │   ├── profile.ts                # ✅ Profile update server action
 │   │   ├── admin.ts                  # ✅ Admin operations (users, roles)
 │   │   ├── team-members.ts           # ✅ Team member management
+│   │   ├── clients.ts                # ✅ Client CRUD operations
 │   │   ├── venues.ts                 # ✅ Venue CRUD operations
 │   │   ├── shifts.ts                 # ✅ Shift CRUD + repeating shifts
 │   │   ├── venue-hours.ts            # ✅ Venue hours management
@@ -464,7 +365,7 @@ project-root/
 │   │   ├── team/
 │   │   │   └── page.tsx              # ✅ Team + Scheduling tabs
 │   │   └── clients/
-│   │       └── page.tsx              # Client list (TODO)
+│   │       └── page.tsx              # ✅ Client list page
 │   └── middleware.ts                 # ✅ Route protection
 ├── components/
 │   ├── admin/
@@ -472,6 +373,11 @@ project-root/
 │   │   ├── navbar.tsx                # ✅ Admin navbar
 │   │   ├── admin-layout.tsx          # ✅ Layout wrapper
 │   │   ├── marketplace/              # ✅ Venue components
+│   │   ├── clients/
+│   │   │   ├── client-list-client.tsx # ✅ Client list table
+│   │   │   ├── add-client-modal.tsx   # ✅ Add client modal
+│   │   │   ├── edit-client-modal.tsx  # ✅ Edit client modal
+│   │   │   └── index.ts               # ✅ Exports
 │   │   └── team/
 │   │       ├── team-list-client.tsx  # ✅ Team member list
 │   │       ├── team-member-modal.tsx # ✅ Add/Edit team modal
@@ -503,33 +409,29 @@ project-root/
 
 ## 🎯 Critical Decisions Summary
 
-| Decision                   | Choice                            | Rationale                                            |
-| -------------------------- | --------------------------------- | ---------------------------------------------------- |
-| **Data Access Pattern**    | Service Role (server-side)        | Simpler, more secure, easier to maintain             |
-| **Authorization Pattern**  | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing  |
-| **Role Storage**           | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler      |
-| **Role Changes**           | Immediate (no re-auth)            | Better UX, middleware queries DB on each request     |
-| **Client Data Access**     | Server-side with filtering        | Users access own data via filtered queries           |
-| **RLS Policies**           | Disabled                          | Not needed with Service Role                         |
-| **User Table Structure**   | Unified table with roles array    | Handles role transitions, single source of truth     |
-| **Authentication**         | Clerk                             | Industry standard, OAuth support, handles auth only  |
-| **Timezone Handling**      | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11), handles DST |
-| **Date Storage**           | YYYY-MM-DD strings                | No timezone, consistent across all systems           |
-| **Date Parsing**           | Always add 'Z' suffix             | Forces UTC interpretation, no local timezone issues  |
-| **Date Methods**           | Use getUTCDay(), setUTCDate()     | Ensures consistent behavior regardless of local time |
-| **Week Format**            | Monday-Sunday (ISO 8601)          | Industry standard, aligns with business week         |
-| **Shift Constraints**      | Unique per team/venue/date        | Prevents double-booking, ensures data integrity      |
-| **Team-Venue Assignments** | Soft delete (is_active flag)      | Preserves history, allows reactivation, auditing     |
-| **Assignment Modal**       | Show ALL members, pre-check       | Better UX, single modal for all operations           |
-| **Unassignment**           | Set is_active: false              | Preserves history, maintains referential integrity   |
-| **Closed Days**            | Separate table with recurrence    | Supports one-time and recurring closures             |
-| **Conflict Resolution**    | User choice (skip or replace)     | Flexible, prevents accidental data loss              |
-| **Calendar View**          | Weekly grid Mon-Sun               | Standard business view, matches team expectations    |
-| **Performance Trade-off**  | +5-10ms per request (DB query)    | Worth it for simplicity and instant updates          |
-| **Venue Slugs**            | Auto-generated (name-6digits)     | Unique, short, SEO-friendly booking URLs             |
-| **Multi-location Support** | Venues table + assignments        | Each location gets unique booking page               |
-| **Public API Security**    | Whitelist fields only             | Only expose id, first_name, photo_url publicly       |
-| **TypeScript Types**       | Explicit interfaces, no `any`     | Type safety, better IDE support, fewer bugs          |
+| Decision                  | Choice                            | Rationale                                              |
+| ------------------------- | --------------------------------- | ------------------------------------------------------ |
+| **Data Access Pattern**   | Service Role (server-side)        | Simpler, more secure, easier to maintain               |
+| **Authorization Pattern** | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing    |
+| **Role Storage**          | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler        |
+| **Role Changes**          | Immediate (no re-auth)            | Better UX, middleware queries DB on each request       |
+| **Client Data Access**    | Server-side with filtering        | Users access own data via filtered queries             |
+| **RLS Policies**          | Disabled                          | Not needed with Service Role                           |
+| **User Table Structure**  | Unified table with roles array    | Handles role transitions, single source of truth       |
+| **Authentication**        | Clerk                             | Industry standard, OAuth support, handles auth only    |
+| **Timezone Handling**     | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11), handles DST   |
+| **Date Storage**          | YYYY-MM-DD strings                | No timezone, consistent across all systems             |
+| **Date Parsing**          | Always add 'Z' suffix             | Forces UTC interpretation, no local timezone issues    |
+| **Date Methods**          | Use getUTCDay(), setUTCDate()     | Ensures consistent behavior regardless of local time   |
+| **Week Format**           | Monday-Sunday (ISO 8601)          | Industry standard, aligns with business week           |
+| **Client Filtering**      | Fetch + Filter in JavaScript      | Reliable for <10K records, easier to maintain          |
+| **Array Filtering**       | JavaScript over PostgREST         | PostgREST array syntax is tricky and version-dependent |
+| **Performance Trade-off** | Slight over-fetching acceptable   | <100ms impact for typical salon, optimize when needed  |
+| **Client Photos**         | Optional, gradient fallback       | Professional appearance, not all clients need photos   |
+| **Table Design**          | Fresha-inspired columns           | Clean, scannable, industry-standard UX                 |
+| **Registered Clients**    | Cannot be deleted                 | Protects users with active accounts                    |
+| **Sales Column**          | Show £0.00 placeholder            | Indicates feature exists, ready for Phase 5            |
+| **TypeScript Types**      | Explicit interfaces, no `any`     | Type safety, better IDE support, fewer bugs            |
 
 ---
 
@@ -537,74 +439,106 @@ project-root/
 
 **October 2025:**
 
-- ✅ **Completed Phase 3.5: Scheduling System** 🎉
+- ✅ **Completed Phase 4: Client Management** 🎉
 
-  - Built complete shift management system with calendar view
-  - Implemented repeating shifts with conflict detection
-  - Created team-venue assignment system
-  - Added venue operating hours management
-  - Implemented venue closed days tracking
-  - Built week navigation (Mon-Sun format)
-  - Calendar grid showing all team members and their shifts
-  - "Set Schedule" button opens modal for repeating shifts
-  - Bulk team assignment to venues
+  - Built complete client list page with table-based UI
+  - Implemented add, edit, delete functionality for clients
+  - Added photo upload and management for client profiles
+  - Created alert note system for important client warnings
+  - Built stats dashboard (Total, Registered, Unregistered, With Alerts)
+  - Implemented search and filter functionality
+  - Added bulk selection checkboxes (ready for future bulk actions)
+  - Sales column placeholder (£0.00 - ready for booking integration)
 
-- ✅ **Enhanced Assignment System** 🆕
+- ✅ **Client Filtering Architecture**
 
-  - Created `/api/admin/team/all-members` endpoint for fetching all team members
-  - Updated assignment modal to show ALL team members (not just unassigned)
-  - Pre-check boxes for already assigned members
-  - Allow unassignment by unchecking (sets `is_active: false`)
-  - Single modal for both assign and unassign operations
-  - Added comprehensive console logging for debugging
-  - Fixed `bulkUnassignTeamMembers` function implementation
-  - Fixed operation order (unassign first, then assign)
-  - Real-time calendar refresh after changes
+  - Fetch users with 'client' role from database
+  - Filter in JavaScript to get pure clients only
+  - Exclude team members (roles: ['client', 'team_member'])
+  - Exclude admins (roles: ['client', 'admin'])
+  - Reliable approach for typical salon sizes (<10,000 clients)
+  - Can optimize with database function if needed at scale
 
-- ✅ **Fixed Critical Timezone Bugs**
+- ✅ **UI/UX Improvements**
 
-  - Discovered Melbourne timezone (UTC+10/+11) was causing date shifts
-  - Implemented UTC-safe date parsing throughout application
-  - All dates now parsed with 'Z' suffix to force UTC interpretation
-  - Changed all date methods to UTC versions (getUTCDay, setUTCDate, etc.)
-  - Fixed calendar week display (was showing Sat-Fri, now Mon-Sun)
-  - Fixed date range showing only 6 days (now correctly shows 7)
-  - Fixed shifts saving 1 day earlier than selected
-  - Handles daylight saving time transitions automatically
+  - Fresha-inspired table design with proper HTML table structure
+  - Gradient purple avatars for clients without photos
+  - Alert indicators with hover tooltips
+  - Note count badges showing client notes
+  - Icon-only action buttons (Edit, Delete)
+  - Responsive layout with proper column alignment
+  - Clean, professional appearance
+  - Hover effects and smooth transitions
 
-- ✅ **Technical Improvements**
+- ✅ **Photo Management**
 
-  - Created `lib/shift-helpers.ts` with 30+ UTC-safe date utilities
-  - Implemented proper TypeScript types for scheduling (eliminated all `any` types)
-  - Added proper interface types: `TeamMemberAssignment`, `QueryUser`, `QueryShift`
-  - Fixed all useEffect dependency warnings
-  - Fixed Supabase ambiguous relationship errors
-  - Added refresh mechanism for real-time calendar updates
-  - Optimized database queries with proper indexes
-  - Improved error handling with early returns
-  - Added user-friendly loading states and overlays
+  - Upload client photos during creation
+  - Edit/remove photos in edit modal
+  - Photos stored in `user-photos` bucket under `clients/` folder
+  - Automatic cleanup on client deletion
+  - 5MB size limit with validation
+  - Preview before upload
 
-- ✅ **Database Additions**
-  - Added 4 new tables: venue_operating_hours, team_member_venues, shifts, venue_closed_days
-  - Created unique constraints to prevent conflicts
-  - Added indexes for performance optimization
-  - Implemented soft delete pattern with `is_active` flag
-  - Preserved assignment history for auditing
+- ✅ **Technical Implementations**
+  - Server actions: `createClient()`, `updateClient()`, `deleteClient()`, `deleteClientPhoto()`
+  - JavaScript-based role filtering (reliable and maintainable)
+  - Photo upload with Buffer conversion for Supabase
+  - Form validation and error handling
+  - Hydration error fix for date formatting
+  - Email uniqueness validation
+  - Protection against deleting registered clients
 
-**Architecture Highlights:**
+**Previous Updates (Phase 3.5: Scheduling System):**
 
-- **Timezone-Safe by Design**: All date handling uses UTC methods to prevent bugs in Melbourne (UTC+10/+11)
-- **Flexible Scheduling**: Repeating shifts with conflict resolution options
-- **Multi-Venue Support**: Team members can work at multiple venues
-- **Smart Assignment System**: Single modal handles assign/unassign with pre-checked states
-- **Calendar View**: Industry-standard Mon-Sun weekly view
-- **Real-Time Updates**: Changes reflected immediately without page reload
-- **Type Safety**: Comprehensive TypeScript interfaces, no `any` types
-- **Audit Trail**: Soft deletes preserve assignment history
+- ✅ Built complete shift management system with calendar view
+- ✅ Implemented repeating shifts with conflict detection
+- ✅ Created team-venue assignment system
+- ✅ Fixed critical timezone bugs (Melbourne UTC+10/+11)
+- ✅ Implemented UTC-safe date utilities
+- ✅ Enhanced assignment system with pre-check states
+- ✅ Real-time calendar refresh after changes
 
 ---
 
 ## 🔮 Lessons Learned
+
+### Client Role Filtering
+
+**Problem Discovered:**
+
+- PostgREST array operators are tricky and version-dependent
+- `.not('roles', 'cs', '{team_member}')` syntax confusing
+- `cs` (contains), `cd` (contained by), `ov` (overlaps) operators unclear
+- Array negation doesn't always work as expected
+
+**Solution Implemented:**
+
+- Fetch all users with 'client' role first
+- Filter in JavaScript to exclude team members and admins
+- More reliable and easier to debug
+- Performance negligible for typical salon size (<10K clients)
+
+**Key Principle:**
+
+> "For small to medium datasets (<10K records), JavaScript filtering after fetch is more maintainable than complex database queries. Optimize when you have real performance data."
+
+### Date Formatting Hydration
+
+**Problem Discovered:**
+
+- `toLocaleDateString()` without locale caused hydration mismatch
+- Server used one locale (AU: DD/MM/YYYY), client used another (US: MM/DD/YYYY)
+- React hydration error: "text didn't match the client"
+
+**Solution Implemented:**
+
+- Always specify locale in `toLocaleDateString('en-US', {...})`
+- Consistent formatting on both server and client
+- Prevents hydration mismatches
+
+**Key Principle:**
+
+> "Always specify locale and format options for date/time rendering to ensure server-client consistency."
 
 ### Timezone Handling in Melbourne
 
@@ -620,13 +554,10 @@ project-root/
 - Always use UTC methods: `getUTCDay()`, `setUTCDate()`, `getUTCFullYear()`
 - Never use local timezone methods: `getDay()`, `setDate()`, `getFullYear()`
 - Keep dates as YYYY-MM-DD strings throughout application
-- No Date object conversions in browser or server until final display
 
 **Key Principle:**
 
 > "When working with dates in databases, always think in UTC, never in local time."
-
-This applies to ANY timezone, not just Melbourne! The issue affects all locations during daylight saving transitions.
 
 ### TypeScript Type Safety
 
@@ -647,30 +578,9 @@ This applies to ANY timezone, not just Melbourne! The issue affects all location
 
 > "Invest time in proper TypeScript types upfront—they catch bugs before they reach production."
 
-### Assignment System UX
-
-**Problem Discovered:**
-
-- Original modal only showed unassigned members
-- No way to see who was already assigned
-- Unassigning required separate workflow
-- Poor visibility into team assignments
-
-**Solution Implemented:**
-
-- Show ALL team members in single modal
-- Pre-check assigned members for visual feedback
-- Allow both assign and unassign in one operation
-- Added search and select all functionality
-- Comprehensive logging for debugging
-
-**Key Principle:**
-
-> "Users prefer a single interface that shows complete state rather than multiple fragmented views."
-
 ---
 
 **Document Status:** Living document - update as architecture evolves  
-**Next Review:** After Client Management completion  
+**Next Review:** After Booking System (Phase 5) planning  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Enhanced Assignment System with TypeScript Improvements (Phase 3.5 Refinements)
+**Last Major Change:** Completed Phase 4 - Client Management (October 2025)
