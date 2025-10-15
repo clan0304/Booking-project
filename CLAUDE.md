@@ -137,7 +137,48 @@
 - Unique constraint: (venue_id, closed_date)
 - **Purpose:** Mark venue closures, prevent bookings on closed days
 
-**9. Supabase Storage Buckets**
+**9. Service Categories Table** ✅
+
+- Organizes services into categories
+- Fields: id, name, description, color (hex), display_order, is_active, timestamps
+- Indexes on: is_active + display_order, name
+- **Purpose:** Group services (e.g., Hair, Nails, Beauty)
+
+**10. Services Table** ✅
+
+- Stores all service offerings with three types
+- Fields: id, name, category_id (FK), description, parent_service_id (FK), type (service/variant_group/bundle), price_type (fixed/from), price, duration_minutes, is_bookable, display_order, is_active, created_by, timestamps
+- Types:
+  - `service`: Regular bookable service or variant option
+  - `variant_group`: Parent service with variants (shows modal on booking)
+  - `bundle`: Package with multiple services
+- Indexes on: category_id, type, parent_service_id, is_active, is_bookable, display_order
+- **Purpose:** Core service catalog with flexible pricing models
+
+**11. Bundle Items Table** ✅
+
+- Links services to bundle packages
+- Fields: id, bundle_id (FK), service_id (FK), sequence_order, timestamps
+- Unique constraint: (bundle_id, service_id)
+- Check constraint: bundle_id != service_id
+- **Purpose:** Define which services are included in bundles
+
+**12. Service Venues Table** ✅
+
+- Junction table for service-venue availability
+- Fields: id, service_id (FK), venue_id (FK), is_active, timestamps
+- Unique constraint: (service_id, venue_id)
+- **Purpose:** Control which services are available at which venues
+
+**13. Service Team Members Table** ✅
+
+- Junction table with custom pricing support
+- Fields: id, service_id (FK), team_member_id (FK), custom_price (nullable), custom_duration_minutes (nullable), is_active, timestamps
+- Unique constraint: (service_id, team_member_id)
+- **Purpose:** Assign services to team members with optional custom pricing
+- **Key Feature:** NULL values use service defaults, set values override
+
+**14. Supabase Storage Buckets**
 
 - **`user-photos`**: User profile photos
   - Public read access
@@ -160,6 +201,8 @@
 - **Venues table:** Supports multi-location businesses, unique booking URLs per venue
 - **Scheduling tables:** Flexible shift management with venue assignments
 - **Closed days tracking:** Prevents conflicts and handles special closures
+- **Service architecture:** Flexible three-type system handles variants and bundles elegantly
+- **Custom pricing per team member:** Allows individualized rates without duplicating services
 - **Soft deletes:** `is_active` flag preserves assignment history for auditing
 - **No RLS policies:** Simpler maintenance, security enforced in application code
 - **Roles in database only:** No syncing complexity, instant updates
@@ -313,17 +356,99 @@
 - [ ] Client communication history
 - [ ] Booking history view
 
+### Phase 4.5: Service Management ✅ (COMPLETED)
+
+- [x] **Database Schema**
+  - [x] Service categories table with color coding
+  - [x] Services table with three types (service/variant_group/bundle)
+  - [x] Bundle items junction table
+  - [x] Service venues assignment table
+  - [x] Service team members with custom pricing
+  - [x] Helper functions (get_effective_price, get_effective_duration, get_service_variants)
+  - [x] Updated_at triggers for all tables
+- [x] **Service Categories Management**
+  - [x] Create, edit, delete categories
+  - [x] Color picker with 12 preset colors
+  - [x] Category display order
+  - [x] Category grouping in sidebar
+  - [x] Service count per category
+  - [x] Double-click to edit category
+- [x] **Services Management**
+  - [x] Three service types support:
+    - [x] Regular Service (standalone bookable)
+    - [x] Service with Variants (shows variant options modal)
+    - [x] Service Bundle (package of multiple services)
+  - [x] 2-step service creation/editing modal:
+    - [x] Step 1: Basic info (type, name, category, description, price, duration)
+    - [x] Step 2: Locations & team members
+  - [x] Price types: Fixed or "From" pricing
+  - [x] Duration selection (15min to 3h in intervals)
+  - [x] Venue assignments (select which locations offer service)
+  - [x] Team member assignments (select who can perform service)
+  - [x] Service search by name
+  - [x] Filter by category
+  - [x] Edit existing services
+  - [x] Delete services (soft delete)
+  - [x] Service card display with type indicators
+- [x] **Variants System**
+  - [x] Add variants to variant group services
+  - [x] Variant list modal showing all options
+  - [x] Delete individual variants
+  - [x] Calculated "from" pricing (min variant price)
+  - [x] Variant-specific pricing and duration
+  - [x] Visual display: "from £X" for variant groups
+- [x] **Custom Pricing per Team Member**
+  - [x] CustomPricingModal component
+  - [x] Override service default price per team member
+  - [x] Override service default duration per team member
+  - [x] Enable/disable custom pricing with checkboxes
+  - [x] Reset to default button
+  - [x] Visual indicators:
+    - [x] "Custom" badge on team members with custom pricing
+    - [x] "Customize" button for each selected team member
+  - [x] Service default display for reference
+  - [x] Auto-refresh after pricing changes
+- [x] **Server Actions**
+  - [x] getCategories, createCategory, updateCategory, deleteCategory
+  - [x] getServices, getServiceById, createService, updateService, deleteService
+  - [x] getServiceVariants, createVariant, deleteVariant
+  - [x] assignServiceVenues, assignServiceTeamMembers
+  - [x] updateTeamMemberCustomPricing, resetTeamMemberToDefault
+  - [x] getAllVenues, getAllTeamMembers (helper functions)
+- [x] **Technical Improvements**
+  - [x] TypeScript type safety (no 'any' types)
+  - [x] Proper interface definitions for nested data
+  - [x] useCallback for data fetching functions
+  - [x] useEffect dependency warnings resolved
+  - [x] State synchronization on modal open/close
+  - [x] Loading states during mutations
+  - [x] Router.refresh() integration for real-time updates
+  - [x] Props usage instead of state for list data
+- [x] **UI/UX Features**
+  - [x] Category sidebar with service counts
+  - [x] Service cards with type badges
+  - [x] Search functionality
+  - [x] Category filtering
+  - [x] Loading overlay during refresh
+  - [x] Disabled states during operations
+  - [x] Error handling and display
+  - [x] Confirmation dialogs for deletions
+  - [x] Modal-based workflows for all operations
+  - [x] Clean, professional Fresha-inspired design
+
 ### Phase 5: Booking System (FUTURE)
 
-- [ ] Services table design
-- [ ] Service categories
 - [ ] Appointment booking schema
 - [ ] Booking flow for clients
-- [ ] Availability management based on shifts
+- [ ] Availability management based on shifts and services
 - [ ] Email notifications
 - [ ] SMS reminders
 - [ ] Booking confirmations
+- [ ] Payment integration
 - [ ] Public booking pages (using venue slugs)
+- [ ] Calendar view for appointments
+- [ ] Conflict detection and resolution
+- [ ] Cancellation and rescheduling
 
 ---
 
@@ -345,7 +470,8 @@ project-root/
 │   │   ├── shifts.ts                 # ✅ Shift CRUD + repeating shifts
 │   │   ├── venue-hours.ts            # ✅ Venue hours management
 │   │   ├── team-venue-assignments.ts # ✅ Assign/unassign team to venues
-│   │   └── venue-closed-days.ts      # ✅ Closed days management
+│   │   ├── venue-closed-days.ts      # ✅ Closed days management
+│   │   └── services.ts               # ✅ Services, categories, variants, custom pricing
 │   ├── api/
 │   │   ├── webhooks/
 │   │   │   └── clerk/
@@ -364,8 +490,10 @@ project-root/
 │   │   │   └── page.tsx              # ✅ Venues management
 │   │   ├── team/
 │   │   │   └── page.tsx              # ✅ Team + Scheduling tabs
-│   │   └── clients/
-│   │       └── page.tsx              # ✅ Client list page
+│   │   ├── clients/
+│   │   │   └── page.tsx              # ✅ Client list page
+│   │   └── services/
+│   │       └── page.tsx              # ✅ Services management
 │   └── middleware.ts                 # ✅ Route protection
 ├── components/
 │   ├── admin/
@@ -378,6 +506,17 @@ project-root/
 │   │   │   ├── add-client-modal.tsx   # ✅ Add client modal
 │   │   │   ├── edit-client-modal.tsx  # ✅ Edit client modal
 │   │   │   └── index.ts               # ✅ Exports
+│   │   ├── services/
+│   │   │   ├── service-list-client.tsx # ✅ Services list with categories
+│   │   │   ├── service-card.tsx        # ✅ Individual service card
+│   │   │   ├── add-category-modal.tsx  # ✅ Create category
+│   │   │   ├── edit-category-modal.tsx # ✅ Edit/delete category
+│   │   │   ├── add-service-modal.tsx   # ✅ Create service (2 steps)
+│   │   │   ├── edit-service-modal.tsx  # ✅ Edit/delete service (2 steps)
+│   │   │   ├── add-variant-modal.tsx   # ✅ Add variant to service
+│   │   │   ├── variant-list-modal.tsx  # ✅ View/manage variants
+│   │   │   ├── custom-pricing-modal.tsx # ✅ Team member custom pricing
+│   │   │   └── index.ts                # ✅ Exports
 │   │   └── team/
 │   │       ├── team-list-client.tsx  # ✅ Team member list
 │   │       ├── team-member-modal.tsx # ✅ Add/Edit team modal
@@ -402,36 +541,39 @@ project-root/
     └── migrations/
         ├── 001_initial_schema.sql    # ✅ Users, notes, team
         ├── 002_venues.sql            # ✅ Venues + slug generator
-        └── 003_scheduling_system.sql # ✅ Shifts, hours, assignments
+        ├── 003_scheduling_system.sql # ✅ Shifts, hours, assignments
+        └── 004_services_system.sql   # ✅ Services, categories, pricing
 ```
 
 ---
 
 ## 🎯 Critical Decisions Summary
 
-| Decision                  | Choice                            | Rationale                                              |
-| ------------------------- | --------------------------------- | ------------------------------------------------------ |
-| **Data Access Pattern**   | Service Role (server-side)        | Simpler, more secure, easier to maintain               |
-| **Authorization Pattern** | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing    |
-| **Role Storage**          | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler        |
-| **Role Changes**          | Immediate (no re-auth)            | Better UX, middleware queries DB on each request       |
-| **Client Data Access**    | Server-side with filtering        | Users access own data via filtered queries             |
-| **RLS Policies**          | Disabled                          | Not needed with Service Role                           |
-| **User Table Structure**  | Unified table with roles array    | Handles role transitions, single source of truth       |
-| **Authentication**        | Clerk                             | Industry standard, OAuth support, handles auth only    |
-| **Timezone Handling**     | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11), handles DST   |
-| **Date Storage**          | YYYY-MM-DD strings                | No timezone, consistent across all systems             |
-| **Date Parsing**          | Always add 'Z' suffix             | Forces UTC interpretation, no local timezone issues    |
-| **Date Methods**          | Use getUTCDay(), setUTCDate()     | Ensures consistent behavior regardless of local time   |
-| **Week Format**           | Monday-Sunday (ISO 8601)          | Industry standard, aligns with business week           |
-| **Client Filtering**      | Fetch + Filter in JavaScript      | Reliable for <10K records, easier to maintain          |
-| **Array Filtering**       | JavaScript over PostgREST         | PostgREST array syntax is tricky and version-dependent |
-| **Performance Trade-off** | Slight over-fetching acceptable   | <100ms impact for typical salon, optimize when needed  |
-| **Client Photos**         | Optional, gradient fallback       | Professional appearance, not all clients need photos   |
-| **Table Design**          | Fresha-inspired columns           | Clean, scannable, industry-standard UX                 |
-| **Registered Clients**    | Cannot be deleted                 | Protects users with active accounts                    |
-| **Sales Column**          | Show £0.00 placeholder            | Indicates feature exists, ready for Phase 5            |
-| **TypeScript Types**      | Explicit interfaces, no `any`     | Type safety, better IDE support, fewer bugs            |
+| Decision                     | Choice                            | Rationale                                              |
+| ---------------------------- | --------------------------------- | ------------------------------------------------------ |
+| **Data Access Pattern**      | Service Role (server-side)        | Simpler, more secure, easier to maintain               |
+| **Authorization Pattern**    | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing    |
+| **Role Storage**             | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler        |
+| **Role Changes**             | Immediate (no re-auth)            | Better UX, middleware queries DB on each request       |
+| **Client Data Access**       | Server-side with filtering        | Users access own data via filtered queries             |
+| **RLS Policies**             | Disabled                          | Not needed with Service Role                           |
+| **User Table Structure**     | Unified table with roles array    | Handles role transitions, single source of truth       |
+| **Authentication**           | Clerk                             | Industry standard, OAuth support, handles auth only    |
+| **Timezone Handling**        | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11), handles DST   |
+| **Date Storage**             | YYYY-MM-DD strings                | No timezone, consistent across all systems             |
+| **Date Parsing**             | Always add 'Z' suffix             | Forces UTC interpretation, no local timezone issues    |
+| **Date Methods**             | Use getUTCDay(), setUTCDate()     | Ensures consistent behavior regardless of local time   |
+| **Week Format**              | Monday-Sunday (ISO 8601)          | Industry standard, aligns with business week           |
+| **Client Filtering**         | Fetch + Filter in JavaScript      | Reliable for <10K records, easier to maintain          |
+| **Array Filtering**          | JavaScript over PostgREST         | PostgREST array syntax is tricky and version-dependent |
+| **Performance Trade-off**    | Slight over-fetching acceptable   | <100ms impact for typical salon, optimize when needed  |
+| **Service Types**            | Three-type system                 | Flexible: regular, variants, bundles                   |
+| **Variant Groups**           | Parent-child relationship         | Clean hierarchy, calculated pricing                    |
+| **Custom Pricing**           | NULL = default, value = override  | Flexible per-stylist rates without duplication         |
+| **Service State Management** | Props over state                  | Auto-updates after router.refresh()                    |
+| **Modal Workflows**          | Multi-step for complex forms      | Better UX, logical grouping                            |
+| **Loading States**           | Show during data refresh          | Clear user feedback, prevents confusion                |
+| **TypeScript Types**         | Explicit interfaces, no `any`     | Type safety, better IDE support, fewer bugs            |
 
 ---
 
@@ -439,68 +581,166 @@ project-root/
 
 **October 2025:**
 
-- ✅ **Completed Phase 4: Client Management** 🎉
+- ✅ **Completed Phase 4.5: Service Management** 🎉
 
-  - Built complete client list page with table-based UI
-  - Implemented add, edit, delete functionality for clients
-  - Added photo upload and management for client profiles
-  - Created alert note system for important client warnings
-  - Built stats dashboard (Total, Registered, Unregistered, With Alerts)
-  - Implemented search and filter functionality
-  - Added bulk selection checkboxes (ready for future bulk actions)
-  - Sales column placeholder (£0.00 - ready for booking integration)
+  - Built complete service catalog system with categories
+  - Implemented three service types: Regular, Variants, Bundles
+  - Created variant management for services with options
+  - Built custom pricing system for individual team members
+  - Implemented venue and team member assignments
+  - Added search and category filtering
+  - Created 8 modal components for service operations
+  - Real-time updates with loading states
 
-- ✅ **Client Filtering Architecture**
+- ✅ **Service Architecture**
 
-  - Fetch users with 'client' role from database
-  - Filter in JavaScript to get pure clients only
-  - Exclude team members (roles: ['client', 'team_member'])
-  - Exclude admins (roles: ['client', 'admin'])
-  - Reliable approach for typical salon sizes (<10,000 clients)
-  - Can optimize with database function if needed at scale
+  - Flexible three-type system handles different service models
+  - Variant groups show "from" pricing calculated from minimum variant
+  - Bundle support ready for future implementation
+  - Services can be assigned to specific venues
+  - Services can be assigned to specific team members
+  - Custom pricing overrides at team member level
 
-- ✅ **UI/UX Improvements**
+- ✅ **Custom Pricing Feature**
 
-  - Fresha-inspired table design with proper HTML table structure
-  - Gradient purple avatars for clients without photos
-  - Alert indicators with hover tooltips
-  - Note count badges showing client notes
-  - Icon-only action buttons (Edit, Delete)
-  - Responsive layout with proper column alignment
-  - Clean, professional appearance
-  - Hover effects and smooth transitions
+  - Team members can have custom rates per service
+  - Override both price and duration independently
+  - NULL values use service defaults (automatic updates)
+  - Set values are locked (won't change with service updates)
+  - Visual indicators (badges, buttons) for custom pricing
+  - Reset to default functionality
+  - Separate modal for clean UX
 
-- ✅ **Photo Management**
+- ✅ **Technical Quality**
 
-  - Upload client photos during creation
-  - Edit/remove photos in edit modal
-  - Photos stored in `user-photos` bucket under `clients/` folder
-  - Automatic cleanup on client deletion
-  - 5MB size limit with validation
-  - Preview before upload
+  - Complete TypeScript type safety (no 'any' types)
+  - Proper interfaces for nested Supabase data
+  - useCallback for functions used in useEffect
+  - State synchronization patterns for edit modals
+  - Loading states and router refresh integration
+  - Props usage for list data (auto-updates)
 
-- ✅ **Technical Implementations**
-  - Server actions: `createClient()`, `updateClient()`, `deleteClient()`, `deleteClientPhoto()`
-  - JavaScript-based role filtering (reliable and maintainable)
-  - Photo upload with Buffer conversion for Supabase
-  - Form validation and error handling
-  - Hydration error fix for date formatting
-  - Email uniqueness validation
-  - Protection against deleting registered clients
+- ✅ **UI/UX Excellence**
+  - Category sidebar with colored indicators
+  - Service cards showing type badges
+  - 2-step modals for complex forms
+  - Loading overlays during operations
+  - Search and filter functionality
+  - Confirmation dialogs for destructive actions
+  - Clean, professional Fresha-inspired design
+  - Persistent "Customize" buttons for clarity
 
-**Previous Updates (Phase 3.5: Scheduling System):**
+**Previous Updates:**
 
-- ✅ Built complete shift management system with calendar view
-- ✅ Implemented repeating shifts with conflict detection
-- ✅ Created team-venue assignment system
-- ✅ Fixed critical timezone bugs (Melbourne UTC+10/+11)
-- ✅ Implemented UTC-safe date utilities
-- ✅ Enhanced assignment system with pre-check states
-- ✅ Real-time calendar refresh after changes
+- ✅ **Completed Phase 4: Client Management** (October 2025)
+- ✅ **Completed Phase 3.5: Scheduling System** (October 2025)
+- ✅ **Completed Phase 3: Admin Panel** (October 2025)
 
 ---
 
 ## 🔮 Lessons Learned
+
+### Modal State Synchronization
+
+**Problem Discovered:**
+
+- Edit modals initialized state from props only on first render
+- When data updated after submission, modal state didn't sync
+- `useState(initialValue)` ignores new prop values after first render
+- Had to refresh entire page to see updated values in edit modal
+
+**Solution Implemented:**
+
+- Added `useEffect` to sync state when modal opens or props change
+- Reset all form fields from props when `isOpen` becomes true
+- Monitors both `isOpen` and data props in dependency array
+- Clears error states and resets UI when modal opens
+
+```typescript
+useEffect(() => {
+  if (isOpen) {
+    setName(category.name);
+    setDescription(category.description || '');
+    setSelectedColor(category.color);
+    setError('');
+  }
+}, [isOpen, category]);
+```
+
+**Key Principle:**
+
+> "Edit modals must sync state with props when opened. `useState` initial values only run once—use `useEffect` to re-sync when props change."
+
+### List State Management with Router Refresh
+
+**Problem Discovered:**
+
+- List component stored data in state: `const [services] = useState(initialServices)`
+- After mutations, `router.refresh()` fetched new data from server
+- Parent component re-rendered with fresh props
+- But child component's state never updated (stale data)
+- UI showed old values until full page refresh
+
+**Solution Implemented:**
+
+- Changed from state to direct props usage: `const services = initialServices`
+- Removed unnecessary state that duplicates props
+- Now when parent re-renders with new data, child automatically shows it
+- `router.refresh()` pattern works perfectly
+
+```typescript
+// ❌ BEFORE: State never updates
+const [services] = useState(initialServices);
+
+// ✅ AFTER: Auto-updates with props
+const services = initialServices;
+```
+
+**Key Principle:**
+
+> "Don't store props in state if you want automatic updates. Use props directly—they update when parent re-renders. Reserve state for UI-only values like search queries."
+
+### Service Types Architecture
+
+**Decision Made:**
+
+- Three service types in one table with `type` field
+- `service`: Regular bookable service or variant option
+- `variant_group`: Parent showing variant options modal (not directly bookable)
+- `bundle`: Package of multiple services
+
+**Why This Works:**
+
+- Single table with flexible `type` field is simpler than 3 separate tables
+- Parent-child relationship via `parent_service_id` for variants
+- Bundles use junction table `bundle_items` for many-to-many
+- Price calculation: variants show "from £X" (minimum variant price)
+- `is_bookable` flag controls booking behavior per type
+
+**Key Principle:**
+
+> "Use type discriminators in a single table when entities share 80% of fields. Separate tables when they're fundamentally different."
+
+### Custom Pricing Architecture
+
+**Decision Made:**
+
+- Store custom price/duration in `service_team_members` table
+- NULL = use service default (auto-updates with service changes)
+- Set value = locked override (won't change with service updates)
+- Helper functions: `get_effective_price()`, `get_effective_duration()`
+
+**Why This Works:**
+
+- No service duplication needed for different team members
+- Service updates automatically apply to all team members (unless overridden)
+- Team members can have individualized rates when needed
+- Database functions encapsulate pricing logic
+- Clean separation of concerns
+
+**Key Principle:**
+
+> "For optional overrides, use NULL to mean 'use default' and explicit values to mean 'locked override'. Provides flexibility without complexity."
 
 ### Client Role Filtering
 
@@ -583,4 +823,4 @@ project-root/
 **Document Status:** Living document - update as architecture evolves  
 **Next Review:** After Booking System (Phase 5) planning  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Completed Phase 4 - Client Management (October 2025)
+**Last Major Change:** Completed Phase 4.5 - Service Management (October 2025)
