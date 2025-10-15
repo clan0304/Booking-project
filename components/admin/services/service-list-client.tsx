@@ -1,7 +1,7 @@
 // components/admin/services/service-list-client.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Plus, ChevronDown } from 'lucide-react';
 import { AddCategoryModal } from './add-category-modal';
 import { EditCategoryModal } from './edit-category-modal';
@@ -46,8 +46,9 @@ export function ServiceListClient({
   initialServices,
   initialCategories,
 }: ServiceListClientProps) {
-  const [services] = useState(initialServices);
-  const [categories] = useState(initialCategories);
+  const services = initialServices;
+  const categories = initialCategories;
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAddCategory, setShowAddCategory] = useState(false);
@@ -60,6 +61,39 @@ export function ServiceListClient({
   const [viewingVariantsOf, setViewingVariantsOf] = useState<Service | null>(
     null
   );
+
+  // ✅ Loading state - only shown after successful submissions
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // ✅ Listen for when page is refreshing after router.refresh()
+  useEffect(() => {
+    if (isRefreshing) {
+      // Auto-hide loading after data has been refreshed
+      const timer = setTimeout(() => {
+        setIsRefreshing(false);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isRefreshing, initialServices, initialCategories]);
+
+  // ✅ Simple close handlers - no refresh, just close
+  const handleCategoryModalClose = () => {
+    setShowAddCategory(false);
+    setEditingCategory(null);
+  };
+
+  const handleServiceModalClose = () => {
+    setShowAddService(false);
+    setEditingService(null);
+  };
+
+  const handleVariantModalClose = () => {
+    setAddingVariantToService(null);
+  };
+
+  const handleVariantListClose = () => {
+    setViewingVariantsOf(null);
+  };
 
   // Filter services
   const filteredServices = services.filter((service) => {
@@ -90,7 +124,17 @@ export function ServiceListClient({
   const totalServiceCount = services.length;
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="h-full flex flex-col bg-gray-50 relative">
+      {/* ✅ Loading Overlay - only shows after successful submission */}
+      {isRefreshing && (
+        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-40 flex items-center justify-center">
+          <div className="bg-white rounded-lg shadow-lg p-6 flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-sm font-medium text-gray-700">Refreshing...</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-8 py-4">
         <div className="flex items-center justify-between gap-4">
@@ -102,51 +146,40 @@ export function ServiceListClient({
               placeholder="Search service name"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              disabled={isRefreshing}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
             />
           </div>
 
           {/* Location filter placeholder */}
-          <button className="px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2">
+          <button
+            disabled={isRefreshing}
+            className="px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             <span className="text-sm text-gray-700">All locations</span>
             <ChevronDown className="w-4 h-4 text-gray-500" />
           </button>
 
-          {/* Filters placeholder */}
-          <button className="px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2">
-            <span className="text-sm text-gray-700">Filters</span>
-            <svg
-              className="w-4 h-4 text-gray-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
-              />
-            </svg>
-          </button>
-
-          {/* Add dropdown */}
+          {/* Add button with dropdown */}
           <div className="relative">
             <button
               onClick={() => setShowAddDropdown(!showAddDropdown)}
-              className="px-6 py-2 bg-black text-white rounded-lg hover:bg-gray-800 flex items-center gap-2 font-medium"
+              disabled={isRefreshing}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
+              <Plus className="w-4 h-4" />
               <span>Add</span>
               <ChevronDown className="w-4 h-4" />
             </button>
 
-            {showAddDropdown && (
+            {/* Dropdown menu */}
+            {showAddDropdown && !isRefreshing && (
               <>
                 <div
                   className="fixed inset-0 z-10"
                   onClick={() => setShowAddDropdown(false)}
                 />
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-20">
+                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1">
                   <button
                     onClick={() => {
                       setShowAddService(true);
@@ -192,7 +225,8 @@ export function ServiceListClient({
               {/* All categories */}
               <button
                 onClick={() => setSelectedCategory(null)}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors ${
+                disabled={isRefreshing}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   selectedCategory === null
                     ? 'bg-purple-50 text-purple-700'
                     : 'hover:bg-gray-50 text-gray-700'
@@ -209,8 +243,11 @@ export function ServiceListClient({
                 <button
                   key={category.id}
                   onClick={() => setSelectedCategory(category.id)}
-                  onDoubleClick={() => setEditingCategory(category)}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors ${
+                  onDoubleClick={() =>
+                    !isRefreshing && setEditingCategory(category)
+                  }
+                  disabled={isRefreshing}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     selectedCategory === category.id
                       ? 'bg-purple-50 text-purple-700'
                       : 'hover:bg-gray-50 text-gray-700'
@@ -229,32 +266,30 @@ export function ServiceListClient({
                 </button>
               ))}
             </div>
-
-            {/* Add category button */}
-            <button
-              onClick={() => setShowAddCategory(true)}
-              className="w-full mt-6 flex items-center gap-2 px-4 py-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add category</span>
-            </button>
           </div>
         </div>
 
-        {/* Services list */}
+        {/* Services content */}
         <div className="flex-1 overflow-y-auto p-8">
-          {Object.keys(groupedServices).length === 0 ? (
+          {filteredServices.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-gray-500">No services found</p>
-              <button
-                onClick={() => setShowAddService(true)}
-                className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-              >
-                Add your first service
-              </button>
+              <p className="text-gray-500">
+                {searchQuery
+                  ? 'No services found matching your search'
+                  : 'No services yet'}
+              </p>
+              {!searchQuery && (
+                <button
+                  onClick={() => setShowAddService(true)}
+                  disabled={isRefreshing}
+                  className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add your first service
+                </button>
+              )}
             </div>
           ) : (
-            <div className="space-y-12 max-w-4xl">
+            <div className="space-y-8">
               {Object.entries(groupedServices).map(
                 ([categoryId, categoryServices]) => {
                   const category =
@@ -276,7 +311,10 @@ export function ServiceListClient({
                           <h3 className="text-2xl font-semibold">
                             {category.name}
                           </h3>
-                          <button className="px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2">
+                          <button
+                            disabled={isRefreshing}
+                            className="px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
                             <span className="text-sm text-gray-700">
                               Actions
                             </span>
@@ -291,11 +329,16 @@ export function ServiceListClient({
                           <ServiceCard
                             key={service.id}
                             service={service}
-                            onEdit={() => setEditingService(service)}
+                            onEdit={() =>
+                              !isRefreshing && setEditingService(service)
+                            }
                             onAddVariant={() =>
+                              !isRefreshing &&
                               setAddingVariantToService(service)
                             }
-                            onViewVariants={() => setViewingVariantsOf(service)}
+                            onViewVariants={() =>
+                              !isRefreshing && setViewingVariantsOf(service)
+                            }
                           />
                         ))}
                       </div>
@@ -309,48 +352,75 @@ export function ServiceListClient({
       </div>
 
       {/* Modals */}
-      <AddCategoryModal
-        isOpen={showAddCategory}
-        onClose={() => setShowAddCategory(false)}
-      />
+      {!isRefreshing && (
+        <>
+          <AddCategoryModal
+            isOpen={showAddCategory}
+            onClose={handleCategoryModalClose}
+            onSuccess={() => {
+              setIsRefreshing(true);
+              handleCategoryModalClose();
+            }}
+          />
 
-      {editingCategory && (
-        <EditCategoryModal
-          category={editingCategory}
-          isOpen={!!editingCategory}
-          onClose={() => setEditingCategory(null)}
-        />
-      )}
+          {editingCategory && (
+            <EditCategoryModal
+              category={editingCategory}
+              isOpen={!!editingCategory}
+              onClose={handleCategoryModalClose}
+              onSuccess={() => {
+                setIsRefreshing(true);
+                handleCategoryModalClose();
+              }}
+            />
+          )}
 
-      <AddServiceModal
-        isOpen={showAddService}
-        onClose={() => setShowAddService(false)}
-        categories={categories}
-      />
+          <AddServiceModal
+            isOpen={showAddService}
+            onClose={handleServiceModalClose}
+            categories={categories}
+            onSuccess={() => {
+              setIsRefreshing(true);
+              handleServiceModalClose();
+            }}
+          />
 
-      {editingService && (
-        <EditServiceModal
-          service={editingService}
-          isOpen={!!editingService}
-          onClose={() => setEditingService(null)}
-          categories={categories}
-        />
-      )}
+          {editingService && (
+            <EditServiceModal
+              service={editingService}
+              isOpen={!!editingService}
+              onClose={handleServiceModalClose}
+              categories={categories}
+              onSuccess={() => {
+                setIsRefreshing(true);
+                handleServiceModalClose();
+              }}
+            />
+          )}
 
-      {addingVariantToService && (
-        <AddVariantModal
-          parentService={addingVariantToService}
-          isOpen={!!addingVariantToService}
-          onClose={() => setAddingVariantToService(null)}
-        />
-      )}
+          {addingVariantToService && (
+            <AddVariantModal
+              parentService={addingVariantToService}
+              isOpen={!!addingVariantToService}
+              onClose={handleVariantModalClose}
+              onSuccess={() => {
+                setIsRefreshing(true);
+                handleVariantModalClose();
+              }}
+            />
+          )}
 
-      {viewingVariantsOf && (
-        <VariantListModal
-          parentService={viewingVariantsOf}
-          isOpen={!!viewingVariantsOf}
-          onClose={() => setViewingVariantsOf(null)}
-        />
+          {viewingVariantsOf && (
+            <VariantListModal
+              parentService={viewingVariantsOf}
+              isOpen={!!viewingVariantsOf}
+              onClose={handleVariantListClose}
+              onSuccess={() => {
+                setIsRefreshing(true);
+              }}
+            />
+          )}
+        </>
       )}
     </div>
   );

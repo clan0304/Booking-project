@@ -1,7 +1,7 @@
 // components/admin/services/variant-list-modal.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Trash2, Plus } from 'lucide-react';
 import { getServiceVariants, deleteVariant } from '@/app/actions/services';
@@ -23,6 +23,7 @@ interface VariantListModalProps {
   parentService: ParentService;
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void; // ✅ Added
 }
 
 function formatDuration(minutes: number): string {
@@ -36,6 +37,7 @@ export function VariantListModal({
   parentService,
   isOpen,
   onClose,
+  onSuccess, // ✅ Added
 }: VariantListModalProps) {
   const router = useRouter();
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -43,13 +45,8 @@ export function VariantListModal({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (isOpen) {
-      loadVariants();
-    }
-  }, [isOpen, parentService.id]);
-
-  const loadVariants = async () => {
+  // ✅ Define loadVariants BEFORE useEffect with useCallback
+  const loadVariants = useCallback(async () => {
     try {
       setIsLoading(true);
       const data = await getServiceVariants(parentService.id);
@@ -60,7 +57,14 @@ export function VariantListModal({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [parentService.id]);
+
+  // ✅ useEffect with proper dependencies
+  useEffect(() => {
+    if (isOpen) {
+      loadVariants();
+    }
+  }, [isOpen, loadVariants]);
 
   const handleDelete = async (variantId: string) => {
     if (!confirm('Are you sure you want to delete this variant?')) {
@@ -73,6 +77,11 @@ export function VariantListModal({
       await deleteVariant(variantId);
       router.refresh();
       await loadVariants(); // Reload list
+
+      // ✅ Call onSuccess to trigger loading state
+      if (onSuccess) {
+        onSuccess();
+      }
     } catch (err) {
       console.error('Failed to delete variant:', err);
       setError(err instanceof Error ? err.message : 'Failed to delete variant');
@@ -86,17 +95,25 @@ export function VariantListModal({
   const minPrice =
     variants.length > 0 ? Math.min(...variants.map((v) => v.price)) : 0;
 
+  const maxPrice =
+    variants.length > 0 ? Math.max(...variants.map((v) => v.price)) : 0;
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div>
             <h2 className="text-2xl font-bold">{parentService.name}</h2>
             <p className="text-sm text-gray-600 mt-1">
-              Displays as: <strong>from A$ {minPrice.toFixed(0)}</strong>{' '}
-              (minimum from variants)
+              {parentService.description || 'Manage service variants'}
             </p>
+            {variants.length > 0 && (
+              <p className="text-sm text-purple-600 mt-2">
+                from A$ {minPrice.toFixed(0)}
+                {minPrice !== maxPrice && ` - A$ ${maxPrice.toFixed(0)}`}
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -106,17 +123,8 @@ export function VariantListModal({
           </button>
         </div>
 
-        {/* Description */}
-        {parentService.description && (
-          <div className="px-6 pt-4 pb-2">
-            <p className="text-sm text-gray-600 whitespace-pre-line">
-              {parentService.description}
-            </p>
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* Body */}
+        <div className="p-6">
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
               {error}
@@ -125,7 +133,7 @@ export function VariantListModal({
 
           {isLoading ? (
             <div className="text-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+              <div className="inline-block w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
               <p className="text-gray-500 mt-4">Loading variants...</p>
             </div>
           ) : variants.length === 0 ? (
@@ -162,8 +170,13 @@ export function VariantListModal({
                       onClick={() => handleDelete(variant.id)}
                       disabled={deletingId === variant.id}
                       className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                      title="Delete variant"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {deletingId === variant.id ? (
+                        <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
                     </button>
                   </div>
                 </div>

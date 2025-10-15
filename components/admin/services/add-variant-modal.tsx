@@ -16,6 +16,7 @@ interface AddVariantModalProps {
   parentService: ParentService;
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void; // ✅ Added
 }
 
 const DURATION_OPTIONS = [
@@ -35,6 +36,7 @@ export function AddVariantModal({
   parentService,
   isOpen,
   onClose,
+  onSuccess, // ✅ Added
 }: AddVariantModalProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -74,7 +76,13 @@ export function AddVariantModal({
       });
 
       router.refresh();
-      onClose();
+
+      // ✅ Call onSuccess instead of onClose
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        onClose();
+      }
     } catch (err) {
       console.error('Failed to create variant:', err);
       setError(err instanceof Error ? err.message : 'Failed to create variant');
@@ -118,78 +126,65 @@ export function AddVariantModal({
                 htmlFor="name"
                 className="block text-sm font-medium text-gray-900 mb-2"
               >
-                Variant name
+                Variant name *
               </label>
               <input
                 type="text"
                 id="name"
                 name="name"
-                placeholder="e.g. Analog Perm (S)"
-                required
+                placeholder="e.g. Short hair, Medium hair, Long hair"
                 disabled={isSubmitting}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                autoFocus
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Example: (S), (M), (L), or describe the variant option
-              </p>
             </div>
 
-            {/* Price and Duration */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label
-                  htmlFor="price"
-                  className="block text-sm font-medium text-gray-900 mb-2"
-                >
-                  Price
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
-                    A$
-                  </span>
-                  <input
-                    type="number"
-                    id="price"
-                    name="price"
-                    min="0"
-                    step="0.01"
-                    defaultValue="0.00"
-                    required
-                    disabled={isSubmitting}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="duration"
-                  className="block text-sm font-medium text-gray-900 mb-2"
-                >
-                  Duration
-                </label>
-                <select
-                  id="duration"
-                  name="duration"
-                  defaultValue="90"
-                  required
+            {/* Price */}
+            <div>
+              <label
+                htmlFor="price"
+                className="block text-sm font-medium text-gray-900 mb-2"
+              >
+                Price *
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
+                  £
+                </span>
+                <input
+                  type="number"
+                  id="price"
+                  name="price"
+                  step="0.01"
+                  min="0"
+                  defaultValue="0.00"
                   disabled={isSubmitting}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                >
-                  {DURATION_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                />
               </div>
             </div>
 
-            <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
-              <p className="text-sm text-purple-800">
-                💡 <strong>Tip:</strong> The parent service will automatically
-                display the minimum price from all variants.
-              </p>
+            {/* Duration */}
+            <div>
+              <label
+                htmlFor="duration"
+                className="block text-sm font-medium text-gray-900 mb-2"
+              >
+                Duration *
+              </label>
+              <select
+                id="duration"
+                name="duration"
+                defaultValue="30"
+                disabled={isSubmitting}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+              >
+                {DURATION_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -199,14 +194,14 @@ export function AddVariantModal({
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? 'Adding...' : 'Add variant'}
             </button>

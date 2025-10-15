@@ -7,3 +7,4 @@ export { AddServiceModal } from './add-service-modal';
 export { EditServiceModal } from './edit-service-modal';
 export { AddVariantModal } from './add-variant-modal';
 export { VariantListModal } from './variant-list-modal';
+export { CustomPricingModal } from './custom-pricing-modal'; // ✅ Added

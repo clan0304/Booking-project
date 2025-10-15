@@ -1,9 +1,9 @@
 // components/admin/services/edit-service-modal.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Check, Trash2 } from 'lucide-react';
+import { X, Trash2, Settings } from 'lucide-react';
 import {
   updateService,
   deleteService,
@@ -11,6 +11,7 @@ import {
   getAllVenues,
   getAllTeamMembers,
 } from '@/app/actions/services';
+import { CustomPricingModal } from './custom-pricing-modal';
 
 interface Category {
   id: string;
@@ -41,11 +42,48 @@ interface TeamMember {
   photo_url: string | null;
 }
 
+// ✅ Proper types for the nested service data
+interface ServiceVenue {
+  id: string;
+  venue_id: string;
+  is_active: boolean;
+  venues: {
+    id: string;
+    name: string;
+  };
+}
+
+interface ServiceTeamMember {
+  id: string;
+  team_member_id: string;
+  custom_price: number | null;
+  custom_duration_minutes: number | null;
+  is_active: boolean;
+  users: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    photo_url: string | null;
+  };
+}
+
+// ✅ Complete service data type returned by getServiceById
+interface ServiceData extends Service {
+  category: {
+    id: string;
+    name: string;
+    color: string;
+  } | null;
+  service_venues: ServiceVenue[];
+  service_team_members: ServiceTeamMember[];
+}
+
 interface EditServiceModalProps {
   service: Service;
   isOpen: boolean;
   onClose: () => void;
   categories: Category[];
+  onSuccess?: () => void;
 }
 
 const DURATION_OPTIONS = [
@@ -59,13 +97,14 @@ const DURATION_OPTIONS = [
   { value: 120, label: '2h' },
   { value: 150, label: '2h 30min' },
   { value: 180, label: '3h' },
-];
+] as const;
 
 export function EditServiceModal({
   service,
   isOpen,
   onClose,
   categories,
+  onSuccess,
 }: EditServiceModalProps) {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
@@ -92,16 +131,44 @@ export function EditServiceModal({
   const [allLocations, setAllLocations] = useState(false);
   const [allTeam, setAllTeam] = useState(false);
 
+  // ✅ Custom pricing modal state
+  const [editingPricingFor, setEditingPricingFor] = useState<{
+    member: TeamMember;
+    customPrice: number | null;
+    customDuration: number | null;
+  } | null>(null);
+
+  // ✅ Store custom pricing data from service_team_members
+  const [teamMemberPricing, setTeamMemberPricing] = useState<
+    Map<
+      string,
+      {
+        customPrice: number | null;
+        customDuration: number | null;
+      }
+    >
+  >(new Map());
+
+  // ✅ Reset form state when modal opens or service changes
   useEffect(() => {
     if (isOpen) {
-      loadData();
+      setName(service.name);
+      setCategoryId(service.category_id || '');
+      setDescription(service.description || '');
+      setPriceType(service.price_type);
+      setPrice(service.price?.toString() || '0.00');
+      setDuration(service.duration_minutes);
+      setError('');
+      setShowDeleteConfirm(false);
+      setCurrentStep(1);
     }
-  }, [isOpen, service.id]);
+  }, [isOpen, service]);
 
-  const loadData = async () => {
+  // ✅ Define loadData BEFORE useEffect
+  const loadData = useCallback(async () => {
     try {
       const [serviceData, venuesData, teamData] = await Promise.all([
-        getServiceById(service.id),
+        getServiceById(service.id) as Promise<ServiceData>,
         getAllVenues(),
         getAllTeamMembers(),
       ]);
@@ -109,57 +176,84 @@ export function EditServiceModal({
       setVenues(venuesData);
       setTeamMembers(teamData);
 
-      // Set selected venues
+      // ✅ Properly typed, no more 'any'
       const serviceVenueIds =
-        serviceData.service_venues?.map((sv: any) => sv.venue_id) || [];
+        serviceData.service_venues
+          ?.filter((sv) => sv.is_active)
+          .map((sv) => sv.venue_id) || [];
       setSelectedVenues(serviceVenueIds);
       setAllLocations(serviceVenueIds.length === venuesData.length);
 
-      // Set selected team members
+      // ✅ Properly typed, no more 'any'
       const serviceTeamIds =
-        serviceData.service_team_members?.map((st: any) => st.team_member_id) ||
-        [];
+        serviceData.service_team_members
+          ?.filter((stm) => stm.is_active)
+          .map((stm) => stm.team_member_id) || [];
       setSelectedTeamMembers(serviceTeamIds);
       setAllTeam(serviceTeamIds.length === teamData.length);
+
+      // ✅ Store custom pricing data for each team member
+      const pricingMap = new Map();
+      serviceData.service_team_members?.forEach((stm) => {
+        if (stm.is_active) {
+          pricingMap.set(stm.team_member_id, {
+            customPrice: stm.custom_price,
+            customDuration: stm.custom_duration_minutes,
+          });
+        }
+      });
+      setTeamMemberPricing(pricingMap);
     } catch (err) {
       console.error('Failed to load data:', err);
+      setError('Failed to load service details');
     }
-  };
+  }, [service.id]);
+
+  // ✅ useEffect with proper dependencies
+  useEffect(() => {
+    if (isOpen) {
+      loadData();
+    }
+  }, [isOpen, loadData]);
 
   const handleToggleAllLocations = () => {
     if (allLocations) {
       setSelectedVenues([]);
+      setAllLocations(false);
     } else {
       setSelectedVenues(venues.map((v) => v.id));
+      setAllLocations(true);
     }
-    setAllLocations(!allLocations);
   };
 
   const handleToggleAllTeam = () => {
     if (allTeam) {
       setSelectedTeamMembers([]);
+      setAllTeam(false);
     } else {
       setSelectedTeamMembers(teamMembers.map((t) => t.id));
+      setAllTeam(true);
     }
-    setAllTeam(!allTeam);
   };
 
   const handleToggleVenue = (venueId: string) => {
-    setSelectedVenues((prev) =>
-      prev.includes(venueId)
+    setSelectedVenues((prev) => {
+      const newSelected = prev.includes(venueId)
         ? prev.filter((id) => id !== venueId)
-        : [...prev, venueId]
-    );
-    setAllLocations(false);
+        : [...prev, venueId];
+      setAllLocations(newSelected.length === venues.length);
+      return newSelected;
+    });
   };
 
   const handleToggleTeamMember = (memberId: string) => {
-    setSelectedTeamMembers((prev) =>
-      prev.includes(memberId)
+    setSelectedTeamMembers((prev) => {
+      const newSelected = prev.includes(memberId)
         ? prev.filter((id) => id !== memberId)
-        : [...prev, memberId]
-    );
-    setAllTeam(false);
+        : [...prev, memberId];
+      setAllTeam(newSelected.length === teamMembers.length);
+      return newSelected;
+    });
   };
 
   const handleSubmit = async () => {
@@ -177,6 +271,18 @@ export function EditServiceModal({
       return;
     }
 
+    if (selectedVenues.length === 0) {
+      setError('Please select at least one location');
+      setCurrentStep(2);
+      return;
+    }
+
+    if (selectedTeamMembers.length === 0) {
+      setError('Please select at least one team member');
+      setCurrentStep(2);
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -187,14 +293,18 @@ export function EditServiceModal({
         price_type: priceType,
         price: service.type === 'variant_group' ? undefined : parseFloat(price),
         duration_minutes: duration,
-        venue_ids: allLocations ? venues.map((v) => v.id) : selectedVenues,
-        team_member_ids: allTeam
-          ? teamMembers.map((t) => t.id)
-          : selectedTeamMembers,
+        venue_ids: selectedVenues,
+        team_member_ids: selectedTeamMembers,
       });
 
       router.refresh();
-      onClose();
+
+      // ✅ Call onSuccess instead of onClose
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        onClose();
+      }
     } catch (err) {
       console.error('Failed to update service:', err);
       setError(err instanceof Error ? err.message : 'Failed to update service');
@@ -204,13 +314,18 @@ export function EditServiceModal({
   };
 
   const handleDelete = async () => {
-    setError('');
     setIsDeleting(true);
-
     try {
       await deleteService(service.id);
+
       router.refresh();
-      onClose();
+
+      // ✅ Call onSuccess instead of onClose
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        onClose();
+      }
     } catch (err) {
       console.error('Failed to delete service:', err);
       setError(err instanceof Error ? err.message : 'Failed to delete service');
@@ -220,422 +335,380 @@ export function EditServiceModal({
     }
   };
 
-  if (!isOpen) return null;
+  const handleClose = () => {
+    if (!isSubmitting && !isDeleting) {
+      setError('');
+      setCurrentStep(1);
+      setShowDeleteConfirm(false);
+      onClose();
+    }
+  };
 
-  const steps = [
-    { number: 1, label: 'Basic details' },
-    { number: 2, label: 'Locations' },
-    { number: 3, label: 'Team members' },
-  ];
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex overflow-hidden">
-        {/* Sidebar with steps */}
-        <div className="w-64 bg-gray-50 border-r border-gray-200 p-6">
-          <h2 className="text-xl font-bold mb-6">Edit service</h2>
-          <div className="space-y-2">
-            {steps.map((step) => (
-              <button
-                key={step.number}
-                onClick={() => setCurrentStep(step.number)}
-                disabled={isSubmitting || isDeleting}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                  currentStep === step.number
-                    ? 'bg-purple-50 text-purple-700'
-                    : 'hover:bg-gray-100 text-gray-700'
-                } disabled:opacity-50`}
-              >
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                    currentStep === step.number
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-200 text-gray-600'
-                  }`}
-                >
-                  {step.number}
-                </div>
-                <span className="font-medium">{step.label}</span>
-              </button>
-            ))}
-          </div>
+      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Edit Service</h2>
+          <button
+            onClick={handleClose}
+            disabled={isSubmitting || isDeleting}
+            className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        {/* Main content */}
-        <div className="flex-1 flex flex-col">
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h3 className="text-lg font-semibold">
-              {steps.find((s) => s.number === currentStep)?.label}
-            </h3>
-            <button
-              onClick={onClose}
-              disabled={isSubmitting || isDeleting}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+        <div className="p-6 space-y-6">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              {error}
+            </div>
+          )}
 
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {error && (
-              <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-                {error}
+          {/* Step 1: Basic Info */}
+          {currentStep === 1 && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Service type
+                </label>
+                <div className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
+                  {service.type === 'service' && 'Regular Service'}
+                  {service.type === 'variant_group' && 'Service with Variants'}
+                  {service.type === 'bundle' && 'Service Bundle'}
+                  <span className="text-gray-500 ml-2">
+                    (Cannot be changed)
+                  </span>
+                </div>
               </div>
-            )}
 
-            {/* Step 1: Basic details */}
-            {currentStep === 1 && (
-              <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Service name *
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Haircut, Color, Balayage"
+                  disabled={isSubmitting}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Category
+                </label>
+                <select
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                  disabled={isSubmitting}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                >
+                  <option value="">Uncategorized</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Description
+                </label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Brief description of the service..."
+                  rows={3}
+                  disabled={isSubmitting}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                />
+              </div>
+
+              {/* Price - Hidden for variant_group */}
+              {service.type !== 'variant_group' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">
-                    Service name
+                    Price type
                   </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Men's Haircut"
-                    maxLength={255}
-                    disabled={isSubmitting || isDeleting}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 mb-2">
-                    Category
-                  </label>
-                  <select
-                    value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
-                    disabled={isSubmitting || isDeleting}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                  >
-                    <option value="">Select category</option>
-                    {categories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 mb-2">
-                    Description{' '}
-                    <span className="text-gray-500">(Optional)</span>
-                  </label>
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={3}
-                    maxLength={1000}
-                    placeholder="Add a short description"
-                    disabled={isSubmitting || isDeleting}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 resize-none"
-                  />
-                </div>
-
-                {/* Pricing - only for non-variant groups */}
-                {service.type !== 'variant_group' && (
-                  <div>
-                    <h4 className="font-semibold text-gray-900 mb-4">
-                      Pricing and duration
-                    </h4>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                          Price type
-                        </label>
-                        <select
-                          value={priceType}
-                          onChange={(e) =>
-                            setPriceType(e.target.value as 'fixed' | 'from')
-                          }
-                          disabled={isSubmitting || isDeleting}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                        >
-                          <option value="fixed">Fixed</option>
-                          <option value="from">From</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                          Price
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
-                            A$
-                          </span>
-                          <input
-                            type="number"
-                            value={price}
-                            onChange={(e) => setPrice(e.target.value)}
-                            min="0"
-                            step="0.01"
-                            disabled={isSubmitting || isDeleting}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                          Duration
-                        </label>
-                        <select
-                          value={duration}
-                          onChange={(e) =>
-                            setDuration(parseInt(e.target.value))
-                          }
-                          disabled={isSubmitting || isDeleting}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                        >
-                          {DURATION_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Duration only for variant groups */}
-                {service.type === 'variant_group' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-2">
-                      Average Duration
-                    </label>
-                    <select
-                      value={duration}
-                      onChange={(e) => setDuration(parseInt(e.target.value))}
-                      disabled={isSubmitting || isDeleting}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setPriceType('fixed')}
+                      disabled={isSubmitting}
+                      className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
+                        priceType === 'fixed'
+                          ? 'border-purple-600 bg-purple-50 text-purple-700'
+                          : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                      }`}
                     >
-                      {DURATION_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      This is a reference duration. Each variant can have its
-                      own duration.
-                    </p>
+                      Fixed price
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPriceType('from')}
+                      disabled={isSubmitting}
+                      className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
+                        priceType === 'from'
+                          ? 'border-purple-600 bg-purple-50 text-purple-700'
+                          : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                      }`}
+                    >
+                      From price
+                    </button>
                   </div>
-                )}
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
+                      £
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={price}
+                      onChange={(e) => setPrice(e.target.value)}
+                      disabled={isSubmitting}
+                      className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                    />
+                  </div>
+                </div>
+              )}
 
-                {/* Delete button */}
-                {!showDeleteConfirm ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Duration *
+                </label>
+                <select
+                  value={duration}
+                  onChange={(e) => setDuration(parseInt(e.target.value))}
+                  disabled={isSubmitting}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                >
+                  {DURATION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+
+          {/* Step 2: Locations & Team */}
+          {currentStep === 2 && (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-gray-900">
+                    Locations *
+                  </label>
                   <button
                     type="button"
-                    onClick={() => setShowDeleteConfirm(true)}
-                    disabled={isSubmitting || isDeleting}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                    onClick={handleToggleAllLocations}
+                    className="text-sm text-purple-600 hover:text-purple-700"
                   >
-                    <Trash2 className="w-4 h-4" />
-                    <span>Delete service</span>
+                    {allLocations ? 'Deselect all' : 'Select all'}
                   </button>
-                ) : (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-sm text-red-800 mb-3">
-                      Are you sure you want to delete this service?
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowDeleteConfirm(false)}
-                        disabled={isDeleting}
-                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleDelete}
-                        disabled={isDeleting}
-                        className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
-                      >
-                        {isDeleting ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Step 2: Locations - same as add modal */}
-            {currentStep === 2 && (
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">
-                  Choose the locations where this service is available
-                </p>
-
-                <button
-                  onClick={handleToggleAllLocations}
-                  className={`w-full flex items-center gap-3 px-4 py-3 border-2 rounded-lg transition-all ${
-                    allLocations
-                      ? 'border-purple-600 bg-purple-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div
-                    className={`w-6 h-6 rounded flex items-center justify-center ${
-                      allLocations
-                        ? 'bg-purple-600'
-                        : 'bg-white border-2 border-gray-300'
-                    }`}
-                  >
-                    {allLocations && <Check className="w-4 h-4 text-white" />}
-                  </div>
-                  <span className="font-medium">All locations</span>
-                </button>
-
-                <div className="space-y-2">
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
                   {venues.map((venue) => (
-                    <button
+                    <label
                       key={venue.id}
-                      onClick={() => handleToggleVenue(venue.id)}
-                      disabled={allLocations}
-                      className={`w-full flex items-center gap-3 px-4 py-3 border-2 rounded-lg transition-all ${
-                        selectedVenues.includes(venue.id)
-                          ? 'border-purple-600 bg-purple-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      } ${allLocations ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
                     >
-                      <div
-                        className={`w-6 h-6 rounded flex items-center justify-center ${
-                          selectedVenues.includes(venue.id)
-                            ? 'bg-purple-600'
-                            : 'bg-white border-2 border-gray-300'
-                        }`}
-                      >
-                        {selectedVenues.includes(venue.id) && (
-                          <Check className="w-4 h-4 text-white" />
-                        )}
-                      </div>
-                      <span className="font-medium">{venue.name}</span>
-                    </button>
+                      <input
+                        type="checkbox"
+                        checked={selectedVenues.includes(venue.id)}
+                        onChange={() => handleToggleVenue(venue.id)}
+                        disabled={isSubmitting}
+                        className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                      />
+                      <span className="text-sm text-gray-700">
+                        {venue.name}
+                      </span>
+                    </label>
                   ))}
                 </div>
               </div>
-            )}
 
-            {/* Step 3: Team members - same as add modal */}
-            {currentStep === 3 && (
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">
-                  Choose which team members can perform this service
-                </p>
-
-                <button
-                  onClick={handleToggleAllTeam}
-                  className={`w-full flex items-center gap-3 px-4 py-3 border-2 rounded-lg transition-all ${
-                    allTeam
-                      ? 'border-purple-600 bg-purple-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div
-                    className={`w-6 h-6 rounded flex items-center justify-center ${
-                      allTeam
-                        ? 'bg-purple-600'
-                        : 'bg-white border-2 border-gray-300'
-                    }`}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-gray-900">
+                    Team members *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleToggleAllTeam}
+                    className="text-sm text-purple-600 hover:text-purple-700"
                   >
-                    {allTeam && <Check className="w-4 h-4 text-white" />}
-                  </div>
-                  <span className="font-medium">All team members</span>
-                </button>
+                    {allTeam ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                  {teamMembers.map((member) => {
+                    const pricing = teamMemberPricing.get(member.id);
+                    const hasCustomPricing =
+                      pricing &&
+                      (pricing.customPrice !== null ||
+                        pricing.customDuration !== null);
 
-                <div className="space-y-2">
-                  {teamMembers.map((member) => (
-                    <button
-                      key={member.id}
-                      onClick={() => handleToggleTeamMember(member.id)}
-                      disabled={allTeam}
-                      className={`w-full flex items-center gap-3 px-4 py-3 border-2 rounded-lg transition-all ${
-                        selectedTeamMembers.includes(member.id)
-                          ? 'border-purple-600 bg-purple-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      } ${allTeam ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
+                    return (
                       <div
-                        className={`w-6 h-6 rounded flex items-center justify-center ${
-                          selectedTeamMembers.includes(member.id)
-                            ? 'bg-purple-600'
-                            : 'bg-white border-2 border-gray-300'
-                        }`}
+                        key={member.id}
+                        className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded group"
                       >
-                        {selectedTeamMembers.includes(member.id) && (
-                          <Check className="w-4 h-4 text-white" />
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {member.photo_url ? (
-                          <img
-                            src={member.photo_url}
-                            alt={member.first_name}
-                            className="w-8 h-8 rounded-full object-cover"
+                        <label className="flex items-center gap-2 flex-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedTeamMembers.includes(member.id)}
+                            onChange={() => handleToggleTeamMember(member.id)}
+                            disabled={isSubmitting}
+                            className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
                           />
-                        ) : (
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white text-sm font-medium">
-                            {member.first_name[0]}
-                          </div>
+                          <span className="text-sm text-gray-700">
+                            {member.first_name} {member.last_name}
+                          </span>
+                          {hasCustomPricing && (
+                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
+                              Custom pricing
+                            </span>
+                          )}
+                        </label>
+
+                        {/* Custom Pricing Button */}
+                        {selectedTeamMembers.includes(member.id) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingPricingFor({
+                                member,
+                                customPrice: pricing?.customPrice || null,
+                                customDuration: pricing?.customDuration || null,
+                              })
+                            }
+                            disabled={isSubmitting}
+                            className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-0"
+                            title="Custom pricing"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </button>
                         )}
-                        <span className="font-medium">
-                          {member.first_name} {member.last_name}
-                        </span>
                       </div>
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
-            )}
-          </div>
+            </>
+          )}
+        </div>
 
-          {/* Footer */}
-          <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-3">
+          {/* Delete button on the left */}
+          {!showDeleteConfirm ? (
             <button
-              onClick={() => {
-                if (currentStep === 1) {
-                  onClose();
-                } else {
-                  setCurrentStep(currentStep - 1);
-                }
-              }}
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={isSubmitting || isDeleting}
-              className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors font-medium disabled:opacity-50"
+              className="px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 flex items-center gap-2"
             >
-              {currentStep === 1 ? 'Cancel' : 'Back'}
+              <Trash2 className="w-4 h-4" />
+              Delete
             </button>
-            <div className="flex gap-3">
-              {currentStep < 3 ? (
-                <button
-                  onClick={() => setCurrentStep(currentStep + 1)}
-                  disabled={isSubmitting || isDeleting}
-                  className="px-6 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium disabled:opacity-50"
-                >
-                  Next
-                </button>
-              ) : (
-                <button
-                  onClick={handleSubmit}
-                  disabled={isSubmitting || isDeleting}
-                  className="px-6 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium disabled:opacity-50"
-                >
-                  {isSubmitting ? 'Saving...' : 'Save changes'}
-                </button>
-              )}
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-700">Are you sure?</span>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Yes, delete'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
             </div>
+          )}
+
+          {/* Navigation buttons on the right */}
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-gray-600">Step {currentStep} of 2</div>
+            {currentStep === 2 && (
+              <button
+                type="button"
+                onClick={() => setCurrentStep(1)}
+                disabled={isSubmitting}
+                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Back
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleClose}
+              disabled={isSubmitting || isDeleting}
+              className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            {currentStep === 1 ? (
+              <button
+                type="button"
+                onClick={() => setCurrentStep(2)}
+                disabled={isSubmitting || !name.trim()}
+                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? 'Updating...' : 'Update Service'}
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Custom Pricing Modal */}
+      {editingPricingFor && (
+        <CustomPricingModal
+          isOpen={!!editingPricingFor}
+          onClose={() => setEditingPricingFor(null)}
+          service={{
+            id: service.id,
+            name: service.name,
+            price: service.price,
+            duration_minutes: service.duration_minutes,
+          }}
+          teamMember={editingPricingFor.member}
+          currentCustomPrice={editingPricingFor.customPrice}
+          currentCustomDuration={editingPricingFor.customDuration}
+          onSuccess={() => {
+            setEditingPricingFor(null);
+            // Reload the service data to get updated custom pricing
+            loadData();
+          }}
+        />
+      )}
     </div>
   );
 }
