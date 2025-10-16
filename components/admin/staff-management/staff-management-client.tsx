@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card,
@@ -16,12 +16,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { User } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  User,
+  Loader2,
+  Clock,
+  DollarSign,
+  Calendar,
+  FileText,
+} from 'lucide-react';
 import {
   TimeClockPanel,
   ActiveShiftDisplay,
   TimeEntriesTable,
   LongRunningAlert,
+  PayRatesTab,
+  PublicHolidaysManager,
+  PayrollReportsTab,
 } from '@/components/admin/staff-management';
 import {
   getActiveShift,
@@ -113,6 +124,7 @@ export function StaffManagementClient({
   venues,
 }: StaffManagementClientProps) {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState('time-tracking');
   const [selectedStaffId, setSelectedStaffId] = useState<string>(
     currentUser.isTeamMember && !currentUser.isAdmin ? currentUser.id : ''
   );
@@ -125,25 +137,18 @@ export function StaffManagementClient({
 
   const selectedStaff = teamMembers.find((m) => m.id === selectedStaffId);
 
-  // Fetch data when staff member is selected
-  useEffect(() => {
-    if (selectedStaffId) {
-      fetchData();
-    }
-  }, [selectedStaffId]);
+  const fetchData = useCallback(async () => {
+    if (!selectedStaffId) return;
 
-  const fetchData = async () => {
     setLoading(true);
 
-    // Get active shift for selected staff
-    const shiftResult = await getActiveShift();
+    const shiftResult = await getActiveShift(selectedStaffId);
     if (shiftResult.success && shiftResult.data) {
       setActiveShift(shiftResult.data);
     } else {
       setActiveShift(null);
     }
 
-    // Get time entries
     const entriesResult = await getTimeEntries({
       teamMemberId: currentUser.isAdmin ? selectedStaffId : undefined,
       limit: 50,
@@ -152,7 +157,6 @@ export function StaffManagementClient({
       setTimeEntries(entriesResult.data);
     }
 
-    // Get long-running shifts (admin only)
     if (currentUser.isAdmin) {
       const longResult = await getLongRunningShifts(12);
       if (longResult.success && longResult.data) {
@@ -161,7 +165,13 @@ export function StaffManagementClient({
     }
 
     setLoading(false);
-  };
+  }, [selectedStaffId, currentUser.isAdmin]);
+
+  useEffect(() => {
+    if (activeTab === 'time-tracking') {
+      fetchData();
+    }
+  }, [fetchData, activeTab]);
 
   const handleRefresh = () => {
     router.refresh();
@@ -174,123 +184,193 @@ export function StaffManagementClient({
       <div>
         <h1 className="text-3xl font-bold">Staff Management</h1>
         <p className="text-muted-foreground mt-1">
-          Track your working hours and breaks
+          Manage time tracking, pay rates, and payroll
         </p>
       </div>
 
-      {/* Staff Member Selector (Kiosk Mode) */}
-      {currentUser.isAdmin && (
-        <Card className="border-2 border-blue-500">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Select Staff Member
-            </CardTitle>
-            <CardDescription>
-              Choose who is clocking in/out (Kiosk Mode)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Select value={selectedStaffId} onValueChange={setSelectedStaffId}>
-              <SelectTrigger className="text-lg h-12">
-                <SelectValue placeholder="Choose a team member" />
-              </SelectTrigger>
-              <SelectContent>
-                {teamMembers.map((member) => (
-                  <SelectItem key={member.id} value={member.id}>
-                    <div className="flex items-center gap-2">
-                      {member.photo_url ? (
-                        <Image
-                          src={member.photo_url}
-                          alt={member.first_name}
-                          className="w-6 h-6 rounded-full"
-                          width={6}
-                          height={6}
-                        />
-                      ) : (
-                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
-                          {member.first_name[0]}
-                        </div>
-                      )}
-                      <span className="font-medium">
-                        {member.first_name} {member.last_name || ''}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-      )}
+      {/* Tabs Navigation */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList
+          className={`grid w-full ${
+            currentUser.isAdmin ? 'grid-cols-4' : 'grid-cols-1'
+          }`}
+        >
+          <TabsTrigger
+            value="time-tracking"
+            className="flex items-center gap-2"
+          >
+            <Clock className="h-4 w-4" />
+            Time Tracking
+          </TabsTrigger>
+          {/* Admin-only tabs */}
+          {currentUser.isAdmin && (
+            <>
+              <TabsTrigger
+                value="pay-rates"
+                className="flex items-center gap-2"
+              >
+                <DollarSign className="h-4 w-4" />
+                Pay Rates
+              </TabsTrigger>
+              <TabsTrigger value="holidays" className="flex items-center gap-2">
+                <Calendar className="h-4 w-4" />
+                Public Holidays
+              </TabsTrigger>
+              <TabsTrigger value="payroll" className="flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Payroll Reports
+              </TabsTrigger>
+            </>
+          )}
+        </TabsList>
 
-      {/* Show content only if staff member is selected */}
-      {!selectedStaffId ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <User className="h-16 w-16 mx-auto mb-4 opacity-20" />
-            <p className="text-lg font-medium">
-              Please select a team member to continue
-            </p>
-            <p className="text-sm mt-2">
-              Choose your name from the dropdown above
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          {/* Selected Staff Display */}
-          {selectedStaff && (
-            <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
-              {selectedStaff.photo_url ? (
-                <Image
-                  src={selectedStaff.photo_url}
-                  alt={selectedStaff.first_name}
-                  className="w-12 h-12 rounded-full"
-                  width={12}
-                  height={12}
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-lg font-bold">
-                  {selectedStaff.first_name[0]}
+        {/* TIME TRACKING TAB */}
+        <TabsContent value="time-tracking" className="space-y-6 mt-6">
+          {/* Staff Member Selector (Kiosk Mode) */}
+          {currentUser.isAdmin && (
+            <Card className="border-2 border-blue-500">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5" />
+                  Select Staff Member
+                </CardTitle>
+                <CardDescription>
+                  Choose who is clocking in/out (Kiosk Mode)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Select
+                  value={selectedStaffId}
+                  onValueChange={setSelectedStaffId}
+                >
+                  <SelectTrigger className="text-lg h-12">
+                    <SelectValue placeholder="Choose a team member" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {teamMembers.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        <div className="flex items-center gap-2">
+                          {member.photo_url ? (
+                            <Image
+                              src={member.photo_url}
+                              alt={member.first_name}
+                              className="w-6 h-6 rounded-full"
+                              width={6}
+                              height={6}
+                            />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
+                              {member.first_name[0]}
+                            </div>
+                          )}
+                          <span className="font-medium">
+                            {member.first_name} {member.last_name || ''}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Show content only if staff member is selected */}
+          {!selectedStaffId ? (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                <User className="h-16 w-16 mx-auto mb-4 opacity-20" />
+                <p className="text-lg font-medium">
+                  Please select a team member to continue
+                </p>
+                <p className="text-sm mt-2">
+                  Choose your name from the dropdown above
+                </p>
+              </CardContent>
+            </Card>
+          ) : loading ? (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                <Loader2 className="h-16 w-16 mx-auto mb-4 animate-spin" />
+                <p className="text-lg font-medium">Loading shift data...</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {/* Selected Staff Display */}
+              {selectedStaff && (
+                <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  {selectedStaff.photo_url ? (
+                    <Image
+                      src={selectedStaff.photo_url}
+                      alt={selectedStaff.first_name}
+                      className="w-12 h-12 rounded-full"
+                      width={12}
+                      height={12}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-lg font-bold">
+                      {selectedStaff.first_name[0]}
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-semibold text-lg">
+                      {selectedStaff.first_name} {selectedStaff.last_name || ''}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Currently selected for time tracking
+                    </p>
+                  </div>
                 </div>
               )}
-              <div>
-                <p className="font-semibold text-lg">
-                  {selectedStaff.first_name} {selectedStaff.last_name || ''}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Currently selected for time tracking
-                </p>
+
+              {/* Long Running Shifts Alert (Admin Only) */}
+              {currentUser.isAdmin && longRunningShifts.length > 0 && (
+                <LongRunningAlert shifts={longRunningShifts} />
+              )}
+
+              {/* Time Clock Section */}
+              <div className="grid gap-6 md:grid-cols-2">
+                {activeShift ? (
+                  <ActiveShiftDisplay
+                    shift={activeShift}
+                    onUpdate={handleRefresh}
+                    selectedStaffId={selectedStaffId}
+                  />
+                ) : (
+                  <TimeClockPanel
+                    venues={venues}
+                    onClockIn={handleRefresh}
+                    selectedStaffId={selectedStaffId}
+                  />
+                )}
               </div>
-            </div>
-          )}
 
-          {/* Long Running Shifts Alert (Admin Only) */}
-          {currentUser.isAdmin && longRunningShifts.length > 0 && (
-            <LongRunningAlert shifts={longRunningShifts} />
-          )}
-
-          {/* Time Clock Section */}
-          <div className="grid gap-6 md:grid-cols-2">
-            {activeShift ? (
-              <ActiveShiftDisplay
-                shift={activeShift}
-                onUpdate={handleRefresh}
+              {/* Time Entries Table */}
+              <TimeEntriesTable
+                entries={timeEntries}
+                isAdmin={currentUser.isAdmin}
+                currentUserId={selectedStaffId}
               />
-            ) : (
-              <TimeClockPanel venues={venues} onClockIn={handleRefresh} />
-            )}
-          </div>
+            </>
+          )}
+        </TabsContent>
 
-          {/* Time Entries Table */}
-          <TimeEntriesTable
-            entries={timeEntries}
-            isAdmin={currentUser.isAdmin}
-            currentUserId={selectedStaffId}
-          />
-        </>
-      )}
+        {/* PAY RATES TAB */}
+        <TabsContent value="pay-rates" className="space-y-6 mt-6">
+          <PayRatesTab teamMembers={teamMembers} />
+        </TabsContent>
+
+        {/* PUBLIC HOLIDAYS TAB */}
+        <TabsContent value="holidays" className="space-y-6 mt-6">
+          <PublicHolidaysManager />
+        </TabsContent>
+
+        {/* PAYROLL REPORTS TAB */}
+        <TabsContent value="payroll" className="space-y-6 mt-6">
+          <PayrollReportsTab teamMembers={teamMembers} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

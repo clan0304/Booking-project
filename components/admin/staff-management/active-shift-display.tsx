@@ -30,11 +30,13 @@ interface ActiveShift {
 interface ActiveShiftDisplayProps {
   shift: ActiveShift;
   onUpdate?: () => void;
+  selectedStaffId?: string; // ✅ NEW: For kiosk mode
 }
 
 export function ActiveShiftDisplay({
   shift,
   onUpdate,
+  selectedStaffId, // ✅ NEW: Receive selected staff ID
 }: ActiveShiftDisplayProps) {
   const [loading, setLoading] = useState(false);
   const [duration, setDuration] = useState('00:00:00');
@@ -68,7 +70,8 @@ export function ActiveShiftDisplay({
     if (!confirm('Are you sure you want to clock out?')) return;
 
     setLoading(true);
-    const result = await clockOut(shift.id);
+    // ✅ FIX: Pass selectedStaffId for kiosk mode
+    const result = await clockOut(shift.id, selectedStaffId);
 
     if (result.success) {
       if (onUpdate) onUpdate();
@@ -80,7 +83,8 @@ export function ActiveShiftDisplay({
 
   const handleStartBreak = async () => {
     setLoading(true);
-    const result = await startBreak(shift.id);
+    // ✅ FIX: Pass selectedStaffId for kiosk mode
+    const result = await startBreak(shift.id, selectedStaffId);
 
     if (result.success) {
       if (onUpdate) onUpdate();
@@ -92,7 +96,8 @@ export function ActiveShiftDisplay({
 
   const handleEndBreak = async () => {
     setLoading(true);
-    const result = await endBreak(shift.id);
+    // ✅ FIX: Pass selectedStaffId for kiosk mode
+    const result = await endBreak(shift.id, selectedStaffId);
 
     if (result.success) {
       if (onUpdate) onUpdate();
@@ -117,11 +122,9 @@ export function ActiveShiftDisplay({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Duration Display */}
-        <div className="text-center py-6 bg-muted rounded-lg">
-          <div className="text-4xl font-bold font-mono tabular-nums">
-            {duration}
-          </div>
+        {/* Duration Timer */}
+        <div className="bg-gray-50 rounded-lg p-6 text-center">
+          <div className="text-5xl font-bold font-mono">{duration}</div>
           <p className="text-sm text-muted-foreground mt-2">
             Started at{' '}
             {new Date(shift.clock_in_time).toLocaleTimeString('en-US', {
@@ -132,51 +135,71 @@ export function ActiveShiftDisplay({
           </p>
         </div>
 
-        {/* Break Info */}
-        {shift.breaks.length > 0 && (
-          <div className="text-sm text-muted-foreground">
-            <p>Breaks taken: {shift.breaks.length}</p>
-          </div>
+        {/* Break Button */}
+        {isOnBreak ? (
+          <Button
+            onClick={handleEndBreak}
+            disabled={loading}
+            variant="default"
+            className="w-full h-12"
+            size="lg"
+          >
+            <Coffee className="mr-2 h-5 w-5" />
+            {loading ? 'Ending Break...' : 'End Break'}
+          </Button>
+        ) : (
+          <Button
+            onClick={handleStartBreak}
+            disabled={loading}
+            variant="outline"
+            className="w-full h-12"
+            size="lg"
+          >
+            <Coffee className="mr-2 h-5 w-5" />
+            {loading ? 'Starting Break...' : 'Start Break'}
+          </Button>
         )}
 
-        {/* Action Buttons */}
-        <div className="grid gap-2">
-          {isOnBreak ? (
-            <Button
-              onClick={handleEndBreak}
-              disabled={loading}
-              className="w-full"
-              variant="default"
-            >
-              {loading ? 'Ending Break...' : '✅ End Break'}
-            </Button>
-          ) : (
-            <Button
-              onClick={handleStartBreak}
-              disabled={loading}
-              className="w-full"
-              variant="outline"
-            >
-              <Coffee className="h-4 w-4 mr-2" />
-              {loading ? 'Starting...' : 'Start Break'}
-            </Button>
-          )}
+        {/* Clock Out Button */}
+        <Button
+          onClick={handleClockOut}
+          disabled={loading}
+          variant="destructive"
+          className="w-full h-12"
+          size="lg"
+        >
+          <StopCircle className="mr-2 h-5 w-5" />
+          {loading ? 'Clocking Out...' : 'Clock Out'}
+        </Button>
 
-          <Button
-            onClick={handleClockOut}
-            disabled={loading || isOnBreak}
-            className="w-full"
-            variant="destructive"
-          >
-            <StopCircle className="h-4 w-4 mr-2" />
-            {loading ? 'Clocking Out...' : 'Clock Out'}
-          </Button>
-        </div>
-
-        {isOnBreak && (
-          <p className="text-xs text-orange-600 text-center">
-            ⚠️ You must end your break before clocking out
-          </p>
+        {/* Break History */}
+        {shift.breaks && shift.breaks.length > 0 && (
+          <div className="pt-4 border-t">
+            <p className="text-sm font-medium mb-2">Break History</p>
+            <div className="space-y-1">
+              {shift.breaks.map((brk, index) => (
+                <div
+                  key={index}
+                  className="text-xs text-muted-foreground flex justify-between"
+                >
+                  <span>Break {index + 1}</span>
+                  <span>
+                    {new Date(brk.start).toLocaleTimeString('en-US', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}{' '}
+                    -{' '}
+                    {brk.end
+                      ? new Date(brk.end).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : 'In Progress'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

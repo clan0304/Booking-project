@@ -27,9 +27,14 @@ interface Venue {
 interface TimeClockPanelProps {
   venues: Venue[];
   onClockIn?: () => void;
+  selectedStaffId?: string; // ✅ NEW: For kiosk mode
 }
 
-export function TimeClockPanel({ venues, onClockIn }: TimeClockPanelProps) {
+export function TimeClockPanel({
+  venues,
+  onClockIn,
+  selectedStaffId, // ✅ NEW: Receive selected staff ID
+}: TimeClockPanelProps) {
   const [selectedVenue, setSelectedVenue] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
@@ -40,7 +45,8 @@ export function TimeClockPanel({ venues, onClockIn }: TimeClockPanelProps) {
     }
 
     setLoading(true);
-    const result = await clockIn(selectedVenue);
+    // ✅ FIX: Pass selectedStaffId for kiosk mode
+    const result = await clockIn(selectedVenue, selectedStaffId);
 
     if (result.success) {
       if (onClockIn) onClockIn();

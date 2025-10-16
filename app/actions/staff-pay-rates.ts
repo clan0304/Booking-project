@@ -117,7 +117,8 @@ export async function updateDefaultPayRates(updates: {
   paid_break_minutes?: number;
 }) {
   try {
-    const { userId } = await requireAdmin();
+    // ✅ FIX: Use supabaseUserId
+    const { supabaseUserId } = await requireAdmin();
 
     const rates = [
       updates.weekday_rate,
@@ -136,7 +137,7 @@ export async function updateDefaultPayRates(updates: {
 
     const { error } = await supabaseAdmin
       .from('staff_default_pay_rates')
-      .update({ ...updates, updated_by: userId })
+      .update({ ...updates, updated_by: supabaseUserId })
       .eq('id', '00000000-0000-0000-0000-000000000001');
 
     if (error) throw error;
@@ -166,9 +167,12 @@ export async function getCustomPayRates(teamMemberId?: string): Promise<{
   try {
     await requireAdmin();
 
+    // ✅ FIX: Specify the team_member_id relationship explicitly
     let query = supabaseAdmin
       .from('staff_pay_rates')
-      .select(`*, users(first_name, last_name)`)
+      .select(
+        `*, users!staff_pay_rates_team_member_id_fkey(first_name, last_name)`
+      )
       .order('created_at', { ascending: false });
 
     if (teamMemberId) {
@@ -210,7 +214,8 @@ export async function upsertCustomPayRates(
   }
 ) {
   try {
-    const { userId } = await requireAdmin();
+    // ✅ FIX: Use supabaseUserId
+    const { supabaseUserId } = await requireAdmin();
 
     const rateValues = [
       rates.weekday_rate,
@@ -237,13 +242,17 @@ export async function upsertCustomPayRates(
     if (existing) {
       const { error } = await supabaseAdmin
         .from('staff_pay_rates')
-        .update({ ...rates, updated_by: userId })
+        .update({ ...rates, updated_by: supabaseUserId })
         .eq('team_member_id', teamMemberId);
       if (error) throw error;
     } else {
       const { error } = await supabaseAdmin
         .from('staff_pay_rates')
-        .insert({ team_member_id: teamMemberId, ...rates, updated_by: userId });
+        .insert({
+          team_member_id: teamMemberId,
+          ...rates,
+          updated_by: supabaseUserId,
+        });
       if (error) throw error;
     }
 
@@ -369,7 +378,8 @@ export async function addPublicHoliday(holiday: {
   is_recurring?: boolean;
 }) {
   try {
-    const { userId } = await requireAdmin();
+    // ✅ FIX: Use supabaseUserId
+    const { supabaseUserId } = await requireAdmin();
 
     const date = new Date(holiday.date);
     if (isNaN(date.getTime()))
@@ -381,7 +391,7 @@ export async function addPublicHoliday(holiday: {
       date: holiday.date,
       name: holiday.name.trim(),
       is_recurring: holiday.is_recurring || false,
-      created_by: userId,
+      created_by: supabaseUserId,
     });
 
     if (error) {
@@ -527,7 +537,9 @@ export async function calculatePayroll(
 
     let query = supabaseAdmin
       .from('staff_time_entries')
-      .select(`*, users(id, first_name, last_name)`)
+      .select(
+        `*, users!staff_time_entries_team_member_id_fkey(id, first_name, last_name)`
+      )
       .gte('shift_date', startDate)
       .lte('shift_date', endDate)
       .eq('status', 'completed')

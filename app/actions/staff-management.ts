@@ -78,14 +78,21 @@ interface LongRunningShift {
 // =====================================================
 // CLOCK IN
 // =====================================================
-export async function clockIn(venueId: string) {
+export async function clockIn(venueId: string, teamMemberId?: string) {
   try {
-    const { userId } = await requireAuth();
+    // ✅ FIX: Support kiosk mode - admin can clock in for any team member
+    const { supabaseUserId, roles } = await requireAuth();
+    const isAdmin = roles.includes('admin');
+
+    // Admin can clock in for any team member (kiosk mode)
+    // Non-admin can only clock in for themselves
+    const targetUserId =
+      isAdmin && teamMemberId ? teamMemberId : supabaseUserId;
 
     const { data: activeShift } = await supabaseAdmin
       .from('staff_time_entries')
       .select('id, status')
-      .eq('team_member_id', userId)
+      .eq('team_member_id', targetUserId)
       .in('status', ['clocked_in', 'on_break'])
       .single();
 
@@ -102,12 +109,12 @@ export async function clockIn(venueId: string) {
     const { data, error } = await supabaseAdmin
       .from('staff_time_entries')
       .insert({
-        team_member_id: userId,
+        team_member_id: targetUserId,
         venue_id: venueId,
         shift_date: shiftDate,
         clock_in_time: now,
         status: 'clocked_in',
-        created_by: userId,
+        created_by: supabaseUserId, // Track who created it (admin)
       })
       .select()
       .single();
@@ -128,16 +135,23 @@ export async function clockIn(venueId: string) {
 // =====================================================
 // CLOCK OUT
 // =====================================================
-export async function clockOut(entryId: string) {
+export async function clockOut(entryId: string, teamMemberId?: string) {
   try {
-    const { userId } = await requireAuth();
+    // ✅ FIX: Support kiosk mode
+    const { supabaseUserId, roles } = await requireAuth();
+    const isAdmin = roles.includes('admin');
 
-    const { data: entry } = await supabaseAdmin
+    // Build query - admin can clock out anyone, non-admin only themselves
+    let query = supabaseAdmin
       .from('staff_time_entries')
       .select('*')
-      .eq('id', entryId)
-      .eq('team_member_id', userId)
-      .single();
+      .eq('id', entryId);
+
+    if (!isAdmin || !teamMemberId) {
+      query = query.eq('team_member_id', supabaseUserId);
+    }
+
+    const { data: entry } = await query.single();
 
     if (!entry) return { success: false, error: 'Time entry not found' };
     if (entry.status === 'on_break')
@@ -153,7 +167,7 @@ export async function clockOut(entryId: string) {
     const { data: payRate } = await supabaseAdmin.rpc(
       'get_effective_pay_rate',
       {
-        p_team_member_id: userId,
+        p_team_member_id: entry.team_member_id,
         p_date: entry.shift_date,
       }
     );
@@ -173,7 +187,7 @@ export async function clockOut(entryId: string) {
         total_hours: hours?.[0]?.total_hours || 0,
         total_paid_hours: hours?.[0]?.total_paid_hours || 0,
         total_break_minutes: hours?.[0]?.total_break_minutes || 0,
-        updated_by: userId,
+        updated_by: supabaseUserId,
       })
       .eq('id', entryId);
 
@@ -193,16 +207,23 @@ export async function clockOut(entryId: string) {
 // =====================================================
 // START BREAK
 // =====================================================
-export async function startBreak(entryId: string) {
+export async function startBreak(entryId: string, teamMemberId?: string) {
   try {
-    const { userId } = await requireAuth();
+    // ✅ FIX: Support kiosk mode
+    const { supabaseUserId, roles } = await requireAuth();
+    const isAdmin = roles.includes('admin');
 
-    const { data: entry } = await supabaseAdmin
+    // Build query - admin can start break for anyone, non-admin only themselves
+    let query = supabaseAdmin
       .from('staff_time_entries')
       .select('*')
-      .eq('id', entryId)
-      .eq('team_member_id', userId)
-      .single();
+      .eq('id', entryId);
+
+    if (!isAdmin || !teamMemberId) {
+      query = query.eq('team_member_id', supabaseUserId);
+    }
+
+    const { data: entry } = await query.single();
 
     if (!entry) return { success: false, error: 'Time entry not found' };
     if (entry.status !== 'clocked_in')
@@ -220,7 +241,7 @@ export async function startBreak(entryId: string) {
       .update({
         status: 'on_break',
         current_break_start: now,
-        updated_by: userId,
+        updated_by: supabaseUserId,
       })
       .eq('id', entryId);
 
@@ -240,28 +261,33 @@ export async function startBreak(entryId: string) {
 // =====================================================
 // END BREAK
 // =====================================================
-export async function endBreak(entryId: string) {
+export async function endBreak(entryId: string, teamMemberId?: string) {
   try {
-    const { userId } = await requireAuth();
+    // ✅ FIX: Support kiosk mode
+    const { supabaseUserId, roles } = await requireAuth();
+    const isAdmin = roles.includes('admin');
 
-    const { data: entry } = await supabaseAdmin
+    // Build query - admin can end break for anyone, non-admin only themselves
+    let query = supabaseAdmin
       .from('staff_time_entries')
       .select('*')
-      .eq('id', entryId)
-      .eq('team_member_id', userId)
-      .single();
+      .eq('id', entryId);
+
+    if (!isAdmin || !teamMemberId) {
+      query = query.eq('team_member_id', supabaseUserId);
+    }
+
+    const { data: entry } = await query.single();
 
     if (!entry) return { success: false, error: 'Time entry not found' };
     if (entry.status !== 'on_break')
-      return { success: false, error: 'No active break to end' };
+      return { success: false, error: 'No break in progress' };
     if (!entry.current_break_start)
-      return { success: false, error: 'No break start time found' };
+      return { success: false, error: 'Break not started properly' };
 
     const now = new Date().toISOString();
-    const breaks = entry.breaks || [];
-
     const updatedBreaks = [
-      ...breaks,
+      ...(entry.breaks || []),
       { start: entry.current_break_start, end: now },
     ];
 
@@ -269,9 +295,9 @@ export async function endBreak(entryId: string) {
       .from('staff_time_entries')
       .update({
         status: 'clocked_in',
-        current_break_start: null,
         breaks: updatedBreaks,
-        updated_by: userId,
+        current_break_start: null,
+        updated_by: supabaseUserId,
       })
       .eq('id', entryId);
 
@@ -291,40 +317,52 @@ export async function endBreak(entryId: string) {
 // =====================================================
 // GET ACTIVE SHIFT
 // =====================================================
-export async function getActiveShift(): Promise<{
+export async function getActiveShift(teamMemberId?: string): Promise<{
   success: boolean;
-  data?: ActiveShift | null;
+  data?: ActiveShift;
   error?: string;
 }> {
   try {
-    const { userId } = await requireAuth();
+    // ✅ FIX: Use provided teamMemberId for kiosk mode, otherwise use logged-in user
+    const { supabaseUserId, roles } = await requireAuth();
+    const isAdmin = roles.includes('admin');
+
+    // Admin can check any team member's shift (kiosk mode)
+    // Non-admin can only check their own shift
+    const targetUserId =
+      isAdmin && teamMemberId ? teamMemberId : supabaseUserId;
 
     const { data, error } = await supabaseAdmin
       .from('staff_time_entries')
       .select(
-        `id, venue_id, clock_in_time, status, current_break_start, breaks, venues(name)`
+        'id, venue_id, clock_in_time, status, current_break_start, breaks, venues(name)'
       )
-      .eq('team_member_id', userId)
+      .eq('team_member_id', targetUserId)
       .in('status', ['clocked_in', 'on_break'])
       .single();
 
-    if (error && error.code !== 'PGRST116') throw error;
-    if (!data) return { success: true, data: null };
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { success: true, data: undefined };
+      }
+      throw error;
+    }
 
     const typedData = data as unknown as ActiveShiftData;
 
-    return {
-      success: true,
-      data: {
-        id: typedData.id,
-        venue_id: typedData.venue_id,
-        venue_name: typedData.venues?.name || '',
-        clock_in_time: typedData.clock_in_time,
-        status: typedData.status,
-        current_break_start: typedData.current_break_start,
-        breaks: typedData.breaks || [],
-      },
+    if (!typedData) return { success: true, data: undefined };
+
+    const activeShift: ActiveShift = {
+      id: typedData.id,
+      venue_id: typedData.venue_id,
+      venue_name: typedData.venues?.name || 'Unknown Venue',
+      clock_in_time: typedData.clock_in_time,
+      status: typedData.status,
+      current_break_start: typedData.current_break_start,
+      breaks: typedData.breaks || [],
     };
+
+    return { success: true, data: activeShift };
   } catch (error) {
     console.error('Get active shift error:', error);
     return {
@@ -350,19 +388,21 @@ export async function getTimeEntries(filters?: {
   error?: string;
 }> {
   try {
-    const { userId, roles } = await requireAuth();
+    // ✅ FIX: Use supabaseUserId
+    const { supabaseUserId, roles } = await requireAuth();
     const isAdmin = roles.includes('admin');
 
+    // ✅ FIX: Specify which users relationship to use with hint syntax
     let query = supabaseAdmin
       .from('staff_time_entries')
       .select(
-        `*, users(id, first_name, last_name, photo_url), venues(id, name)`
+        `*, users!staff_time_entries_team_member_id_fkey(id, first_name, last_name, photo_url), venues(id, name)`
       )
       .order('shift_date', { ascending: false })
       .order('clock_in_time', { ascending: false });
 
     if (!isAdmin) {
-      query = query.eq('team_member_id', userId);
+      query = query.eq('team_member_id', supabaseUserId);
     } else if (filters?.teamMemberId) {
       query = query.eq('team_member_id', filters.teamMemberId);
     }
@@ -428,7 +468,8 @@ export async function adminClockOut(
   notes?: string
 ) {
   try {
-    const { userId } = await requireAdmin();
+    // ✅ FIX: Use supabaseUserId
+    const { supabaseUserId } = await requireAdmin();
 
     const { data: entry } = await supabaseAdmin
       .from('staff_time_entries')
@@ -479,7 +520,7 @@ export async function adminClockOut(
         total_paid_hours: hours?.[0]?.total_paid_hours || 0,
         total_break_minutes: hours?.[0]?.total_break_minutes || 0,
         notes: updatedNotes || null,
-        updated_by: userId,
+        updated_by: supabaseUserId,
       })
       .eq('id', entryId);
 
@@ -509,7 +550,8 @@ export async function updateTimeEntry(
   }
 ) {
   try {
-    const { userId } = await requireAdmin();
+    // ✅ FIX: Use supabaseUserId
+    const { supabaseUserId } = await requireAdmin();
 
     const { data: entry } = await supabaseAdmin
       .from('staff_time_entries')
@@ -552,7 +594,7 @@ export async function updateTimeEntry(
       }
     }
 
-    finalUpdates.updated_by = userId;
+    finalUpdates.updated_by = supabaseUserId;
 
     const { error } = await supabaseAdmin
       .from('staff_time_entries')
@@ -611,7 +653,8 @@ export async function createManualEntry(data: {
   notes?: string;
 }) {
   try {
-    const { userId } = await requireAdmin();
+    // ✅ FIX: Use supabaseUserId
+    const { supabaseUserId } = await requireAdmin();
 
     const clockIn = new Date(data.clock_in_time);
     const clockOut = new Date(data.clock_out_time);
@@ -649,7 +692,7 @@ export async function createManualEntry(data: {
       total_hours: hours?.[0]?.total_hours || 0,
       total_paid_hours: hours?.[0]?.total_paid_hours || 0,
       total_break_minutes: 0,
-      created_by: userId,
+      created_by: supabaseUserId,
     });
 
     if (error) throw error;
