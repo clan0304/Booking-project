@@ -178,7 +178,38 @@
 - **Purpose:** Assign services to team members with optional custom pricing
 - **Key Feature:** NULL values use service defaults, set values override
 
-**14. Supabase Storage Buckets**
+**14. Staff Time Entries Table** ✅
+
+- Tracks team member work hours and shifts
+- Fields: id, team_member_id (FK), venue_id (FK), shift_date, clock_in_time, clock_out_time, breaks (jsonb), current_break_start, status (clocked_in/on_break/completed), total_hours, total_paid_hours, total_break_minutes, notes, created_by, updated_by, timestamps
+- Unique constraint: Only one active shift per team member
+- Indexes on: team_member_id, venue_id, shift_date, status
+- **Purpose:** Time tracking, payroll calculations, shift history
+
+**15. Staff Default Pay Rates Table** ✅
+
+- Stores default hourly rates for all team members
+- Fields: id (fixed UUID), weekday_rate, saturday_rate, sunday_rate, public_holiday_rate, paid_break_minutes, updated_by, timestamps
+- Single row system-wide defaults
+- **Purpose:** Base pay rates applied to all team members unless custom rate set
+
+**16. Staff Pay Rates Table** ✅
+
+- Custom pay rates per team member (overrides defaults)
+- Fields: id, team_member_id (FK), weekday_rate, saturday_rate, sunday_rate, public_holiday_rate, paid_break_minutes, notes, updated_by, timestamps
+- Unique constraint: team_member_id
+- **Purpose:** Individual pay rate overrides for specific team members
+- **Note:** NULL values use defaults, set values override
+
+**17. Public Holidays Table** ✅
+
+- Tracks public holidays for payroll calculations
+- Fields: id, date, name, is_recurring, recurrence_rule, created_by, timestamps
+- Unique constraint: date
+- Indexes on: date, is_recurring
+- **Purpose:** Apply holiday rates automatically, prevent double-booking
+
+**18. Supabase Storage Buckets**
 
 - **`user-photos`**: User profile photos
   - Public read access
@@ -203,6 +234,9 @@
 - **Closed days tracking:** Prevents conflicts and handles special closures
 - **Service architecture:** Flexible three-type system handles variants and bundles elegantly
 - **Custom pricing per team member:** Allows individualized rates without duplicating services
+- **Staff time tracking:** Complete payroll system with break tracking and multiple rate types
+- **Flexible pay rates:** Default rates with per-member overrides, automatic effective rate calculation
+- **Public holidays:** Automatic holiday rate application, recurring holiday support
 - **Soft deletes:** `is_active` flag preserves assignment history for auditing
 - **No RLS policies:** Simpler maintenance, security enforced in application code
 - **Roles in database only:** No syncing complexity, instant updates
@@ -348,14 +382,6 @@
   - [x] Visual indicators for alerts and notes
   - [x] Clean, professional appearance
 
-**Still TODO for Phase 4:**
-
-- [ ] Client detail page (individual client view)
-- [ ] Client notes CRUD interface (separate notes table)
-- [ ] Client tags/categories
-- [ ] Client communication history
-- [ ] Booking history view
-
 ### Phase 4.5: Service Management ✅ (COMPLETED)
 
 - [x] **Database Schema**
@@ -436,6 +462,139 @@
   - [x] Modal-based workflows for all operations
   - [x] Clean, professional Fresha-inspired design
 
+### Phase 4.75: Staff Management ✅ (COMPLETED)
+
+- [x] **Database Schema**
+  - [x] Staff time entries table with break tracking
+  - [x] Staff default pay rates table (system-wide)
+  - [x] Staff custom pay rates table (per team member)
+  - [x] Public holidays table with recurring support
+  - [x] Helper functions (calculate_shift_hours, get_effective_pay_rate, get_long_running_shifts)
+  - [x] Unique constraints for active shifts and pay rates
+  - [x] Indexes for performance (team_member_id, shift_date, status)
+- [x] **Time Tracking System**
+  - [x] Clock in/out functionality with venue selection
+  - [x] Break management (start/end break)
+  - [x] Automatic break tracking in JSONB array
+  - [x] Live duration timer during active shifts
+  - [x] Status tracking (clocked_in, on_break, completed)
+  - [x] Break history display on active shifts
+  - [x] Current break indicator
+- [x] **Kiosk Mode (Admin Feature)**
+  - [x] Staff member selector dropdown for admins
+  - [x] Admin can clock in/out for any team member
+  - [x] Admin can start/end breaks for any team member
+  - [x] Non-admin users only see their own shifts
+  - [x] Selected staff display with photo and name
+  - [x] Kiosk-style UI for easy touch operation
+- [x] **Pay Rates Management (Admin Only)**
+  - [x] Default pay rates card (system-wide defaults):
+    - [x] Weekday rate (e.g., $25/hr)
+    - [x] Saturday rate (e.g., $30/hr)
+    - [x] Sunday rate (e.g., $35/hr)
+    - [x] Public holiday rate (e.g., $50/hr)
+    - [x] Paid break duration (e.g., 30 minutes)
+  - [x] Custom pay rates per team member:
+    - [x] Override individual rates (NULL = use default)
+    - [x] Team member list with custom rate indicators
+    - [x] Notes field for rate justification
+    - [x] Edit custom rates modal
+    - [x] Delete custom rates (revert to defaults)
+  - [x] Effective rate calculation based on date and team member
+  - [x] Automatic rate application to time entries
+- [x] **Public Holidays Management (Admin Only)**
+  - [x] Add public holidays with date and name
+  - [x] Recurring holiday support (annual dates)
+  - [x] Delete holidays
+  - [x] Holiday list with visual indicators
+  - [x] Automatic holiday rate application in payroll
+- [x] **Payroll Reports (Admin Only)**
+  - [x] Date range selection with quick presets:
+    - [x] This Week / Last Week
+    - [x] This Fortnight / Last Fortnight
+    - [x] This Month / Last Month
+  - [x] Period type selector (Weekly/Fortnightly/Monthly)
+  - [x] Team member filter (All or specific member)
+  - [x] Generate report button with loading state
+  - [x] Summary statistics:
+    - [x] Total payroll amount
+    - [x] Total paid hours
+    - [x] Staff count
+    - [x] Average hours per staff
+  - [x] Detailed breakdown per team member:
+    - [x] Weekday hours and pay
+    - [x] Saturday hours and pay
+    - [x] Sunday hours and pay
+    - [x] Public holiday hours and pay
+    - [x] Total paid hours and total pay
+    - [x] Number of shifts
+  - [x] Expandable rows showing individual shifts
+  - [x] Export to CSV functionality
+- [x] **Time Entries Table**
+  - [x] Historical shift records with pagination
+  - [x] Date, venue, clock in/out times
+  - [x] Total hours and paid hours display
+  - [x] Status badges (Active, On Break, Completed)
+  - [x] Team member column (admin view only)
+  - [x] Sortable columns
+  - [x] Filter by date range
+- [x] **Long-Running Shifts Alert (Admin Only)**
+  - [x] Automatic detection of shifts > 12 hours
+  - [x] Visual alert banner with warning icon
+  - [x] List of long-running shifts with:
+    - [x] Team member name and photo
+    - [x] Venue name
+    - [x] Hours elapsed
+    - [x] Clock in time
+    - [x] Current status
+  - [x] Alert badge on staff management page
+- [x] **Payroll Calculations**
+  - [x] Automatic calculation of:
+    - [x] Total hours worked
+    - [x] Total paid hours (minus unpaid breaks)
+    - [x] Break duration (paid vs unpaid)
+    - [x] Rate based on day type (weekday/Saturday/Sunday/holiday)
+  - [x] Rate precedence: Custom > Default
+  - [x] Paid break threshold (e.g., first 30min paid, rest unpaid)
+  - [x] Database function for shift hour calculations
+  - [x] Effective pay rate function with date awareness
+- [x] **Server Actions**
+  - [x] clockIn, clockOut (with kiosk mode support)
+  - [x] startBreak, endBreak (with kiosk mode support)
+  - [x] getActiveShift, getTimeEntries, getLongRunningShifts
+  - [x] getDefaultPayRates, updateDefaultPayRates
+  - [x] getCustomPayRates, upsertCustomPayRates, deleteCustomPayRates
+  - [x] getEffectivePayRates (date and team member aware)
+  - [x] getPublicHolidays, addPublicHoliday, deletePublicHoliday
+  - [x] calculatePayroll (with date range and filtering)
+- [x] **UI Components**
+  - [x] StaffManagementClient (main container with tabs)
+  - [x] TimeClockPanel (clock in interface)
+  - [x] ActiveShiftDisplay (active shift with timer)
+  - [x] TimeEntriesTable (shift history)
+  - [x] LongRunningAlert (warning banner)
+  - [x] PayRatesTab (default + custom rates)
+  - [x] DefaultPayRatesCard (edit system defaults)
+  - [x] CustomPayRatesList (per-member overrides)
+  - [x] PublicHolidaysManager (holiday CRUD)
+  - [x] PayrollReportsTab (reporting interface)
+- [x] **Technical Implementation**
+  - [x] Full TypeScript type safety
+  - [x] Proper Supabase relationship hints for foreign keys
+  - [x] useCallback for performance optimization
+  - [x] Loading states for all async operations
+  - [x] Error handling with user feedback
+  - [x] Revalidation after mutations
+  - [x] Kiosk mode security checks in all actions
+  - [x] UTC-safe time handling throughout
+- [x] **Security & Authorization**
+  - [x] requireAuth() for all time tracking actions
+  - [x] requireAdmin() for pay rates and payroll
+  - [x] Kiosk mode: Admin can manage any team member
+  - [x] Non-admin: Can only manage own time entries
+  - [x] Server-side filtering based on user role
+  - [x] Audit trail with created_by and updated_by
+
 ### Phase 5: Booking System (FUTURE)
 
 - [ ] Appointment booking schema
@@ -471,7 +630,9 @@ project-root/
 │   │   ├── venue-hours.ts            # ✅ Venue hours management
 │   │   ├── team-venue-assignments.ts # ✅ Assign/unassign team to venues
 │   │   ├── venue-closed-days.ts      # ✅ Closed days management
-│   │   └── services.ts               # ✅ Services, categories, variants, custom pricing
+│   │   ├── services.ts               # ✅ Services, categories, variants, custom pricing
+│   │   ├── staff-management.ts       # ✅ Time tracking, clock in/out, breaks
+│   │   └── staff-pay-rates.ts        # ✅ Pay rates, holidays, payroll calculations
 │   ├── api/
 │   │   ├── webhooks/
 │   │   │   └── clerk/
@@ -492,8 +653,10 @@ project-root/
 │   │   │   └── page.tsx              # ✅ Team + Scheduling tabs
 │   │   ├── clients/
 │   │   │   └── page.tsx              # ✅ Client list page
-│   │   └── services/
-│   │       └── page.tsx              # ✅ Services management
+│   │   ├── services/
+│   │   │   └── page.tsx              # ✅ Services management
+│   │   └── staff-management/
+│   │       └── page.tsx              # ✅ Staff management with tabs
 │   └── middleware.ts                 # ✅ Route protection
 ├── components/
 │   ├── admin/
@@ -517,6 +680,18 @@ project-root/
 │   │   │   ├── variant-list-modal.tsx  # ✅ View/manage variants
 │   │   │   ├── custom-pricing-modal.tsx # ✅ Team member custom pricing
 │   │   │   └── index.ts                # ✅ Exports
+│   │   ├── staff-management/
+│   │   │   ├── staff-management-client.tsx # ✅ Main container with tabs
+│   │   │   ├── time-clock-panel.tsx       # ✅ Clock in interface
+│   │   │   ├── active-shift-display.tsx   # ✅ Active shift with timer
+│   │   │   ├── time-entries-table.tsx     # ✅ Shift history
+│   │   │   ├── long-running-alert.tsx     # ✅ Warning banner
+│   │   │   ├── pay-rates-tab.tsx          # ✅ Pay rates container
+│   │   │   ├── default-pay-rates-card.tsx # ✅ System defaults
+│   │   │   ├── custom-pay-rates-list.tsx  # ✅ Per-member overrides
+│   │   │   ├── public-holidays-manager.tsx # ✅ Holiday CRUD
+│   │   │   ├── payroll-reports-tab.tsx    # ✅ Reporting interface
+│   │   │   └── index.ts                   # ✅ Exports
 │   │   └── team/
 │   │       ├── team-list-client.tsx  # ✅ Team member list
 │   │       ├── team-member-modal.tsx # ✅ Add/Edit team modal
@@ -542,38 +717,47 @@ project-root/
         ├── 001_initial_schema.sql    # ✅ Users, notes, team
         ├── 002_venues.sql            # ✅ Venues + slug generator
         ├── 003_scheduling_system.sql # ✅ Shifts, hours, assignments
-        └── 004_services_system.sql   # ✅ Services, categories, pricing
+        ├── 004_services_system.sql   # ✅ Services, categories, pricing
+        └── 005_staff_management.sql  # ✅ Time tracking, pay rates, holidays
 ```
 
 ---
 
 ## 🎯 Critical Decisions Summary
 
-| Decision                     | Choice                            | Rationale                                              |
-| ---------------------------- | --------------------------------- | ------------------------------------------------------ |
-| **Data Access Pattern**      | Service Role (server-side)        | Simpler, more secure, easier to maintain               |
-| **Authorization Pattern**    | Supabase only (no Clerk metadata) | Single source of truth, instant updates, no syncing    |
-| **Role Storage**             | Supabase users.roles ONLY         | No JWT caching issues, instant changes, simpler        |
-| **Role Changes**             | Immediate (no re-auth)            | Better UX, middleware queries DB on each request       |
-| **Client Data Access**       | Server-side with filtering        | Users access own data via filtered queries             |
-| **RLS Policies**             | Disabled                          | Not needed with Service Role                           |
-| **User Table Structure**     | Unified table with roles array    | Handles role transitions, single source of truth       |
-| **Authentication**           | Clerk                             | Industry standard, OAuth support, handles auth only    |
-| **Timezone Handling**        | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11), handles DST   |
-| **Date Storage**             | YYYY-MM-DD strings                | No timezone, consistent across all systems             |
-| **Date Parsing**             | Always add 'Z' suffix             | Forces UTC interpretation, no local timezone issues    |
-| **Date Methods**             | Use getUTCDay(), setUTCDate()     | Ensures consistent behavior regardless of local time   |
-| **Week Format**              | Monday-Sunday (ISO 8601)          | Industry standard, aligns with business week           |
-| **Client Filtering**         | Fetch + Filter in JavaScript      | Reliable for <10K records, easier to maintain          |
-| **Array Filtering**          | JavaScript over PostgREST         | PostgREST array syntax is tricky and version-dependent |
-| **Performance Trade-off**    | Slight over-fetching acceptable   | <100ms impact for typical salon, optimize when needed  |
-| **Service Types**            | Three-type system                 | Flexible: regular, variants, bundles                   |
-| **Variant Groups**           | Parent-child relationship         | Clean hierarchy, calculated pricing                    |
-| **Custom Pricing**           | NULL = default, value = override  | Flexible per-stylist rates without duplication         |
-| **Service State Management** | Props over state                  | Auto-updates after router.refresh()                    |
-| **Modal Workflows**          | Multi-step for complex forms      | Better UX, logical grouping                            |
-| **Loading States**           | Show during data refresh          | Clear user feedback, prevents confusion                |
-| **TypeScript Types**         | Explicit interfaces, no `any`     | Type safety, better IDE support, fewer bugs            |
+| Decision                     | Choice                                 | Rationale                                              |
+| ---------------------------- | -------------------------------------- | ------------------------------------------------------ |
+| **Data Access Pattern**      | Service Role (server-side)             | Simpler, more secure, easier to maintain               |
+| **Authorization Pattern**    | Supabase only (no Clerk metadata)      | Single source of truth, instant updates, no syncing    |
+| **Role Storage**             | Supabase users.roles ONLY              | No JWT caching issues, instant changes, simpler        |
+| **Role Changes**             | Immediate (no re-auth)                 | Better UX, middleware queries DB on each request       |
+| **Client Data Access**       | Server-side with filtering             | Users access own data via filtered queries             |
+| **RLS Policies**             | Disabled                               | Not needed with Service Role                           |
+| **User Table Structure**     | Unified table with roles array         | Handles role transitions, single source of truth       |
+| **Authentication**           | Clerk                                  | Industry standard, OAuth support, handles auth only    |
+| **Timezone Handling**        | UTC-safe everywhere                    | Prevents bugs in Melbourne (UTC+10/+11), handles DST   |
+| **Date Storage**             | YYYY-MM-DD strings                     | No timezone, consistent across all systems             |
+| **Date Parsing**             | Always add 'Z' suffix                  | Forces UTC interpretation, no local timezone issues    |
+| **Date Methods**             | Use getUTCDay(), setUTCDate()          | Ensures consistent behavior regardless of local time   |
+| **Week Format**              | Monday-Sunday (ISO 8601)               | Industry standard, aligns with business week           |
+| **Client Filtering**         | Fetch + Filter in JavaScript           | Reliable for <10K records, easier to maintain          |
+| **Array Filtering**          | JavaScript over PostgREST              | PostgREST array syntax is tricky and version-dependent |
+| **Performance Trade-off**    | Slight over-fetching acceptable        | <100ms impact for typical salon, optimize when needed  |
+| **Service Types**            | Three-type system                      | Flexible: regular, variants, bundles                   |
+| **Variant Groups**           | Parent-child relationship              | Clean hierarchy, calculated pricing                    |
+| **Custom Pricing**           | NULL = default, value = override       | Flexible per-stylist rates without duplication         |
+| **Service State Management** | Props over state                       | Auto-updates after router.refresh()                    |
+| **Modal Workflows**          | Multi-step for complex forms           | Better UX, logical grouping                            |
+| **Time Tracking**            | JSONB breaks array                     | Flexible, tracks multiple breaks per shift             |
+| **Pay Rates**                | Default + Custom (per member)          | System defaults with individual overrides              |
+| **Break Calculation**        | Paid threshold (e.g., 30min)           | First X minutes paid, remainder unpaid                 |
+| **Kiosk Mode**               | Admin manages any team member          | Efficient for physical time clock stations             |
+| **Rate Precedence**          | Custom > Default                       | Member-specific rates override system defaults         |
+| **Holiday Detection**        | Database lookup by date                | Automatic rate application without manual flagging     |
+| **Shift Status**             | Enum (clocked_in/on_break/completed)   | Clear state machine, prevents invalid transitions      |
+| **Payroll Grouping**         | By rate type (weekday/sat/sun/holiday) | Transparent breakdown for accounting                   |
+| **Loading States**           | Show during data refresh               | Clear user feedback, prevents confusion                |
+| **TypeScript Types**         | Explicit interfaces, no `any`          | Type safety, better IDE support, fewer bugs            |
 
 ---
 
@@ -581,57 +765,67 @@ project-root/
 
 **October 2025:**
 
-- ✅ **Completed Phase 4.5: Service Management** 🎉
+- ✅ **Completed Phase 4.75: Staff Management** 🎉
 
-  - Built complete service catalog system with categories
-  - Implemented three service types: Regular, Variants, Bundles
-  - Created variant management for services with options
-  - Built custom pricing system for individual team members
-  - Implemented venue and team member assignments
-  - Added search and category filtering
-  - Created 8 modal components for service operations
-  - Real-time updates with loading states
+  - Built complete time tracking and payroll system
+  - Implemented kiosk mode for admin management
+  - Created flexible pay rates system (default + custom)
+  - Built public holidays management
+  - Implemented comprehensive payroll reports
+  - Added break tracking with paid/unpaid calculation
+  - Created long-running shift alerts
+  - Real-time shift duration timer
 
-- ✅ **Service Architecture**
+- ✅ **Time Tracking Architecture**
 
-  - Flexible three-type system handles different service models
-  - Variant groups show "from" pricing calculated from minimum variant
-  - Bundle support ready for future implementation
-  - Services can be assigned to specific venues
-  - Services can be assigned to specific team members
-  - Custom pricing overrides at team member level
+  - Clock in/out with venue selection
+  - Break management (multiple breaks per shift)
+  - JSONB array for flexible break storage
+  - Status state machine (clocked_in → on_break → clocked_in → completed)
+  - Automatic hour calculations with database functions
+  - UTC-safe time handling throughout
 
-- ✅ **Custom Pricing Feature**
+- ✅ **Kiosk Mode Implementation**
 
-  - Team members can have custom rates per service
-  - Override both price and duration independently
-  - NULL values use service defaults (automatic updates)
-  - Set values are locked (won't change with service updates)
-  - Visual indicators (badges, buttons) for custom pricing
-  - Reset to default functionality
-  - Separate modal for clean UX
+  - Admins can select any team member from dropdown
+  - Admin actions pass selectedStaffId to server
+  - Non-admin users only see/manage own shifts
+  - Visual staff selector with photos
+  - Selected staff display banner
+  - Security enforced in all server actions
+
+- ✅ **Pay Rates System**
+
+  - System-wide default rates (weekday/Saturday/Sunday/holiday)
+  - Per-member custom rate overrides
+  - NULL values = use defaults (auto-update with system changes)
+  - Set values = locked overrides (don't change with system updates)
+  - Effective rate calculation based on date and member
+  - Paid break duration threshold
+  - Automatic rate application in payroll
+
+- ✅ **Payroll Reporting**
+
+  - Date range selection with quick presets
+  - Period types (weekly/fortnightly/monthly)
+  - Team member filtering (all or specific)
+  - Summary statistics (total pay, hours, averages)
+  - Breakdown by rate type (weekday/Saturday/Sunday/holiday)
+  - Expandable rows showing individual shifts
+  - CSV export functionality
 
 - ✅ **Technical Quality**
-
-  - Complete TypeScript type safety (no 'any' types)
-  - Proper interfaces for nested Supabase data
-  - useCallback for functions used in useEffect
-  - State synchronization patterns for edit modals
-  - Loading states and router refresh integration
-  - Props usage for list data (auto-updates)
-
-- ✅ **UI/UX Excellence**
-  - Category sidebar with colored indicators
-  - Service cards showing type badges
-  - 2-step modals for complex forms
-  - Loading overlays during operations
-  - Search and filter functionality
-  - Confirmation dialogs for destructive actions
-  - Clean, professional Fresha-inspired design
-  - Persistent "Customize" buttons for clarity
+  - Full TypeScript type safety
+  - Proper Supabase foreign key relationship hints
+  - useCallback optimization for performance
+  - Loading states for all async operations
+  - Error handling with user feedback
+  - Audit trail with created_by/updated_by
+  - Security checks for kiosk mode operations
 
 **Previous Updates:**
 
+- ✅ **Completed Phase 4.5: Service Management** (October 2025)
 - ✅ **Completed Phase 4: Client Management** (October 2025)
 - ✅ **Completed Phase 3.5: Scheduling System** (October 2025)
 - ✅ **Completed Phase 3: Admin Panel** (October 2025)
@@ -639,6 +833,61 @@ project-root/
 ---
 
 ## 🔮 Lessons Learned
+
+### Kiosk Mode Security Pattern
+
+**Implementation:**
+
+- Admin functions receive optional `teamMemberId` parameter
+- Server actions check: `isAdmin && teamMemberId ? teamMemberId : supabaseUserId`
+- Non-admin users automatically restricted to own ID
+- Admin with no teamMemberId also restricted to own ID
+- Security enforced server-side, not client-side
+
+**Key Principle:**
+
+> "For multi-user management, pass target user ID as optional parameter. Always verify admin status server-side before using provided ID."
+
+### JSONB for Flexible Data
+
+**Break Tracking Implementation:**
+
+- Breaks stored as JSONB array: `[{start: timestamp, end: timestamp | null}]`
+- Allows unlimited breaks per shift
+- Current break tracked separately: `current_break_start`
+- Easy to query and calculate total break time
+- Schema remains flexible for future additions
+
+**Key Principle:**
+
+> "Use JSONB for arrays of structured data that don't need complex queries. Simpler than junction tables for 1:N relationships when N items are always queried together."
+
+### Pay Rate Precedence Pattern
+
+**NULL vs Set Value Overrides:**
+
+- NULL in custom rate = use system default (auto-updates)
+- Set value in custom rate = locked override (manual updates only)
+- Database function checks custom first, falls back to default
+- Clear intent: NULL means "no preference", value means "locked"
+
+**Key Principle:**
+
+> "For override patterns, NULL = 'inherit default' (auto-updates), explicit value = 'locked override' (manual only). Makes intent clear and behavior predictable."
+
+### Effective Rate Calculation
+
+**Date-Aware Rate Logic:**
+
+- Check if date is public holiday → use holiday rate
+- Else check day of week → use weekday/Saturday/Sunday rate
+- Always check custom rates first, then default rates
+- Database function keeps logic centralized
+- Single source of truth for all payroll calculations
+
+**Key Principle:**
+
+> "Centralize complex business logic in database functions. Ensures consistency across all application layers and simplifies testing."
 
 ### Modal State Synchronization
 
@@ -823,4 +1072,4 @@ const services = initialServices;
 **Document Status:** Living document - update as architecture evolves  
 **Next Review:** After Booking System (Phase 5) planning  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Completed Phase 4.5 - Service Management (October 2025)
+**Last Major Change:** Completed Phase 4.75 - Staff Management (October 2025)
