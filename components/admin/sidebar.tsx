@@ -24,7 +24,7 @@ const navItems = [
   { href: '/admin/services', icon: Tag, label: 'Services' },
   { href: '/admin/clients', icon: Smile, label: 'Clients' },
   { href: '/admin/bookings', icon: BookOpen, label: 'Bookings' },
-  { href: '/admin/profile', icon: User, label: 'Profile' },
+  { href: '/admin/staff-management', icon: User, label: 'Shift' },
   { href: '/admin/marketplace', icon: Megaphone, label: 'Marketplace' },
   { href: '/admin/team', icon: Users, label: 'Team' },
   { href: '/admin/analytics', icon: TrendingUp, label: 'Analytics' },
