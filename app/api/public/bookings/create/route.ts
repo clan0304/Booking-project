@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase/server';
 
 interface CreateBookingRequest {
   venue_id: string;
+  client_id?: string | null; // ✅ ADDED: Optional client_id for authenticated users
   guest_first_name: string;
   guest_last_name: string;
   guest_email: string;
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
       .from('booking_groups')
       .insert({
         venue_id: body.venue_id,
-        client_id: null, // Public booking, no client_id
+        client_id: body.client_id || null, // ✅ FIXED: Use provided client_id if authenticated
         guest_first_name: body.guest_first_name,
         guest_last_name: body.guest_last_name,
         guest_email: body.guest_email,
