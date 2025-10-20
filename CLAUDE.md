@@ -595,6 +595,168 @@
   - [x] Server-side filtering based on user role
   - [x] Audit trail with created_by and updated_by
 
+### Phase 4.8: Products Management ✅ (COMPLETED)
+
+**⚠️ Special Note:** This phase uses **JWT + RLS** for educational purposes to demonstrate database-level security. This is an ISOLATED implementation - all other features continue using the Service Role pattern.
+
+- [x] **Database Schema (with RLS enabled)**
+
+  - [x] Products table (linked to venue_id)
+  - [x] Categories table (linked to venue_id)
+  - [x] Product-images storage bucket (5MB limit, public read)
+  - [x] RLS policies enabled (Admin: full CRUD, Team: read-only)
+  - [x] Helper function: get_clerk_user_id() for JWT extraction
+  - [x] Storage RLS policies for image uploads
+  - [x] Updated_at triggers for both tables
+
+- [x] **JWT + RLS Integration (Products Only)**
+
+  - [x] Clerk JWT template configuration:
+    - [x] Template name: 'supabase'
+    - [x] Signing algorithm: HS256
+    - [x] Claims: email only (sub auto-included)
+    - [x] Supabase JWT Secret as signing key
+  - [x] Supabase JWT client (lib/supabase/jwt-client.ts):
+    - [x] createSupabaseJWTClient() function
+    - [x] Uses Clerk getToken({ template: 'supabase' })
+    - [x] Passes JWT in Authorization header
+  - [x] JWT-based authentication for products ONLY
+  - [x] Database-level permission enforcement via RLS
+  - [x] Policies check users.roles array via clerk_user_id
+  - [x] Admin: INSERT, UPDATE, DELETE access
+  - [x] Team Member: SELECT (read-only) access
+
+- [x] **Products Management**
+
+  - [x] Two-tab interface (Products | Categories)
+  - [x] Products table with image thumbnails
+  - [x] Search by product name
+  - [x] Filter by venue and category
+  - [x] Stats dashboard (Total, In Stock, Low Stock, Out of Stock)
+  - [x] Stock status badges (In Stock/Low Stock/Out of Stock)
+  - [x] Dropdown action menus (⋮ icon)
+  - [x] Add product modal with image upload
+  - [x] Edit product modal with state synchronization
+  - [x] Delete product with image cleanup confirmation
+  - [x] Price and quantity management
+  - [x] Category assignment per product
+
+- [x] **Categories Management**
+
+  - [x] Categories table with color badges
+  - [x] Search by category name
+  - [x] Filter by venue
+  - [x] Color picker with 8 preset colors:
+    - [x] Red, Orange, Yellow, Green, Blue, Purple, Pink, Gray
+  - [x] Add category modal
+  - [x] Edit category modal with state sync
+  - [x] Delete category with product handling
+  - [x] Color preview in table
+  - [x] Stats dashboard (Total Categories, Active Venues)
+
+- [x] **Image Upload System**
+
+  - [x] FormData handling for Server Actions
+  - [x] File → ArrayBuffer → Uint8Array conversion
+  - [x] 5MB file size limit validation
+  - [x] Image type validation (jpg, png, webp)
+  - [x] Image preview before upload
+  - [x] Remove/replace image functionality
+  - [x] Automatic image deletion on product delete
+  - [x] Storage path: `{venueId}/{timestamp}-{random}.{ext}`
+  - [x] Next.js config: experimental.serverActions.bodySizeLimit: '10mb'
+
+- [x] **Multi-Venue Support**
+
+  - [x] Products scoped to specific venues
+  - [x] Categories scoped to specific venues
+  - [x] Venue selector in all forms
+  - [x] Venue filter dropdown in lists
+  - [x] Category filter shows only venue's categories
+  - [x] Supports multiple locations/salons
+
+- [x] **Server Actions (JWT Client Only)**
+
+  - [x] getProducts(venueId?), getProductById(id)
+  - [x] createProduct, updateProduct, deleteProduct
+  - [x] getCategories(venueId?)
+  - [x] createCategory, updateCategory, deleteCategory
+  - [x] uploadProductImage(venueId, formData)
+  - [x] deleteProductImage(imageUrl)
+  - [x] All actions use createSupabaseJWTClient()
+  - [x] All actions enforce requireAuth() or requireAdmin()
+
+- [x] **UI Components**
+
+  - [x] ProductsContent (tab container)
+  - [x] ProductsTab (products list with filters)
+  - [x] CategoriesTab (categories list with filters)
+  - [x] AddProductModal (image upload, venue/category selection)
+  - [x] EditProductModal (sync on open with useEffect)
+  - [x] DeleteProductDialog (confirmation)
+  - [x] AddCategoryModal (color picker)
+  - [x] EditCategoryModal (sync on open with useEffect)
+  - [x] DeleteCategoryDialog (confirmation)
+
+- [x] **Technical Challenges Solved**
+
+  - [x] FormData for file uploads:
+    - [x] File objects can't be serialized in Server Actions
+    - [x] Solution: Convert to FormData on client
+    - [x] Extract file and convert to ArrayBuffer on server
+  - [x] Next.js body size limit:
+    - [x] Default 1MB limit too small for images
+    - [x] Solution: experimental.serverActions.bodySizeLimit: '10mb'
+  - [x] Badge variant compatibility:
+    - [x] shadcn/ui Badge doesn't have warning/success variants
+    - [x] Solution: Use secondary/default/destructive variants
+  - [x] Select empty string error:
+    - [x] SelectItem value="" causes error
+    - [x] Solution: Use value="none" and convert to empty string
+  - [x] Image preview:
+    - [x] Next.js Image requires width/height or fill
+    - [x] Solution: Use regular img tag for blob URLs
+  - [x] Modal state sync:
+    - [x] useState initial value only runs once
+    - [x] Solution: useEffect to sync when modal opens
+
+- [x] **Security Implementation**
+  - [x] **Database Level (RLS Policies):**
+    - [x] Policies check clerk_user_id from JWT
+    - [x] Admin role: full CRUD operations
+    - [x] Team member role: read-only access
+    - [x] Client role: no access
+  - [x] **Application Level:**
+    - [x] requireAuth() on all server actions
+    - [x] requireAdmin() on write operations
+    - [x] File size validation (5MB max)
+    - [x] File type validation (images only)
+  - [x] **Storage Level:**
+    - [x] Admins can upload/update/delete images
+    - [x] Public read access for display
+    - [x] RLS policies on storage.objects
+
+**Architecture Comparison:**
+
+| Feature      | Products (Phase 4.8)         | All Other Features       |
+| ------------ | ---------------------------- | ------------------------ |
+| **Client**   | `createSupabaseJWTClient()`  | `supabaseAdmin`          |
+| **Auth**     | JWT from Clerk template      | Service Role key         |
+| **Security** | RLS Policies (database)      | Server Actions (app)     |
+| **Purpose**  | Learning JWT + RLS           | Production pattern       |
+| **File**     | `lib/supabase/jwt-client.ts` | `lib/supabase/client.ts` |
+
+**Key Learnings:**
+
+- ✅ JWT + RLS provides defense-in-depth security
+- ✅ Database enforces permissions even if app has bugs
+- ✅ More complex to set up and debug than Service Role
+- ✅ Good for learning, but Service Role is simpler for most cases
+- ✅ FormData pattern works around Server Actions file size limits
+- ✅ Can migrate other features to RLS in the future if needed
+
+**Files Created:**
+
 ### Phase 5: Booking System (FUTURE)
 
 - [ ] Appointment booking schema

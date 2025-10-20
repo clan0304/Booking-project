@@ -28,7 +28,7 @@ const navItems = [
   { href: '/admin/marketplace', icon: Megaphone, label: 'Marketplace' },
   { href: '/admin/team', icon: Users, label: 'Team' },
   { href: '/admin/analytics', icon: TrendingUp, label: 'Analytics' },
-  { href: '/admin/more', icon: LayoutGrid, label: 'More' },
+  { href: '/admin/products', icon: LayoutGrid, label: 'Products' },
   { href: '/admin/settings', icon: Settings, label: 'Settings' },
 ];
 
