@@ -6,6 +6,7 @@ interface BookingGroupData {
   booking_date: string;
   guest_first_name: string;
   guest_last_name: string | null;
+  venue_id: string; // ✅ ADDED
 }
 
 interface RawAppointmentFromDB {
@@ -103,13 +104,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * GET: Get available time slots for a team member on a specific date
- * This checks:
- * 1. Team member's shift hours for that date (from shifts table)
- * 2. Existing appointments to find free slots
- * 3. Venue closed days
- */
+// app/api/public/bookings/availability/route.ts
+// FIXED: Added venue_id filtering to shift query
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -146,12 +143,19 @@ export async function GET(request: NextRequest) {
     }
 
     // 2. Get team member's shift for this date from shifts table
-    const { data: shift, error: shiftError } = await supabaseAdmin
+    // ✅ FIXED: Added venue_id filter to ensure only this venue's shifts are checked
+    let shiftQuery = supabaseAdmin
       .from('shifts')
       .select('id, start_time, end_time, notes')
       .eq('team_member_id', teamMemberId)
-      .eq('shift_date', date)
-      .maybeSingle();
+      .eq('shift_date', date);
+
+    // Only filter by venue if venueId is provided
+    if (venueId) {
+      shiftQuery = shiftQuery.eq('venue_id', venueId);
+    }
+
+    const { data: shift, error: shiftError } = await shiftQuery.maybeSingle();
 
     if (shiftError) {
       console.error('Error fetching shift:', shiftError);
@@ -161,12 +165,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // If no shift, team member is not working that day
+    // If no shift, team member is not working that day AT THIS VENUE
     if (!shift) {
       return NextResponse.json({
         available: false,
         reason: 'no_shift',
-        message: 'Team member is not scheduled to work on this date',
+        message: venueId
+          ? 'Team member is not scheduled to work at this venue on this date'
+          : 'Team member is not scheduled to work on this date',
         slots: [],
         shift: null,
       });
@@ -184,7 +190,7 @@ export async function GET(request: NextRequest) {
         end_time,
         service_name,
         status,
-        booking_groups!inner(booking_date, guest_first_name, guest_last_name)
+        booking_groups!inner(booking_date, guest_first_name, guest_last_name, venue_id)
       `
       )
       .eq('team_member_id', teamMemberId)
@@ -202,9 +208,20 @@ export async function GET(request: NextRequest) {
     // Format appointments for response
     const rawAppointments = (appointments || []) as RawAppointmentFromDB[];
 
+    // ✅ ADDED: Filter appointments by venue if venueId provided
+    let filteredAppointments = rawAppointments;
+    if (venueId) {
+      filteredAppointments = rawAppointments.filter((appt) => {
+        const bookingGroup = Array.isArray(appt.booking_groups)
+          ? appt.booking_groups[0]
+          : appt.booking_groups;
+        return bookingGroup.venue_id === venueId;
+      });
+    }
+
     // Transform to ensure booking_groups is a single object
     const typedAppointments: AppointmentWithBookingGroup[] =
-      rawAppointments.map((appt) => ({
+      filteredAppointments.map((appt) => ({
         id: appt.id,
         start_time: appt.start_time,
         end_time: appt.end_time,

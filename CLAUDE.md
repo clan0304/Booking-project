@@ -755,23 +755,341 @@
 - ✅ FormData pattern works around Server Actions file size limits
 - ✅ Can migrate other features to RLS in the future if needed
 
-**Files Created:**
+### Phase 5: Booking System (IN PROGRESS) 🚧
 
-### Phase 5: Booking System (FUTURE)
+- [x] **Database Schema**
+  - [x] Booking groups table (venue, client, guest info, totals, status)
+  - [x] Appointments table (service, team member, time slots, pricing)
+  - [x] Foreign key relationships (booking_groups ← appointments)
+  - [x] Status enums (confirmed, cancelled, completed, no_show)
+  - [x] Booking source tracking (online, admin, walk_in, phone)
+- [x] **Public Booking Flow - Frontend**
+  - [x] Service selection step
+  - [x] Team member selection step
+  - [x] Date & time selection step (calendar + time slots)
+  - [x] Guest information step
+  - [x] Booking summary/review step
+  - [x] Booking confirmation step
+  - [x] Progress indicator (step tracker)
+  - [x] Back navigation between steps
+- [x] **Availability System** ✅
+  - [x] API endpoint: `/api/public/bookings/availability`
+  - [x] Venue closed days check
+  - [x] Team member shift check (from shifts table)
+  - [x] Existing appointments check (conflict detection)
+  - [x] Available time slot generation (30-min intervals)
+  - [x] **Venue-specific filtering** (shows only shifts for selected venue)
+  - [x] Real-time availability updates
+  - [x] Booked slot exclusion
+- [x] **Calendar Component** ✅
+  - [x] Month view with navigation (prev/next)
+  - [x] Weekday headers (Sun-Mon-Sat)
+  - [x] Date selection with visual feedback
+  - [x] Past dates disabled
+  - [x] "Today" indicator
+  - [x] Selected date highlighting
+  - [x] **Timezone-safe date handling** (Melbourne UTC+10/+11)
+  - [x] **Fixed timezone bug** (local date formatting instead of UTC conversion)
+- [x] **Time Slot Selection** ✅
+  - [x] Shows available times for selected date
+  - [x] 30-minute interval slots
+  - [x] Service duration display
+  - [x] Time slot selection per service
+  - [x] Visual feedback for selected times
+  - [x] Loading states during availability fetch
+  - [x] Venue-specific availability filtering
+- [x] **Public Booking Pages**
 
-- [ ] Appointment booking schema
-- [ ] Booking flow for clients
-- [ ] Availability management based on shifts and services
-- [ ] Email notifications
-- [ ] SMS reminders
-- [ ] Booking confirmations
-- [ ] Payment integration
-- [ ] Public booking pages (using venue slugs)
-- [ ] Calendar view for appointments
-- [ ] Conflict detection and resolution
-- [ ] Cancellation and rescheduling
+  - [x] Venue-specific booking URLs (`/[venue-slug]`)
+  - [x] Venue information display
+  - [x] Service catalog by category
+  - [x] Team member profiles
+  - [x] SEO-friendly slugs
+
+- [x] **Booking Creation** ✅
+  - [x] API endpoint: `/api/public/bookings/create`
+  - [x] Request validation (venue, guest info, appointments)
+  - [x] Availability check for all appointments
+  - [x] Double-booking prevention (RPC: is_time_slot_available)
+  - [x] Guest information handling
+  - [x] Client ID association for authenticated users
+  - [x] Transaction rollback on appointment creation failure
+  - [x] Booking group creation with totals calculation
+  - [x] Multiple appointments per booking
+  - [x] Status tracking (confirmed/cancelled/completed/no_show)
+  - [x] Booking confirmation response
+- [x] **Server Actions (app/actions/bookings.ts)** ✅
+  - [x] createOnlineBooking (client-authenticated)
+  - [x] createAdminBooking (staff/admin only)
+  - [x] updateMyBooking (client-owned only)
+  - [x] updateBooking (staff/admin only)
+  - [x] getMyBookings (client view)
+  - [x] deleteBooking (admin only)
+  - [x] checkAvailability helper
+- [ ] **Email Notifications** (TODO)
+  - [ ] Booking confirmation emails
+  - [ ] Reminder emails (24h before)
+  - [ ] Cancellation notifications
+- [ ] **Admin Booking Management** (TODO)
+  - [ ] View all bookings
+  - [ ] Create manual bookings
+  - [ ] Edit existing bookings
+  - [ ] Cancel/reschedule bookings
+  - [ ] Mark as completed/no-show
+  - [ ] Calendar view for appointments
+- [ ] **Payment Integration** (TODO)
+  - [ ] Stripe integration
+  - [ ] Payment processing
+  - [ ] Deposit handling
+  - [ ] Refund management
 
 ---
+
+## 📝 Recent Updates
+
+**October 2025:**
+
+- ✅ **Phase 5: Public Booking System (Partial)** 🎉
+
+  - Built complete public booking flow (6 steps)
+  - Implemented real-time availability system
+  - **Completed booking creation API with validation**
+  - Fixed critical timezone bug in calendar
+  - Added venue-specific availability filtering
+  - Calendar component with timezone-safe date handling
+  - Transaction safety with rollback on errors
+
+- ✅ **Booking Creation Architecture**
+
+  - **Two-Phase Transaction:**
+
+    1. Create booking_group (venue, guest info, totals, status)
+    2. Create appointments (service, team member, times, pricing)
+    3. Rollback booking_group if appointments fail
+
+  - **Availability Validation:**
+
+    - Calls database RPC: `is_time_slot_available()`
+    - Checks each appointment before creation
+    - Returns 409 Conflict if any slot unavailable
+    - Prevents race conditions with database-level checks
+
+  - **Client Association:**
+
+    - Accepts optional `client_id` for authenticated users
+    - Links booking to user account when logged in
+    - Stores as guest booking when not authenticated
+    - Booking history accessible via account
+
+  - **Request Structure:**
+
+    ```typescript
+    {
+      venue_id: string,
+      client_id?: string | null,
+      guest_first_name: string,
+      guest_last_name: string,
+      guest_email: string,
+      guest_phone: string,
+      booking_date: string,
+      notes?: string,
+      appointments: [{
+        service_id: string,
+        variant_id?: string | null,
+        team_member_id: string,
+        start_time: string,
+        end_time: string,
+        duration_minutes: number,
+        service_name: string,
+        price: number,
+        notes?: string
+      }]
+    }
+    ```
+
+  - **Response Handling:**
+
+    - Success: Returns booking_group with ID
+    - Validation Error: 400 with error message
+    - Conflict: 409 when time slot unavailable
+    - Server Error: 500 with rollback executed
+
+  - 4-step availability check process:
+
+    1. Venue closed days check
+    2. Team member shift check (venue-specific)
+    3. Existing appointments check (venue-specific)
+    4. Available time slot generation
+
+  - Database queries filter by:
+
+    - `venue_id` in closed days table
+    - `venue_id` in shifts table (ensures correct venue shifts)
+    - `venue_id` in booking_groups (prevents cross-venue conflicts)
+
+  - Returns available slots with shift details and booked appointments
+
+- ✅ **Calendar Timezone Fix**
+
+  - **Problem:** `date.toISOString().split('T')[0]` converted Melbourne local time to UTC
+
+    - User clicked Saturday → converted to Friday UTC → showed wrong availability
+
+  - **Solution:** Created `formatLocalDate()` helper using local timezone methods
+
+    ```typescript
+    // ✅ Uses getFullYear(), getMonth(), getDate() (local)
+    function formatLocalDate(date: Date): string {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    ```
+
+  - **Result:** Calendar date matches exactly what user sees and clicks
+
+- ✅ **Venue-Specific Availability**
+
+  - **Problem:** Availability API showed shifts from ALL venues for team member
+
+    - David works Mon-Thu at Oakleigh, Saturday at Richmond
+    - Richmond booking showed Mon-Thu availability (from Oakleigh shifts)
+
+  - **Solution:** Added venue filtering to both shift and appointment queries
+
+    ```typescript
+    // Filter shifts by venue
+    .eq('venue_id', venueId)
+
+    // Filter appointments by venue
+    booking_groups!inner(venue_id)
+    where venue_id = venueId
+    ```
+
+  - **Result:** Only shows availability for the specific venue being booked
+
+- ✅ **Technical Quality**
+  - Local timezone handling for user-facing dates
+  - UTC-safe methods for database date storage
+  - Proper date string comparison without timezone conversion
+  - Type-safe interfaces for booking data
+  - Loading states and error handling
+  - Responsive design for mobile booking
+
+---
+
+## 🔮 Lessons Learned
+
+### Timezone Handling: Local vs UTC
+
+**When to Use Each:**
+
+- **Local Timezone (User-Facing):**
+
+  - Calendar display and selection
+  - User clicks date → uses `getFullYear()`, `getMonth()`, `getDate()`
+  - Converts to `YYYY-MM-DD` string using local values
+  - Example: `formatLocalDate(date)` for booking calendar
+
+- **UTC Timezone (Database/Admin):**
+  - Admin scheduling system
+  - Database date storage and queries
+  - Uses `getUTCFullYear()`, `getUTCMonth()`, `getUTCDate()`
+  - Prevents timezone bugs in shift management
+  - Example: `formatDate(date)` from `lib/shift-helpers.ts`
+
+**Key Principle:**
+
+> "Match timezone handling to context: Local for user-facing calendar selection, UTC for backend scheduling and database operations. Never mix the two in the same flow."
+
+### Venue-Specific Data Filtering
+
+**Problem Pattern:**
+
+- Multi-location businesses need strict data isolation
+- Team members work at multiple venues on different days
+- Availability must be venue-specific, not team-member-wide
+- Database queries must explicitly filter by venue_id
+
+**Solution Pattern:**
+
+```typescript
+// ❌ WRONG: Shows ALL shifts for team member
+.eq('team_member_id', teamMemberId)
+.eq('shift_date', date)
+
+// ✅ CORRECT: Shows only shifts for THIS venue
+.eq('team_member_id', teamMemberId)
+.eq('venue_id', venueId)  // Critical filter
+.eq('shift_date', date)
+```
+
+**Key Principle:**
+
+> "In multi-location systems, ALWAYS filter by venue_id in availability queries. Team member availability is venue-specific, not global."
+
+### Date String Comparison Without Timezone
+
+**Problem Discovered:**
+
+- Comparing dates using `toISOString()` causes timezone conversion
+- Melbourne Saturday becomes Friday in UTC
+- Calendar selection doesn't match API query date
+
+**Solution Implemented:**
+
+```typescript
+// ❌ WRONG: Timezone conversion
+const dateStr = date.toISOString().split('T')[0];
+// Melbourne Sat 2025-11-01 → '2025-10-31' (UTC)
+
+// ✅ CORRECT: Local date extraction
+const dateStr = formatLocalDate(date);
+// Melbourne Sat 2025-11-01 → '2025-11-01' (local)
+```
+
+**Key Principle:**
+
+> "For user-facing date selection, extract date components using local methods. Store as YYYY-MM-DD string. Never use toISOString() for calendar dates."
+
+### API Response Structure
+
+**Availability API Design:**
+
+```typescript
+// Success response structure
+{
+  available: boolean,
+  reason: 'available' | 'venue_closed' | 'no_shift' | 'fully_booked',
+  message: string,
+  slots: string[],  // ['10:00', '10:30', '11:00']
+  shift: {
+    start_time: string,
+    end_time: string,
+    notes: string | null
+  },
+  booked: Array<{
+    appointment_id: string,
+    start_time: string,
+    end_time: string,
+    service_name: string,
+    client_name: string
+  }>
+}
+```
+
+**Why This Works:**
+
+- Clear boolean for quick availability check
+- Reason code for UI messaging
+- Human-readable message
+- Detailed slot and booking data for debugging
+- Shift context for admin understanding
+
+**Key Principle:**
+
+> "API responses should be both machine-parseable (boolean, enums) and human-readable (messages, detailed context). Include debug information even in production."
 
 ## 📚 Key Files Structure
 
