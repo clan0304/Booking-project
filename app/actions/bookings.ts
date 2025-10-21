@@ -4,6 +4,8 @@
 import { requireAuth, requireStaff, requireAdmin } from '@/lib/auth';
 import { createSupabaseJWTClient } from '@/lib/supabase/jwt-client';
 import { revalidatePath } from 'next/cache';
+import type { CalendarBooking } from '@/types/calendar';
+import { supabaseAdmin } from '@/lib/supabase/server';
 
 // =====================================================
 // TYPES
@@ -225,6 +227,51 @@ interface BookingGroupForStaff {
     first_name: string;
     last_name: string;
   } | null;
+}
+
+interface RawAppointmentFromDB {
+  id: string;
+  service_name: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  price: number;
+  status: string;
+  notes: string | null;
+  team_member_id: string;
+}
+
+interface RawBookingFromDB {
+  id: string;
+  venue_id: string;
+  guest_first_name: string;
+  guest_last_name: string | null;
+  guest_email: string | null;
+  guest_phone: string | null;
+  booking_date: string;
+  total_appointments: number;
+  total_price: number;
+  status: string;
+  notes: string | null;
+  internal_notes: string | null;
+  booking_source: string;
+  created_at: string;
+  client_id: string | null;
+  venues:
+    | {
+        id: string;
+        name: string;
+        address: string;
+      }[]
+    | null;
+  appointments: RawAppointmentFromDB[] | null;
+}
+
+interface TeamMemberFromDB {
+  id: string;
+  first_name: string;
+  last_name: string;
+  photo_url: string | null;
 }
 
 // =====================================================
@@ -1212,6 +1259,164 @@ export async function checkAvailability(
     return { success: true, available: data };
   } catch (error) {
     console.error('Error in checkAvailability:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Get bookings for calendar view (staff/admin only)
+ * Fetches bookings with appointments and team member info
+ * Uses Service Role for reliable data access
+ */
+export async function getCalendarBookings(filters: {
+  venueId?: string;
+  teamMemberId?: string;
+  startDate: string;
+  endDate: string;
+  viewType: 'day' | 'week';
+}): Promise<{
+  success: boolean;
+  data?: CalendarBooking[];
+  error?: string;
+}> {
+  try {
+    await requireStaff();
+    const supabase = await createSupabaseJWTClient();
+
+    // Build query for booking_groups with nested appointments
+    let query = supabase
+      .from('booking_groups')
+      .select(
+        `
+        id,
+        venue_id,
+        guest_first_name,
+        guest_last_name,
+        guest_email,
+        guest_phone,
+        booking_date,
+        total_appointments,
+        total_price,
+        status,
+        notes,
+        internal_notes,
+        booking_source,
+        created_at,
+        client_id,
+        venues (
+          id,
+          name,
+          address
+        ),
+        appointments (
+          id,
+          service_name,
+          start_time,
+          end_time,
+          duration_minutes,
+          price,
+          status,
+          notes,
+          team_member_id
+        )
+      `
+      )
+      .gte('booking_date', filters.startDate)
+      .lte('booking_date', filters.endDate)
+      .neq('status', 'fully_cancelled')
+      .order('booking_date', { ascending: true })
+      .order('created_at', { ascending: false });
+
+    // Apply venue filter if specified
+    if (filters.venueId) {
+      query = query.eq('venue_id', filters.venueId);
+    }
+
+    const { data: bookings, error } = await query;
+
+    if (error) {
+      console.error('Error fetching calendar bookings:', error);
+      return { success: false, error: 'Failed to fetch bookings' };
+    }
+
+    if (!bookings || bookings.length === 0) {
+      return { success: true, data: [] };
+    }
+
+    // Type assertion for raw database results
+    const rawBookings = bookings as RawBookingFromDB[];
+
+    // Filter by team member if specified (client-side filtering since nested)
+    let filteredBookings = rawBookings;
+    if (filters.teamMemberId) {
+      filteredBookings = rawBookings.filter((booking) =>
+        booking.appointments?.some(
+          (appt) => appt.team_member_id === filters.teamMemberId
+        )
+      );
+    }
+
+    // Extract unique team member IDs from all appointments
+    const allAppointments = filteredBookings.flatMap(
+      (b) => b.appointments || []
+    );
+    const teamMemberIds = [
+      ...new Set(allAppointments.map((a) => a.team_member_id)),
+    ];
+
+    // Fetch team member details using Service Role (bypasses RLS)
+    let teamMembers: TeamMemberFromDB[] = [];
+    if (teamMemberIds.length > 0) {
+      const { data, error: tmError } = await supabaseAdmin
+        .from('users')
+        .select('id, first_name, last_name, photo_url')
+        .in('id', teamMemberIds);
+
+      if (tmError) {
+        console.error('Error fetching team members:', tmError);
+      } else {
+        teamMembers = data || [];
+      }
+    }
+
+    // Transform to CalendarBooking type with team member info attached
+    const calendarBookings: CalendarBooking[] = filteredBookings.map(
+      (booking) => ({
+        id: booking.id,
+        venue_id: booking.venue_id,
+        guest_first_name: booking.guest_first_name,
+        guest_last_name: booking.guest_last_name,
+        guest_email: booking.guest_email,
+        guest_phone: booking.guest_phone,
+        booking_date: booking.booking_date,
+        total_appointments: booking.total_appointments,
+        total_price: booking.total_price,
+        status: booking.status,
+        notes: booking.notes,
+        internal_notes: booking.internal_notes,
+        booking_source: booking.booking_source,
+        created_at: booking.created_at,
+        client_id: booking.client_id,
+        venues: booking.venues,
+        appointments: (booking.appointments || []).map((appt) => ({
+          id: appt.id,
+          service_name: appt.service_name,
+          start_time: appt.start_time,
+          end_time: appt.end_time,
+          duration_minutes: appt.duration_minutes,
+          price: appt.price,
+          status: appt.status,
+          notes: appt.notes,
+          team_member_id: appt.team_member_id,
+          team_member:
+            teamMembers.find((tm) => tm.id === appt.team_member_id) || null,
+        })),
+      })
+    );
+
+    return { success: true, data: calendarBookings };
+  } catch (error) {
+    console.error('Error in getCalendarBookings:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
