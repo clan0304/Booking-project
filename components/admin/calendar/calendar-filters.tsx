@@ -56,6 +56,11 @@ export function CalendarFilters({
         if (venuesRes.ok) {
           const venuesData = await venuesRes.json();
           setVenues(venuesData);
+
+          // Set first venue as default if none selected
+          if (venuesData.length > 0 && !selectedVenue) {
+            onVenueChange(venuesData[0].id);
+          }
         }
 
         // Fetch team members using existing API
@@ -73,7 +78,7 @@ export function CalendarFilters({
     };
 
     fetchData();
-  }, []);
+  }, [selectedVenue, onVenueChange]);
 
   // Navigation handlers
   const handlePrevious = () => {
@@ -179,13 +184,12 @@ export function CalendarFilters({
 
         {/* Right: Filters */}
         <div className="flex items-center gap-2">
-          {/* Venue Filter */}
+          {/* Venue Filter - No "All" option */}
           <select
             value={selectedVenue}
             onChange={(e) => onVenueChange(e.target.value)}
             className="px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
           >
-            <option value="all">All Venues</option>
             {venues.map((venue) => (
               <option key={venue.id} value={venue.id}>
                 {venue.name}
@@ -193,7 +197,7 @@ export function CalendarFilters({
             ))}
           </select>
 
-          {/* Team Member Filter */}
+          {/* Team Member Filter - Keep "All" option */}
           <select
             value={selectedTeamMember}
             onChange={(e) => onTeamMemberChange(e.target.value)}

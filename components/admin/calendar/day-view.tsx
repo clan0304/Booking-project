@@ -13,19 +13,54 @@ import Image from 'next/image';
 
 interface DayViewProps {
   bookings: CalendarBooking[];
+  shifts: Array<{
+    team_member_id: string;
+    shift_date: string;
+    start_time: string;
+    end_time: string;
+    team_member: {
+      id: string;
+      first_name: string;
+      last_name: string;
+      photo_url: string | null;
+    };
+  }>;
+  assignedTeamMembers: Array<{
+    id: string;
+    first_name: string;
+    last_name: string;
+    photo_url: string | null;
+  }>;
+  currentDate: string;
 }
 
-export function DayView({ bookings }: DayViewProps) {
-  // Generate time slots (8 AM to 8 PM, 30-min intervals)
+export function DayView({
+  bookings,
+  shifts,
+  assignedTeamMembers,
+  currentDate,
+}: DayViewProps) {
+  // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
     const slots: string[] = [];
     for (let hour = 8; hour <= 20; hour++) {
       slots.push(`${hour.toString().padStart(2, '0')}:00`);
       if (hour < 20) {
+        slots.push(`${hour.toString().padStart(2, '0')}:15`);
         slots.push(`${hour.toString().padStart(2, '0')}:30`);
+        slots.push(`${hour.toString().padStart(2, '0')}:45`);
       }
     }
     return slots;
+  }, []);
+
+  // Generate hour labels (only show on the hour)
+  const hourLabels = useMemo((): string[] => {
+    const labels: string[] = [];
+    for (let hour = 8; hour <= 20; hour++) {
+      labels.push(`${hour.toString().padStart(2, '0')}:00`);
+    }
+    return labels;
   }, []);
 
   // Group appointments by team member
@@ -35,12 +70,12 @@ export function DayView({ bookings }: DayViewProps) {
       { member: CalendarTeamMember; appointments: AppointmentWithBooking[] }
     >();
 
+    // First, add team members from bookings
     bookings.forEach((booking) => {
       booking.appointments?.forEach((appointment) => {
         const memberId = appointment.team_member_id;
         const member = appointment.team_member;
 
-        // Skip if team member info is missing
         if (!member) return;
 
         if (!grouped.has(memberId)) {
@@ -54,8 +89,67 @@ export function DayView({ bookings }: DayViewProps) {
       });
     });
 
+    // Then, add team members from shifts (for today) who don't have bookings yet
+    const todayShifts = shifts.filter((s) => s.shift_date === currentDate);
+    todayShifts.forEach((shift) => {
+      if (!grouped.has(shift.team_member_id)) {
+        grouped.set(shift.team_member_id, {
+          member: {
+            id: shift.team_member.id,
+            first_name: shift.team_member.first_name,
+            last_name: shift.team_member.last_name,
+            photo_url: shift.team_member.photo_url,
+          },
+          appointments: [],
+        });
+      }
+    });
+
+    // Finally, add ALL assigned team members (even without shifts for today)
+    assignedTeamMembers.forEach((member) => {
+      if (!grouped.has(member.id)) {
+        grouped.set(member.id, {
+          member: {
+            id: member.id,
+            first_name: member.first_name,
+            last_name: member.last_name,
+            photo_url: member.photo_url,
+          },
+          appointments: [],
+        });
+      }
+    });
+
     return Array.from(grouped.values());
-  }, [bookings]);
+  }, [bookings, shifts, assignedTeamMembers, currentDate]);
+
+  // Check if a time slot is available (not occupied by an appointment)
+  const isSlotAvailable = (
+    time: string,
+    appointments: AppointmentWithBooking[]
+  ): boolean => {
+    const [hour, min] = time.split(':').map(Number);
+    const slotMinutes = hour * 60 + min;
+
+    return !appointments.some((appt) => {
+      const [startHour, startMin] = appt.start_time.split(':').map(Number);
+      const [endHour, endMin] = appt.end_time.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+
+      return slotMinutes >= startMinutes && slotMinutes < endMinutes;
+    });
+  };
+
+  // Format time for display (12-hour format)
+  const formatTime = (time: string): string => {
+    const [hour, min] = time.split(':');
+    const hourNum = parseInt(hour);
+    const period = hourNum >= 12 ? 'PM' : 'AM';
+    const displayHour =
+      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+    return `${displayHour}:${min} ${period}`;
+  };
 
   // Calculate appointment position and height
   const getAppointmentStyle = (
@@ -69,8 +163,8 @@ export function DayView({ bookings }: DayViewProps) {
     const endMinutes = endHour * 60 + endMin;
 
     const baseMinutes = 8 * 60; // 8 AM
-    const top = ((startMinutes - baseMinutes) / 30) * 60; // 60px per 30min slot
-    const height = ((endMinutes - startMinutes) / 30) * 60;
+    const top = ((startMinutes - baseMinutes) / 15) * 30; // 30px per 15min (increased from 20px)
+    const height = ((endMinutes - startMinutes) / 15) * 30;
 
     return { top, height };
   };
@@ -81,7 +175,6 @@ export function DayView({ bookings }: DayViewProps) {
         <div className="min-w-[800px]">
           {/* Header */}
           {appointmentsByMember.length === 0 ? (
-            // Empty state header - just show time column
             <div className="border-b border-gray-200 bg-gray-50 p-3">
               <div className="text-center text-gray-500">
                 No bookings scheduled for this date
@@ -108,8 +201,8 @@ export function DayView({ bookings }: DayViewProps) {
                         src={member.photo_url}
                         alt={member.first_name}
                         className="w-8 h-8 rounded-full object-cover"
-                        width={8}
-                        height={8}
+                        width={32}
+                        height={32}
                       />
                     )}
                     <div className="font-medium text-sm text-gray-900">
@@ -121,38 +214,73 @@ export function DayView({ bookings }: DayViewProps) {
             </div>
           )}
 
-          {/* Calendar Grid - Always show */}
+          {/* Calendar Grid */}
           <div className="relative">
             {/* Time slots */}
-            {timeSlots.map((time) => (
-              <div
-                key={time}
-                className="grid border-b border-gray-200"
-                style={{
-                  gridTemplateColumns:
-                    appointmentsByMember.length === 0
-                      ? '80px 1fr'
-                      : `80px repeat(${appointmentsByMember.length}, minmax(150px, 1fr))`,
-                  height: '60px',
-                }}
-              >
-                <div className="p-2 border-r border-gray-200 text-sm text-gray-600">
-                  {time}
-                </div>
-                {appointmentsByMember.length === 0 ? (
-                  <div className="border-r border-gray-200 relative bg-gray-50" />
-                ) : (
-                  appointmentsByMember.map(({ member }) => (
-                    <div
-                      key={`${member.id}-${time}`}
-                      className="border-r border-gray-200 relative"
-                    />
-                  ))
-                )}
-              </div>
-            ))}
+            {timeSlots.map((time) => {
+              const isHourMark = time.endsWith(':00');
+              const showLabel = hourLabels.includes(time);
 
-            {/* Appointments Overlay - Only show if there are appointments */}
+              return (
+                <div
+                  key={time}
+                  className="grid"
+                  style={{
+                    gridTemplateColumns:
+                      appointmentsByMember.length === 0
+                        ? '80px 1fr'
+                        : `80px repeat(${appointmentsByMember.length}, minmax(150px, 1fr))`,
+                    height: '20px',
+                  }}
+                >
+                  {/* Time column - no borders */}
+                  <div
+                    className={`p-0.5 border-r border-gray-200 text-xs ${
+                      showLabel ? 'text-gray-600' : 'text-transparent'
+                    }`}
+                  >
+                    {showLabel ? time : '·'}
+                  </div>
+                  {appointmentsByMember.length === 0 ? (
+                    <div
+                      className={`border-r border-gray-200 relative bg-gray-100 ${
+                        isHourMark
+                          ? 'border-t-2 border-t-gray-300'
+                          : 'border-t border-t-gray-100'
+                      }`}
+                    />
+                  ) : (
+                    appointmentsByMember.map(({ member, appointments }) => {
+                      const isAvailable = isSlotAvailable(time, appointments);
+                      return (
+                        <div
+                          key={member.id}
+                          className={`border-r border-gray-200 relative group cursor-pointer transition-colors ${
+                            isAvailable
+                              ? 'bg-white hover:bg-blue-50'
+                              : 'bg-gray-100 hover:bg-gray-200'
+                          } ${
+                            isHourMark
+                              ? 'border-t-2 border-t-gray-300'
+                              : 'border-t border-t-gray-100'
+                          }`}
+                          title={formatTime(time)}
+                        >
+                          {/* Hover tooltip */}
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                            <span className="text-[10px] font-medium text-gray-700 bg-white/90 px-1 rounded">
+                              {formatTime(time)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Appointments Overlay */}
             {appointmentsByMember.length > 0 && (
               <div className="absolute inset-0 pointer-events-none">
                 <div
@@ -172,8 +300,11 @@ export function DayView({ bookings }: DayViewProps) {
                         return (
                           <div
                             key={appointment.id}
-                            className="absolute left-1 right-1 pointer-events-auto"
-                            style={{ top: `${top}px`, height: `${height}px` }}
+                            className="absolute left-1 right-1 pointer-events-auto z-20"
+                            style={{
+                              top: `${top}px`,
+                              height: `${height}px`,
+                            }}
                           >
                             <AppointmentCard
                               appointment={appointment}
