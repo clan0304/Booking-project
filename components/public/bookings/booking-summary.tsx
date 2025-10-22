@@ -215,7 +215,7 @@ export function BookingSummary({
 
       {/* Terms */}
       <p className="text-xs text-gray-500 text-center">
-        By confirming, you agree to our terms and cancellation policy
+        By confirming, you agree to our terms and cancellation policies
       </p>
     </div>
   );
