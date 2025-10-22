@@ -2,7 +2,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Clock } from 'lucide-react';
 import { AppointmentDetailsModal } from './appointment-details-modal';
 import type { CalendarAppointment, CalendarBooking } from '@/types/calendar';
 
@@ -12,23 +11,8 @@ interface AppointmentCardProps {
   compact?: boolean;
 }
 
-const SERVICE_COLORS: Record<string, string> = {
-  'Hair cut': 'bg-orange-200 border-orange-300 text-orange-900',
-  'Hair Coloring': 'bg-orange-300 border-orange-400 text-orange-950',
-  'Haircut and colour': 'bg-blue-200 border-blue-300 text-blue-900',
-  'Blow Dry': 'bg-cyan-200 border-cyan-300 text-cyan-900',
-  'Beard Grooming': 'bg-pink-200 border-pink-300 text-pink-900',
-  'Balinese Massage': 'bg-cyan-300 border-cyan-400 text-cyan-950',
-  'Swedish Massage': 'bg-pink-300 border-pink-400 text-pink-950',
-  'Spa Treatment': 'bg-amber-200 border-amber-300 text-amber-900',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  confirmed: 'bg-green-50 border-green-300 text-green-900',
-  cancelled: 'bg-red-50 border-red-300 text-red-900',
-  completed: 'bg-gray-50 border-gray-300 text-gray-900',
-  no_show: 'bg-yellow-50 border-yellow-300 text-yellow-900',
-};
+// Default color if no category color is available
+const DEFAULT_COLOR = '#4ECDC4';
 
 export function AppointmentCard({
   appointment,
@@ -37,11 +21,22 @@ export function AppointmentCard({
 }: AppointmentCardProps) {
   const [showDetails, setShowDetails] = useState(false);
 
-  // Get color based on service name or status
-  const colorClass =
-    SERVICE_COLORS[appointment.service_name] ||
-    STATUS_COLORS[appointment.status] ||
-    'bg-purple-100 border-purple-300 text-purple-900';
+  // Use category color from appointment data, fallback to default
+  const backgroundColor = appointment.category_color || DEFAULT_COLOR;
+
+  // Format time to HH:mm (remove seconds)
+  const formatTime = (time: string): string => {
+    // If time is already in HH:mm format, return as is
+    if (time.length === 5 && time.includes(':')) {
+      return time;
+    }
+    // If time has seconds (HH:mm:ss), remove them
+    return time.substring(0, 5);
+  };
+
+  const startTime = formatTime(appointment.start_time);
+  const endTime = formatTime(appointment.end_time);
+  const timeRange = `${startTime} - ${endTime}`;
 
   const clientName = `${booking.guest_first_name} ${
     booking.guest_last_name || ''
@@ -51,28 +46,51 @@ export function AppointmentCard({
     <>
       <div
         onClick={() => setShowDetails(true)}
-        className={`h-full rounded-lg border-2 p-2 cursor-pointer hover:shadow-md transition-shadow ${colorClass}`}
+        className="h-full rounded-md p-2 cursor-pointer hover:shadow-lg transition-shadow overflow-hidden"
+        style={{ backgroundColor }}
       >
         {compact ? (
-          // Compact view for week view
-          <div className="flex flex-col h-full">
-            <p className="font-semibold text-xs truncate">{clientName}</p>
-            <p className="text-xs truncate">{appointment.service_name}</p>
+          // Compact view for week view - Very tight spacing
+          <div className="flex flex-col text-white leading-tight">
+            <p className="font-semibold text-[10px] mb-0.5 truncate">
+              {timeRange}
+            </p>
+            <p className="font-medium text-[10px] mb-0.5 truncate">
+              {clientName}
+            </p>
+            <p className="text-[10px] truncate">{appointment.service_name}</p>
           </div>
         ) : (
-          // Full view for day view
-          <div className="flex flex-col h-full">
-            <p className="font-semibold text-sm truncate">{clientName}</p>
-            <p className="text-sm truncate">{appointment.service_name}</p>
-            <div className="flex items-center gap-1 mt-1 text-xs">
-              <Clock className="w-3 h-3" />
-              <span>
-                {appointment.start_time} - {appointment.end_time}
-              </span>
+          // Full view for day view - Optimized for space
+          <div className="flex flex-col text-white leading-tight">
+            {/* Mobile: Stack everything - smaller text */}
+            <div className="block md:hidden">
+              <p className="font-semibold text-[11px] mb-0.5 truncate">
+                {timeRange}
+              </p>
+              <p className="font-medium text-[11px] mb-0.5 truncate">
+                {clientName}
+              </p>
+              <p className="text-[10px] truncate">{appointment.service_name}</p>
             </div>
+
+            {/* Tablet/Desktop: Time and name on same row, service on next row */}
+            <div className="hidden md:flex md:flex-col">
+              <div className="flex items-center justify-between gap-1 mb-0.5">
+                <p className="font-semibold text-[11px] truncate">
+                  {timeRange}
+                </p>
+                <p className="font-medium text-[11px] truncate">{clientName}</p>
+              </div>
+              <p className="text-[10px] truncate leading-tight">
+                {appointment.service_name}
+              </p>
+            </div>
+
+            {/* Status badge if not confirmed */}
             {appointment.status !== 'confirmed' && (
               <div className="mt-1">
-                <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-white bg-opacity-50">
+                <span className="inline-block px-1.5 py-0.5 text-[9px] font-medium rounded-full bg-white/30 truncate">
                   {appointment.status}
                 </span>
               </div>

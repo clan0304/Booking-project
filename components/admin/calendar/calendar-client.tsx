@@ -12,9 +12,29 @@ import type { CalendarBooking } from '@/types/calendar';
 
 export type CalendarViewType = 'day' | 'week';
 
+export interface ShiftWithTeamMember {
+  team_member_id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  team_member: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    photo_url: string | null;
+  };
+}
+
+export interface AssignedTeamMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  photo_url: string | null;
+}
+
 export function CalendarClient() {
   const [viewType, setViewType] = useState<CalendarViewType>('week');
-  const [selectedVenue, setSelectedVenue] = useState<string>('all');
+  const [selectedVenue, setSelectedVenue] = useState<string>(''); // Empty string initially
   const [selectedTeamMember, setSelectedTeamMember] = useState<string>('all');
   const [currentDate, setCurrentDate] = useState<string>(getToday());
   const [currentWeekStart, setCurrentWeekStart] = useState<string>(
@@ -22,10 +42,17 @@ export function CalendarClient() {
   );
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState<CalendarBooking[]>([]);
+  const [shifts, setShifts] = useState<ShiftWithTeamMember[]>([]);
+  const [assignedTeamMembers, setAssignedTeamMembers] = useState<
+    AssignedTeamMember[]
+  >([]);
 
   // Fetch bookings when filters change
   useEffect(() => {
     const fetchBookings = async () => {
+      // Don't fetch if no venue is selected yet
+      if (!selectedVenue) return;
+
       setLoading(true);
       try {
         let startDate: string;
@@ -40,7 +67,7 @@ export function CalendarClient() {
         }
 
         const result = await getCalendarBookings({
-          venueId: selectedVenue === 'all' ? undefined : selectedVenue,
+          venueId: selectedVenue,
           teamMemberId:
             selectedTeamMember === 'all' ? undefined : selectedTeamMember,
           startDate,
@@ -50,6 +77,8 @@ export function CalendarClient() {
 
         if (result.success && result.data) {
           setBookings(result.data);
+          setShifts(result.shifts || []);
+          setAssignedTeamMembers(result.assignedTeamMembers || []);
         }
       } catch (error) {
         console.error('Error fetching bookings:', error);
@@ -89,14 +118,28 @@ export function CalendarClient() {
       />
 
       {/* Calendar Views */}
-      {loading ? (
+      {!selectedVenue ? (
+        <div className="flex items-center justify-center h-96">
+          <div className="text-gray-500">Select a venue to view calendar</div>
+        </div>
+      ) : loading ? (
         <div className="flex items-center justify-center h-96">
           <div className="text-gray-500">Loading bookings...</div>
         </div>
       ) : viewType === 'day' ? (
-        <DayView bookings={bookings} />
+        <DayView
+          bookings={bookings}
+          shifts={shifts}
+          assignedTeamMembers={assignedTeamMembers}
+          currentDate={currentDate}
+        />
       ) : (
-        <WeekView weekStart={currentWeekStart} bookings={bookings} />
+        <WeekView
+          weekStart={currentWeekStart}
+          bookings={bookings}
+          shifts={shifts}
+          assignedTeamMembers={assignedTeamMembers}
+        />
       )}
     </div>
   );

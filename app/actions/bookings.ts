@@ -229,8 +229,28 @@ interface BookingGroupForStaff {
   } | null;
 }
 
-interface RawAppointmentFromDB {
+interface RawServiceCategory {
   id: string;
+  name: string;
+  color: string; // The hex color from database
+}
+
+interface RawVenue {
+  id: string;
+  name: string;
+  address: string;
+}
+
+interface RawService {
+  id: string;
+  name: string;
+  category_id: string | null;
+  service_categories: RawServiceCategory | RawServiceCategory[] | null;
+}
+
+interface RawAppointment {
+  id: string;
+  service_id: string;
   service_name: string;
   start_time: string;
   end_time: string;
@@ -239,6 +259,7 @@ interface RawAppointmentFromDB {
   status: string;
   notes: string | null;
   team_member_id: string;
+  services: RawService | RawService[] | null;
 }
 
 interface RawBookingFromDB {
@@ -257,14 +278,8 @@ interface RawBookingFromDB {
   booking_source: string;
   created_at: string;
   client_id: string | null;
-  venues:
-    | {
-        id: string;
-        name: string;
-        address: string;
-      }[]
-    | null;
-  appointments: RawAppointmentFromDB[] | null;
+  venues: RawVenue | RawVenue[] | null;
+  appointments: RawAppointment[]; // ✅ Updated to use RawAppointment instead of RawAppointmentFromDB
 }
 
 interface TeamMemberFromDB {
@@ -274,6 +289,45 @@ interface TeamMemberFromDB {
   photo_url: string | null;
 }
 
+interface ShiftWithTeamMember {
+  team_member_id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  team_member: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    photo_url: string | null;
+  };
+}
+
+interface TeamMemberFromUsers {
+  id: string;
+  first_name: string;
+  last_name: string;
+  photo_url: string | null;
+}
+
+interface ShiftFromDB {
+  team_member_id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  users: TeamMemberFromUsers | TeamMemberFromUsers[];
+}
+
+interface AssignedTeamMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  photo_url: string | null;
+}
+
+interface TeamMemberAssignmentFromDB {
+  team_member_id: string;
+  users: TeamMemberFromUsers | TeamMemberFromUsers[];
+}
 // =====================================================
 // HELPER FUNCTIONS
 // =====================================================
@@ -1266,6 +1320,8 @@ export async function checkAvailability(
 /**
  * Get bookings for calendar view (staff/admin only)
  * Fetches bookings with appointments and team member info
+ * Also fetches shifts to show team members even without bookings
+ * Also fetches ALL assigned team members for the venue
  * Uses Service Role for reliable data access
  */
 export async function getCalendarBookings(filters: {
@@ -1277,6 +1333,8 @@ export async function getCalendarBookings(filters: {
 }): Promise<{
   success: boolean;
   data?: CalendarBooking[];
+  shifts?: ShiftWithTeamMember[];
+  assignedTeamMembers?: AssignedTeamMember[];
   error?: string;
 }> {
   try {
@@ -1310,6 +1368,7 @@ export async function getCalendarBookings(filters: {
         ),
         appointments (
           id,
+          service_id,
           service_name,
           start_time,
           end_time,
@@ -1317,7 +1376,17 @@ export async function getCalendarBookings(filters: {
           price,
           status,
           notes,
-          team_member_id
+          team_member_id,
+          services!appointments_service_id_fkey (
+            id,
+            name,
+            category_id,
+            service_categories (
+              id,
+              name,
+              color
+            )
+          )
         )
       `
       )
@@ -1339,12 +1408,8 @@ export async function getCalendarBookings(filters: {
       return { success: false, error: 'Failed to fetch bookings' };
     }
 
-    if (!bookings || bookings.length === 0) {
-      return { success: true, data: [] };
-    }
-
     // Type assertion for raw database results
-    const rawBookings = bookings as RawBookingFromDB[];
+    const rawBookings = (bookings || []) as RawBookingFromDB[];
 
     // Filter by team member if specified (client-side filtering since nested)
     let filteredBookings = rawBookings;
@@ -1356,12 +1421,94 @@ export async function getCalendarBookings(filters: {
       );
     }
 
-    // Extract unique team member IDs from all appointments
-    const allAppointments = filteredBookings.flatMap(
-      (b) => b.appointments || []
+    // Fetch ALL team members assigned to the venue (regardless of shifts)
+    let assignedTeamMembers: AssignedTeamMember[] = [];
+    if (filters.venueId) {
+      const { data: assignments, error: assignError } = await supabaseAdmin
+        .from('team_member_venues')
+        .select(
+          `
+          team_member_id,
+          users!team_member_venues_team_member_id_fkey (
+            id,
+            first_name,
+            last_name,
+            photo_url
+          )
+        `
+        )
+        .eq('venue_id', filters.venueId)
+        .eq('is_active', true);
+
+      if (assignError) {
+        console.error('Error fetching assigned team members:', assignError);
+      } else if (assignments) {
+        const rawAssignments = assignments as TeamMemberAssignmentFromDB[];
+        assignedTeamMembers = rawAssignments.map((assignment) => {
+          const user = Array.isArray(assignment.users)
+            ? assignment.users[0]
+            : assignment.users;
+          return {
+            id: user.id,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            photo_url: user.photo_url,
+          };
+        });
+      }
+    }
+
+    // Fetch shifts for the date range with team member info
+    let shiftsQuery = supabaseAdmin
+      .from('shifts')
+      .select(
+        `
+        team_member_id,
+        shift_date,
+        start_time,
+        end_time,
+        users!shifts_team_member_id_fkey (
+          id,
+          first_name,
+          last_name,
+          photo_url
+        )
+      `
+      )
+      .gte('shift_date', filters.startDate)
+      .lte('shift_date', filters.endDate);
+
+    if (filters.venueId) {
+      shiftsQuery = shiftsQuery.eq('venue_id', filters.venueId);
+    }
+
+    if (filters.teamMemberId) {
+      shiftsQuery = shiftsQuery.eq('team_member_id', filters.teamMemberId);
+    }
+
+    const { data: shiftsData, error: shiftsError } = await shiftsQuery;
+
+    if (shiftsError) {
+      console.error('Error fetching shifts:', shiftsError);
+    }
+
+    // Transform shifts data with proper typing
+    const rawShifts = (shiftsData || []) as ShiftFromDB[];
+    const shifts: ShiftWithTeamMember[] = rawShifts.map((shift) => ({
+      team_member_id: shift.team_member_id,
+      shift_date: shift.shift_date,
+      start_time: shift.start_time,
+      end_time: shift.end_time,
+      team_member: Array.isArray(shift.users) ? shift.users[0] : shift.users,
+    }));
+
+    // Extract unique team member IDs from appointments AND shifts
+    const appointmentTeamMemberIds = filteredBookings.flatMap(
+      (b) => b.appointments?.map((a) => a.team_member_id) || []
     );
+    const shiftTeamMemberIds = shifts.map((s) => s.team_member_id);
     const teamMemberIds = [
-      ...new Set(allAppointments.map((a) => a.team_member_id)),
+      ...new Set([...appointmentTeamMemberIds, ...shiftTeamMemberIds]),
     ];
 
     // Fetch team member details using Service Role (bypasses RLS)
@@ -1398,23 +1545,61 @@ export async function getCalendarBookings(filters: {
         created_at: booking.created_at,
         client_id: booking.client_id,
         venues: booking.venues,
-        appointments: (booking.appointments || []).map((appt) => ({
-          id: appt.id,
-          service_name: appt.service_name,
-          start_time: appt.start_time,
-          end_time: appt.end_time,
-          duration_minutes: appt.duration_minutes,
-          price: appt.price,
-          status: appt.status,
-          notes: appt.notes,
-          team_member_id: appt.team_member_id,
-          team_member:
-            teamMembers.find((tm) => tm.id === appt.team_member_id) || null,
-        })),
+        appointments: (booking.appointments || []).map(
+          (appt: RawAppointment) => {
+            // Extract category color from service data
+            let categoryColor: string | null = null;
+            if (appt.services) {
+              // Handle services being array or single object
+              const service = Array.isArray(appt.services)
+                ? appt.services[0]
+                : appt.services;
+
+              if (service && service.service_categories) {
+                // Handle service_categories being array or single object
+                const serviceCategories = Array.isArray(
+                  service.service_categories
+                )
+                  ? service.service_categories[0]
+                  : service.service_categories;
+
+                if (serviceCategories && serviceCategories.color) {
+                  categoryColor = serviceCategories.color;
+                }
+              }
+            }
+
+            return {
+              id: appt.id,
+              service_id: appt.service_id,
+              service_name: appt.service_name,
+              start_time: appt.start_time,
+              end_time: appt.end_time,
+              duration_minutes: appt.duration_minutes,
+              price: appt.price,
+              status: appt.status,
+              notes: appt.notes,
+              team_member_id: appt.team_member_id,
+              team_member:
+                teamMembers.find((tm) => tm.id === appt.team_member_id) || null,
+              services: appt.services
+                ? Array.isArray(appt.services)
+                  ? appt.services[0]
+                  : appt.services
+                : null,
+              category_color: categoryColor,
+            };
+          }
+        ),
       })
     );
 
-    return { success: true, data: calendarBookings };
+    return {
+      success: true,
+      data: calendarBookings,
+      shifts,
+      assignedTeamMembers,
+    };
   } catch (error) {
     console.error('Error in getCalendarBookings:', error);
     return { success: false, error: 'An unexpected error occurred' };
