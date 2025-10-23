@@ -152,6 +152,7 @@ export function DayView({
   };
 
   // Calculate appointment position and height
+  // ✅ FIXED: Changed from 30px to 20px to match time slot height
   const getAppointmentStyle = (
     startTime: string,
     endTime: string
@@ -163,8 +164,8 @@ export function DayView({
     const endMinutes = endHour * 60 + endMin;
 
     const baseMinutes = 8 * 60; // 8 AM
-    const top = ((startMinutes - baseMinutes) / 15) * 30; // 30px per 15min (increased from 20px)
-    const height = ((endMinutes - startMinutes) / 15) * 30;
+    const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
+    const height = ((endMinutes - startMinutes) / 15) * 20;
 
     return { top, height };
   };

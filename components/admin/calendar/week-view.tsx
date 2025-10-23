@@ -2,8 +2,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import { getWeekRange } from '@/lib/shift-helpers';
 import { AppointmentCard } from './appointment-card';
+import { addDays } from '@/lib/shift-helpers';
 import type {
   CalendarBooking,
   CalendarTeamMember,
@@ -37,12 +37,6 @@ interface WeekViewProps {
 }
 
 export function WeekView({ weekStart, bookings }: WeekViewProps) {
-  // Get week days (Mon-Sun)
-  const weekDays = useMemo((): WeekDay[] => {
-    const { days } = getWeekRange(weekStart);
-    return days;
-  }, [weekStart]);
-
   // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
     const slots: string[] = [];
@@ -66,6 +60,22 @@ export function WeekView({ weekStart, bookings }: WeekViewProps) {
     return labels;
   }, []);
 
+  // Generate week days
+  const weekDays = useMemo((): WeekDay[] => {
+    const days: WeekDay[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = addDays(weekStart, i);
+      days.push({
+        date,
+        dayOfWeek: new Date(date + 'T00:00:00').getDay(),
+        dayName: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][
+          new Date(date + 'T00:00:00').getDay()
+        ],
+      });
+    }
+    return days;
+  }, [weekStart]);
+
   // Group appointments by team member and date
   const appointmentsByMemberAndDate =
     useMemo((): AppointmentsByMemberAndDate[] => {
@@ -78,10 +88,11 @@ export function WeekView({ weekStart, bookings }: WeekViewProps) {
       >();
 
       bookings.forEach((booking) => {
+        const bookingDate = booking.booking_date;
+
         booking.appointments?.forEach((appointment) => {
           const memberId = appointment.team_member_id;
           const member = appointment.team_member;
-          const bookingDate = booking.booking_date;
 
           if (!member) return;
 
@@ -137,6 +148,7 @@ export function WeekView({ weekStart, bookings }: WeekViewProps) {
   };
 
   // Calculate appointment position and height
+  // ✅ FIXED: Changed from 30px to 20px to match time slot height
   const getAppointmentStyle = (
     startTime: string,
     endTime: string
@@ -148,8 +160,8 @@ export function WeekView({ weekStart, bookings }: WeekViewProps) {
     const endMinutes = endHour * 60 + endMin;
 
     const baseMinutes = 8 * 60; // 8 AM
-    const top = ((startMinutes - baseMinutes) / 15) * 30; // 30px per 15min (increased from 20px)
-    const height = ((endMinutes - startMinutes) / 15) * 30;
+    const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
+    const height = ((endMinutes - startMinutes) / 15) * 20;
 
     return { top, height };
   };
@@ -242,7 +254,7 @@ export function WeekView({ weekStart, bookings }: WeekViewProps) {
           </div>
         </div>
       ) : (
-        // Team member grids
+        // With bookings - one section per team member
         appointmentsByMemberAndDate.map(({ member, appointmentsByDate }) => (
           <div
             key={member.id}
@@ -264,7 +276,7 @@ export function WeekView({ weekStart, bookings }: WeekViewProps) {
                   <h3 className="font-semibold text-gray-900">
                     {member.first_name} {member.last_name}
                   </h3>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-xs text-gray-600">
                     {appointmentsByDate.size} day
                     {appointmentsByDate.size !== 1 ? 's' : ''} with bookings
                   </p>

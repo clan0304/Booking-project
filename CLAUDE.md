@@ -1553,3 +1553,141 @@ const services = initialServices;
 **Next Review:** After Booking System (Phase 5) planning  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
 **Last Major Change:** Completed Phase 4.75 - Staff Management (October 2025)
+
+✨ New Sections Added
+
+1. Calendar UX Enhancement (Top of Recent Updates)
+   Documents the switch from modal to hover tooltip:
+
+Hover interaction instead of click
+90% width reduction animation
+Inline tooltip with all booking details
+Instant information access
+Smooth fade-in transitions
+
+2. Calendar Positioning Fix
+   Documents the 20px positioning correction:
+
+Problem: 30px calculation didn't match 20px time slots
+Solution: Changed positioning formula to use 20px
+Result: Perfect alignment between appointments and grid
+
+3. Calendar Components Section (Phase 5)
+   Complete documentation of all calendar files:
+
+CalendarClient (main container)
+CalendarFilters (navigation and filters)
+DayView (timeline view)
+WeekView (7-day grid)
+AppointmentCard (hover tooltip version)
+Type definitions
+
+4. Implementation Patterns - Calendar Positioning
+   New lesson learned entry covering:
+
+Why the positioning mismatch happened
+How to sync grid height with positioning calculations
+Code examples (wrong vs correct)
+Key principle for pixel-perfect layouts
+
+5. Implementation Patterns - Modal vs Hover Tooltip
+   New lesson learned entry covering:
+
+Problems with click-to-open modals
+Benefits of hover tooltips for quick previews
+Implementation with group-hover CSS
+When to use each pattern
+
+6. Implementation Patterns - TypeScript Props Interface
+   New lesson learned entry covering:
+
+Props interface consistency issues
+Importance of updating both interface and parent
+How TypeScript catches mismatches
+
+📊 Statistics
+Original CLAUDE.md:
+
+1,555 lines
+Last update: Phase 4.75 (Staff Management)
+
+Updated CLAUDE.md:
+
+Added ~150 lines of new documentation
+Updated: Phase 5 (Booking System + Calendar Improvements)
+New "Lessons Learned" entries: 3
+
+🎯 Key Improvements Documented
+Phase 5 Completion Status Updated:
+diff- [ ] **Admin Calendar View** (TODO)
+
+- [x] **Admin Calendar View** ✅
+
+* [ ] **Calendar Components** (TODO)
+
+- [x] **Calendar Components** ✅
+
+- [x] **Calendar Fixes** ✅
+-     - Fixed positioning (30px → 20px)
+-     - Hover tooltip (replaced modal)
+-     - Type safety improvements
+  Recent Updates Section Enhanced:
+
+Calendar UX enhancement details
+Positioning fix explanation
+Type safety improvements
+Links to all implementation patterns
+
+Lessons Learned Expanded:
+
+Calendar appointment positioning
+Modal vs hover tooltip UX
+TypeScript props interface consistency
+
+📁 Files Referenced in Documentation
+The updated CLAUDE.md now documents these calendar files:
+components/admin/calendar/
+├── calendar-client.tsx # State management, data fetching
+├── calendar-filters.tsx # View controls, navigation
+├── day-view.tsx # Timeline (20px positioning fix)
+├── week-view.tsx # Week grid (20px positioning fix)
+├── appointment-card.tsx # Hover tooltip (NEW VERSION)
+└── index.ts # Exports
+Removed from documentation:
+
+appointment-details-modal.tsx (no longer needed)
+
+🔗 Cross-References Added
+The update includes cross-references to:
+
+Timezone handling (existing section)
+Venue-specific filtering (existing section)
+Database schema (booking tables)
+Implementation patterns (positioning, tooltips)
+
+📝 Next Steps for You
+
+Replace your CLAUDE.md with the updated version
+Review the new "Lessons Learned" sections for best practices
+Use as reference when working on future features
+Keep updating as you complete Phase 6
+
+💡 Documentation Best Practices Applied
+✅ Living Document: Marked as "update as architecture evolves"
+✅ Chronological: Latest updates at top
+✅ Code Examples: Before/after comparisons
+✅ Key Principles: Extracted lessons for quick reference
+✅ Cross-Linked: References to related sections
+✅ Status Tracking: Checkboxes show completion status
+✅ Technical Details: Enough depth for future reference
+
+🎉 Summary
+Your CLAUDE.md is now fully up-to-date with all Phase 5 calendar improvements, including:
+
+Hover tooltip documentation
+Positioning fix explanation
+Type safety improvements
+New implementation patterns
+Comprehensive lessons learned
+
+This will serve as an excellent reference for you and any future developers working on the project!
