@@ -1,13 +1,16 @@
 // components/admin/calendar/day-view.tsx
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { AppointmentCard } from './appointment-card';
+import { TimeSlotActionsModal } from './time-slot-actions-modal';
+import { BlockedTimeModal } from './blocked-time-modal';
 import type {
   CalendarBooking,
   CalendarTeamMember,
   AppointmentWithBooking,
   AppointmentsByMember,
+  BlockedTime,
 } from '@/types/calendar';
 import Image from 'next/image';
 
@@ -32,14 +35,31 @@ interface DayViewProps {
     photo_url: string | null;
   }>;
   currentDate: string;
+  blockedTimes: BlockedTime[];
+  venueId: string;
+  onRefresh: () => void;
 }
 
 export function DayView({
   bookings,
-  shifts,
+
   assignedTeamMembers,
   currentDate,
+  blockedTimes,
+  venueId,
+  onRefresh,
 }: DayViewProps) {
+  // State for modals
+  const [showActionsModal, setShowActionsModal] = useState(false);
+  const [showBlockedTimeModal, setShowBlockedTimeModal] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<{
+    time: string;
+    teamMemberId: string;
+    teamMemberName: string;
+  } | null>(null);
+  const [selectedBlockedTime, setSelectedBlockedTime] =
+    useState<BlockedTime | null>(null);
+
   // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
     const slots: string[] = [];
@@ -79,7 +99,10 @@ export function DayView({
         if (!member) return;
 
         if (!grouped.has(memberId)) {
-          grouped.set(memberId, { member, appointments: [] });
+          grouped.set(memberId, {
+            member,
+            appointments: [],
+          });
         }
 
         grouped.get(memberId)!.appointments.push({
@@ -89,71 +112,79 @@ export function DayView({
       });
     });
 
-    // Then, add team members from shifts (for today) who don't have bookings yet
-    const todayShifts = shifts.filter((s) => s.shift_date === currentDate);
-    todayShifts.forEach((shift) => {
-      if (!grouped.has(shift.team_member_id)) {
-        grouped.set(shift.team_member_id, {
-          member: {
-            id: shift.team_member.id,
-            first_name: shift.team_member.first_name,
-            last_name: shift.team_member.last_name,
-            photo_url: shift.team_member.photo_url,
-          },
-          appointments: [],
-        });
-      }
-    });
-
-    // Finally, add ALL assigned team members (even without shifts for today)
+    // Then add team members from shifts who don't have bookings
     assignedTeamMembers.forEach((member) => {
       if (!grouped.has(member.id)) {
         grouped.set(member.id, {
-          member: {
-            id: member.id,
-            first_name: member.first_name,
-            last_name: member.last_name,
-            photo_url: member.photo_url,
-          },
+          member,
           appointments: [],
         });
       }
     });
 
     return Array.from(grouped.values());
-  }, [bookings, shifts, assignedTeamMembers, currentDate]);
+  }, [bookings, assignedTeamMembers]);
 
-  // Check if a time slot is available (not occupied by an appointment)
+  // Group blocked times by team member
+  const blockedTimesByMember = useMemo(() => {
+    const grouped = new Map<string, BlockedTime[]>();
+
+    blockedTimes.forEach((blockedTime) => {
+      const memberId = blockedTime.team_member_id;
+      if (!grouped.has(memberId)) {
+        grouped.set(memberId, []);
+      }
+      grouped.get(memberId)!.push(blockedTime);
+    });
+
+    return grouped;
+  }, [blockedTimes]);
+
+  // Check if a time slot is available (not occupied by appointment or blocked time)
   const isSlotAvailable = (
     time: string,
-    appointments: AppointmentWithBooking[]
+    appointments: AppointmentWithBooking[],
+    memberBlockedTimes: BlockedTime[]
   ): boolean => {
-    const [hour, min] = time.split(':').map(Number);
-    const slotMinutes = hour * 60 + min;
-
-    return !appointments.some((appt) => {
-      const [startHour, startMin] = appt.start_time.split(':').map(Number);
-      const [endHour, endMin] = appt.end_time.split(':').map(Number);
-      const startMinutes = startHour * 60 + startMin;
-      const endMinutes = endHour * 60 + endMin;
-
-      return slotMinutes >= startMinutes && slotMinutes < endMinutes;
+    // Check appointments
+    const hasAppointment = appointments.some((apt) => {
+      return time >= apt.start_time && time < apt.end_time;
     });
+
+    if (hasAppointment) return false;
+
+    // Check blocked times
+    const hasBlockedTime = memberBlockedTimes.some((blocked) => {
+      const blockStart = blocked.start_time.substring(0, 5);
+      const blockEnd = blocked.end_time.substring(0, 5);
+      return time >= blockStart && time < blockEnd;
+    });
+
+    return !hasBlockedTime;
   };
 
   // Format time for display (12-hour format)
-  const formatTime = (time: string): string => {
+  const formatTime12Hour = (time: string): string => {
     const [hour, min] = time.split(':');
     const hourNum = parseInt(hour);
-    const period = hourNum >= 12 ? 'PM' : 'AM';
+    const period = hourNum >= 12 ? 'pm' : 'am';
     const displayHour =
       hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
     return `${displayHour}:${min} ${period}`;
   };
 
-  // Calculate appointment position and height
-  // ✅ FIXED: Changed from 30px to 20px to match time slot height
-  const getAppointmentStyle = (
+  // Format time label for left column (simplified)
+  const formatTimeLabel = (time: string): string => {
+    const [hour] = time.split(':');
+    const hourNum = parseInt(hour);
+    const period = hourNum >= 12 ? 'pm' : 'am';
+    const displayHour =
+      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+    return `${displayHour}:00\n${period}`;
+  };
+
+  // Calculate position and height for appointments/blocked times
+  const getStyle = (
     startTime: string,
     endTime: string
   ): { top: number; height: number } => {
@@ -164,164 +195,288 @@ export function DayView({
     const endMinutes = endHour * 60 + endMin;
 
     const baseMinutes = 8 * 60; // 8 AM
-    const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
-    const height = ((endMinutes - startMinutes) / 15) * 20;
+    const slotHeight = 60; // 60px per hour (4 x 15px per 15min slot)
+    const top = ((startMinutes - baseMinutes) / 60) * slotHeight;
+    const height = ((endMinutes - startMinutes) / 60) * slotHeight;
 
     return { top, height };
   };
 
+  // Handle empty slot click
+  const handleSlotClick = (
+    time: string,
+    teamMemberId: string,
+    teamMemberName: string
+  ) => {
+    setSelectedSlot({ time, teamMemberId, teamMemberName });
+    setShowActionsModal(true);
+  };
+
+  // Handle blocked time click (for editing)
+  const handleBlockedTimeClick = (
+    blockedTime: BlockedTime,
+    teamMemberName: string
+  ) => {
+    setSelectedBlockedTime(blockedTime);
+    setSelectedSlot({
+      time: blockedTime.start_time.substring(0, 5),
+      teamMemberId: blockedTime.team_member_id,
+      teamMemberName,
+    });
+    setShowBlockedTimeModal(true);
+  };
+
+  const COLUMN_WIDTH = 240; // Width for each team member column
+
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="overflow-x-auto">
-        <div className="min-w-[800px]">
-          {/* Header */}
-          {appointmentsByMember.length === 0 ? (
-            <div className="border-b border-gray-200 bg-gray-50 p-3">
-              <div className="text-center text-gray-500">
-                No bookings scheduled for this date
-              </div>
-            </div>
-          ) : (
+    <>
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        {appointmentsByMember.length === 0 ? (
+          <div className="p-8 text-center text-gray-600">
+            No team members assigned to this venue
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
             <div
-              className="grid border-b border-gray-200 bg-gray-50"
+              className="min-w-full"
               style={{
-                gridTemplateColumns: `80px repeat(${appointmentsByMember.length}, minmax(150px, 1fr))`,
+                minWidth: `${
+                  80 + appointmentsByMember.length * COLUMN_WIDTH
+                }px`,
               }}
             >
-              <div className="p-3 border-r border-gray-200 font-semibold text-sm text-gray-700">
-                Time
-              </div>
-              {appointmentsByMember.map(({ member }) => (
+              {/* Header - Team Members with Profile Photos */}
+              <div className="border-b border-gray-200 bg-gray-50/50 sticky top-0 z-10">
                 <div
-                  key={member.id}
-                  className="p-3 border-r border-gray-200 text-center"
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    {member.photo_url && (
-                      <Image
-                        src={member.photo_url}
-                        alt={member.first_name}
-                        className="w-8 h-8 rounded-full object-cover"
-                        width={32}
-                        height={32}
-                      />
-                    )}
-                    <div className="font-medium text-sm text-gray-900">
-                      {member.first_name} {member.last_name}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Calendar Grid */}
-          <div className="relative">
-            {/* Time slots */}
-            {timeSlots.map((time) => {
-              const isHourMark = time.endsWith(':00');
-              const showLabel = hourLabels.includes(time);
-
-              return (
-                <div
-                  key={time}
                   className="grid"
                   style={{
-                    gridTemplateColumns:
-                      appointmentsByMember.length === 0
-                        ? '80px 1fr'
-                        : `80px repeat(${appointmentsByMember.length}, minmax(150px, 1fr))`,
-                    height: '20px',
+                    gridTemplateColumns: `80px repeat(${appointmentsByMember.length}, ${COLUMN_WIDTH}px)`,
                   }}
                 >
-                  {/* Time column - no borders */}
-                  <div
-                    className={`p-0.5 border-r border-gray-200 text-xs ${
-                      showLabel ? 'text-gray-600' : 'text-transparent'
-                    }`}
-                  >
-                    {showLabel ? time : '·'}
-                  </div>
-                  {appointmentsByMember.length === 0 ? (
-                    <div
-                      className={`border-r border-gray-200 relative bg-gray-100 ${
-                        isHourMark
-                          ? 'border-t-2 border-t-gray-300'
-                          : 'border-t border-t-gray-100'
-                      }`}
-                    />
-                  ) : (
-                    appointmentsByMember.map(({ member, appointments }) => {
-                      const isAvailable = isSlotAvailable(time, appointments);
-                      return (
-                        <div
-                          key={member.id}
-                          className={`border-r border-gray-200 relative group cursor-pointer transition-colors ${
-                            isAvailable
-                              ? 'bg-white hover:bg-blue-50'
-                              : 'bg-gray-100 hover:bg-gray-200'
-                          } ${
-                            isHourMark
-                              ? 'border-t-2 border-t-gray-300'
-                              : 'border-t border-t-gray-100'
-                          }`}
-                          title={formatTime(time)}
-                        >
-                          {/* Hover tooltip */}
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                            <span className="text-[10px] font-medium text-gray-700 bg-white/90 px-1 rounded">
-                              {formatTime(time)}
+                  {/* Empty corner cell */}
+                  <div className="border-r border-gray-200" />
+
+                  {/* Team member columns */}
+                  {appointmentsByMember.map(({ member }) => {
+                    const memberName = `${member.first_name} ${member.last_name}`;
+                    return (
+                      <div
+                        key={member.id}
+                        className="py-4 px-3 border-r border-gray-200 flex flex-col items-center gap-2"
+                      >
+                        {/* Circular profile photo */}
+                        {member.photo_url ? (
+                          <div className="relative w-16 h-16 rounded-full overflow-hidden ring-4 ring-white shadow-md">
+                            <Image
+                              src={member.photo_url}
+                              alt={memberName}
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center ring-4 ring-white shadow-md">
+                            <span className="text-white font-bold text-xl">
+                              {member.first_name[0]}
+                              {member.last_name[0]}
                             </span>
                           </div>
-                        </div>
-                      );
-                    })
-                  )}
+                        )}
+                        {/* Team member name */}
+                        <p className="font-medium text-gray-900 text-center text-sm">
+                          {member.first_name}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
 
-            {/* Appointments Overlay */}
-            {appointmentsByMember.length > 0 && (
-              <div className="absolute inset-0 pointer-events-none">
-                <div
-                  className="relative h-full grid"
-                  style={{
-                    gridTemplateColumns: `80px repeat(${appointmentsByMember.length}, minmax(150px, 1fr))`,
-                  }}
-                >
-                  <div /> {/* Empty space for time column */}
-                  {appointmentsByMember.map(({ member, appointments }) => (
-                    <div key={member.id} className="relative">
-                      {appointments.map((appointment) => {
-                        const { top, height } = getAppointmentStyle(
-                          appointment.start_time,
-                          appointment.end_time
+              {/* Time Slots Grid */}
+              <div>
+                {timeSlots.map((time, timeIndex) => {
+                  const isHourMark = time.endsWith(':00');
+                  const showLabel = hourLabels.includes(time);
+
+                  return (
+                    <div
+                      key={time}
+                      className={`grid ${
+                        isHourMark && timeIndex !== 0
+                          ? 'border-t-2 border-t-gray-200'
+                          : timeIndex === 0
+                          ? ''
+                          : 'border-t border-t-gray-100'
+                      }`}
+                      style={{
+                        gridTemplateColumns: `80px repeat(${appointmentsByMember.length}, ${COLUMN_WIDTH}px)`,
+                      }}
+                    >
+                      {/* Time Label */}
+                      <div
+                        className="border-r border-gray-200 pr-3 pt-1 text-right"
+                        style={{ height: '60px' }}
+                      >
+                        {showLabel && (
+                          <div className="text-xs text-gray-500 leading-tight whitespace-pre-line">
+                            {formatTimeLabel(time)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Team Member Columns */}
+                      {appointmentsByMember.map(({ member, appointments }) => {
+                        const memberBlockedTimes =
+                          blockedTimesByMember.get(member.id) || [];
+                        const memberName = `${member.first_name} ${member.last_name}`;
+                        const available = isSlotAvailable(
+                          time,
+                          appointments,
+                          memberBlockedTimes
                         );
+
                         return (
                           <div
-                            key={appointment.id}
-                            className="absolute left-1 right-1 pointer-events-auto z-20"
-                            style={{
-                              top: `${top}px`,
-                              height: `${height}px`,
-                            }}
+                            key={`${time}-${member.id}`}
+                            className="relative border-r border-gray-200"
+                            style={{ height: '60px' }}
                           >
-                            <AppointmentCard
-                              appointment={appointment}
-                              booking={appointment.booking}
+                            {/* Clickable slot background */}
+                            <div
+                              className={`absolute inset-0 group cursor-pointer transition-colors ${
+                                available
+                                  ? 'bg-white hover:bg-blue-50/30'
+                                  : 'bg-gray-50/30'
+                              }`}
+                              onClick={() => {
+                                if (available) {
+                                  handleSlotClick(time, member.id, memberName);
+                                }
+                              }}
+                              title={
+                                available
+                                  ? `Click to add appointment or block time at ${formatTime12Hour(
+                                      time
+                                    )}`
+                                  : undefined
+                              }
                             />
+
+                            {/* Appointments and Blocked Times Overlay - Only render on first slot */}
+                            {timeIndex === 0 && (
+                              <div
+                                className="absolute inset-0 pointer-events-none"
+                                style={{ height: `${timeSlots.length * 60}px` }}
+                              >
+                                {/* Appointments using AppointmentCard */}
+                                {appointments.map((appointment) => {
+                                  const { top, height } = getStyle(
+                                    appointment.start_time,
+                                    appointment.end_time
+                                  );
+
+                                  return (
+                                    <div
+                                      key={appointment.id}
+                                      className="absolute left-2 right-2 pointer-events-auto"
+                                      style={{
+                                        top: `${top}px`,
+                                        height: `${height}px`,
+                                      }}
+                                    >
+                                      <AppointmentCard
+                                        appointment={appointment}
+                                        booking={appointment.booking}
+                                      />
+                                    </div>
+                                  );
+                                })}
+
+                                {/* Blocked Times Overlay */}
+                                {memberBlockedTimes.map((blockedTime) => {
+                                  const { top, height } = getStyle(
+                                    blockedTime.start_time,
+                                    blockedTime.end_time
+                                  );
+                                  return (
+                                    <div
+                                      key={blockedTime.id}
+                                      className="absolute left-2 right-2 pointer-events-auto cursor-pointer"
+                                      style={{
+                                        top: `${top}px`,
+                                        height: `${height}px`,
+                                      }}
+                                      onClick={() =>
+                                        handleBlockedTimeClick(
+                                          blockedTime,
+                                          memberName
+                                        )
+                                      }
+                                    >
+                                      <div className="h-full rounded-lg border-2 border-dashed border-gray-400 bg-gray-100/80 p-2 hover:bg-gray-200/80 transition-colors flex flex-col">
+                                        <div className="text-xs text-gray-600 font-medium flex items-center gap-1">
+                                          <span>🚫</span>
+                                          <span>Blocked</span>
+                                        </div>
+                                        {blockedTime.reason && (
+                                          <div className="text-xs text-gray-500 mt-1 truncate">
+                                            {blockedTime.reason}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
-    </div>
+
+      {/* Modals */}
+      {showActionsModal && selectedSlot && (
+        <TimeSlotActionsModal
+          isOpen={showActionsModal}
+          onClose={() => {
+            setShowActionsModal(false);
+            setSelectedSlot(null);
+          }}
+          timeSlot={selectedSlot.time}
+          date={currentDate}
+          teamMemberId={selectedSlot.teamMemberId}
+          teamMemberName={selectedSlot.teamMemberName}
+          venueId={venueId}
+          venueName="" // TODO: Pass venue name if needed
+          onSuccess={onRefresh}
+        />
+      )}
+
+      {showBlockedTimeModal && selectedSlot && selectedBlockedTime && (
+        <BlockedTimeModal
+          isOpen={showBlockedTimeModal}
+          onClose={() => {
+            setShowBlockedTimeModal(false);
+            setSelectedBlockedTime(null);
+            setSelectedSlot(null);
+          }}
+          teamMemberId={selectedSlot.teamMemberId}
+          teamMemberName={selectedSlot.teamMemberName}
+          venueId={venueId}
+          venueName="" // TODO: Pass venue name if needed
+          date={currentDate}
+          defaultStartTime={selectedSlot.time}
+          existingBlockedTime={selectedBlockedTime}
+          onSuccess={onRefresh}
+        />
+      )}
+    </>
   );
 }

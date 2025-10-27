@@ -149,3 +149,34 @@ export interface AppointmentStyle {
   top: number; // pixels from top
   height: number; // height in pixels
 }
+
+/**
+ * Blocked time period (when staff is unavailable during shift)
+ */
+export interface BlockedTime {
+  id: string;
+  team_member_id: string;
+  venue_id: string;
+  blocked_date: string; // YYYY-MM-DD format
+  start_time: string; // HH:MM:SS format
+  end_time: string; // HH:MM:SS format
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Blocked times grouped by date for calendar display
+ */
+export interface BlockedTimesByDate {
+  [date: string]: BlockedTime[];
+}
+
+/**
+ * Blocked times grouped by team member and date
+ */
+export interface BlockedTimesByMemberAndDate {
+  [teamMemberId: string]: {
+    [date: string]: BlockedTime[];
+  };
+}

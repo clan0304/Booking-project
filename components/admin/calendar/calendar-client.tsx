@@ -8,7 +8,8 @@ import { DayView } from './day-view';
 import { WeekView } from './week-view';
 import { getStartOfWeek, getToday, addDays } from '@/lib/shift-helpers';
 import { getCalendarBookings } from '@/app/actions/bookings';
-import type { CalendarBooking } from '@/types/calendar';
+import { getBlockedTimes } from '@/app/actions/blocked-times';
+import type { CalendarBooking, BlockedTime } from '@/types/calendar';
 
 export type CalendarViewType = 'day' | 'week';
 
@@ -46,10 +47,12 @@ export function CalendarClient() {
   const [assignedTeamMembers, setAssignedTeamMembers] = useState<
     AssignedTeamMember[]
   >([]);
+  // NEW: State for blocked times
+  const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([]);
 
-  // Fetch bookings when filters change
+  // Fetch bookings and blocked times when filters change
   useEffect(() => {
-    const fetchBookings = async () => {
+    const fetchData = async () => {
       // Don't fetch if no venue is selected yet
       if (!selectedVenue) return;
 
@@ -66,81 +69,164 @@ export function CalendarClient() {
           endDate = addDays(currentWeekStart, 6);
         }
 
-        const result = await getCalendarBookings({
+        // Fetch bookings
+        const bookingsResult = await getCalendarBookings({
           venueId: selectedVenue,
           teamMemberId:
             selectedTeamMember === 'all' ? undefined : selectedTeamMember,
           startDate,
           endDate,
-          viewType,
+          viewType, // FIXED: Added viewType parameter
         });
 
-        if (result.success && result.data) {
-          setBookings(result.data);
-          setShifts(result.shifts || []);
-          setAssignedTeamMembers(result.assignedTeamMembers || []);
+        if (bookingsResult.success && bookingsResult.data) {
+          setBookings(bookingsResult.data);
+          setShifts(bookingsResult.shifts || []);
+          setAssignedTeamMembers(bookingsResult.assignedTeamMembers || []);
+        } else {
+          setBookings([]);
+          setShifts([]);
+          setAssignedTeamMembers([]);
+        }
+
+        // NEW: Fetch blocked times
+        const blockedTimesResult = await getBlockedTimes(
+          selectedVenue,
+          startDate,
+          endDate
+        );
+
+        if (blockedTimesResult.success && blockedTimesResult.data) {
+          setBlockedTimes(blockedTimesResult.data);
+        } else {
+          setBlockedTimes([]);
         }
       } catch (error) {
-        console.error('Error fetching bookings:', error);
+        console.error('Error fetching calendar data:', error);
+        setBookings([]);
+        setShifts([]);
+        setAssignedTeamMembers([]);
+        setBlockedTimes([]);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchBookings();
+    fetchData();
   }, [
+    viewType,
     selectedVenue,
     selectedTeamMember,
     currentDate,
     currentWeekStart,
-    viewType,
   ]);
 
+  // Refresh calendar data (for after creating/editing/deleting blocked times)
+  const refreshCalendar = async () => {
+    if (!selectedVenue) return;
+
+    setLoading(true);
+    try {
+      let startDate: string;
+      let endDate: string;
+
+      if (viewType === 'day') {
+        startDate = currentDate;
+        endDate = currentDate;
+      } else {
+        startDate = currentWeekStart;
+        endDate = addDays(currentWeekStart, 6);
+      }
+
+      const bookingsResult = await getCalendarBookings({
+        venueId: selectedVenue,
+        teamMemberId:
+          selectedTeamMember === 'all' ? undefined : selectedTeamMember,
+        startDate,
+        endDate,
+        viewType, // FIXED: Added viewType parameter
+      });
+
+      if (bookingsResult.success && bookingsResult.data) {
+        setBookings(bookingsResult.data);
+        setShifts(bookingsResult.shifts || []);
+        setAssignedTeamMembers(bookingsResult.assignedTeamMembers || []);
+      }
+
+      const blockedTimesResult = await getBlockedTimes(
+        selectedVenue,
+        startDate,
+        endDate
+      );
+
+      if (blockedTimesResult.success && blockedTimesResult.data) {
+        setBlockedTimes(blockedTimesResult.data);
+      }
+    } catch (error) {
+      console.error('Error refreshing calendar data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-full">
+      {/* Header */}
       <PageHeader
         title="Calendar"
-        description="View and manage all bookings across venues"
+        description="View and manage bookings across your team"
       />
 
       {/* Filters */}
-      <CalendarFilters
-        viewType={viewType}
-        onViewTypeChange={setViewType}
-        selectedVenue={selectedVenue}
-        onVenueChange={setSelectedVenue}
-        selectedTeamMember={selectedTeamMember}
-        onTeamMemberChange={setSelectedTeamMember}
-        currentDate={currentDate}
-        onDateChange={setCurrentDate}
-        currentWeekStart={currentWeekStart}
-        onWeekChange={setCurrentWeekStart}
-      />
-
-      {/* Calendar Views */}
-      {!selectedVenue ? (
-        <div className="flex items-center justify-center h-96">
-          <div className="text-gray-500">Select a venue to view calendar</div>
-        </div>
-      ) : loading ? (
-        <div className="flex items-center justify-center h-96">
-          <div className="text-gray-500">Loading bookings...</div>
-        </div>
-      ) : viewType === 'day' ? (
-        <DayView
-          bookings={bookings}
-          shifts={shifts}
-          assignedTeamMembers={assignedTeamMembers}
+      <div className="px-4 sm:px-6 py-4 border-b border-gray-200 bg-white">
+        <CalendarFilters
+          viewType={viewType}
+          onViewTypeChange={setViewType}
+          selectedVenue={selectedVenue}
+          onVenueChange={setSelectedVenue}
+          selectedTeamMember={selectedTeamMember}
+          onTeamMemberChange={setSelectedTeamMember}
           currentDate={currentDate}
+          onDateChange={setCurrentDate}
+          currentWeekStart={currentWeekStart}
+          onWeekChange={setCurrentWeekStart}
         />
-      ) : (
-        <WeekView
-          weekStart={currentWeekStart}
-          bookings={bookings}
-          shifts={shifts}
-          assignedTeamMembers={assignedTeamMembers}
-        />
-      )}
+      </div>
+
+      {/* Calendar View */}
+      <div className="flex-1 overflow-auto p-4 sm:p-6">
+        {loading ? (
+          <div className="flex items-center justify-center h-96">
+            <div className="text-gray-600">Loading calendar...</div>
+          </div>
+        ) : !selectedVenue ? (
+          <div className="flex items-center justify-center h-96 border-2 border-dashed border-gray-200 rounded-lg">
+            <p className="text-gray-600">
+              Please select a venue to view calendar
+            </p>
+          </div>
+        ) : viewType === 'day' ? (
+          <DayView
+            bookings={bookings}
+            shifts={shifts}
+            assignedTeamMembers={assignedTeamMembers}
+            currentDate={currentDate}
+            blockedTimes={blockedTimes}
+            venueId={selectedVenue}
+            onRefresh={refreshCalendar}
+          />
+        ) : (
+          <WeekView
+            weekStart={currentWeekStart}
+            bookings={bookings}
+            shifts={shifts}
+            assignedTeamMembers={assignedTeamMembers}
+            blockedTimes={blockedTimes}
+            venueId={selectedVenue}
+            onRefresh={refreshCalendar}
+          />
+        )}
+      </div>
     </div>
   );
 }
