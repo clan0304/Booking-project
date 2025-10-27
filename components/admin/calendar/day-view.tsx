@@ -144,18 +144,27 @@ export function DayView({
     appointments: AppointmentWithBooking[],
     memberBlockedTimes: BlockedTime[]
   ): boolean => {
-    // Check appointments
+    // Normalize time to HH:MM format for comparison
+    const normalizeTime = (timeStr: string): string => {
+      return timeStr.substring(0, 5); // Get HH:MM from HH:MM or HH:MM:SS
+    };
+
+    const currentTime = normalizeTime(time);
+
+    // Check appointments - time slot is unavailable if it falls within an appointment
     const hasAppointment = appointments.some((apt) => {
-      return time >= apt.start_time && time < apt.end_time;
+      const aptStart = normalizeTime(apt.start_time);
+      const aptEnd = normalizeTime(apt.end_time);
+      return currentTime >= aptStart && currentTime < aptEnd;
     });
 
     if (hasAppointment) return false;
 
-    // Check blocked times
+    // Check blocked times - time slot is unavailable if it falls within blocked time
     const hasBlockedTime = memberBlockedTimes.some((blocked) => {
-      const blockStart = blocked.start_time.substring(0, 5);
-      const blockEnd = blocked.end_time.substring(0, 5);
-      return time >= blockStart && time < blockEnd;
+      const blockStart = normalizeTime(blocked.start_time);
+      const blockEnd = normalizeTime(blocked.end_time);
+      return currentTime >= blockStart && currentTime < blockEnd;
     });
 
     return !hasBlockedTime;
@@ -329,10 +338,10 @@ export function DayView({
                           return (
                             <div
                               key={time}
-                              className={`h-[20px] border-b border-gray-100 cursor-pointer transition-colors ${
+                              className={`h-[20px] border-b border-gray-100 transition-colors ${
                                 available
-                                  ? 'hover:bg-purple-50'
-                                  : 'bg-gray-50/50'
+                                  ? 'bg-white hover:bg-purple-50 cursor-pointer'
+                                  : 'bg-gray-200 cursor-not-allowed'
                               }`}
                               onClick={() => {
                                 if (available) {
@@ -344,7 +353,7 @@ export function DayView({
                                   ? `Click to add appointment or block time at ${formatTime12Hour(
                                       time
                                     )}`
-                                  : undefined
+                                  : 'Time slot unavailable'
                               }
                             />
                           );
