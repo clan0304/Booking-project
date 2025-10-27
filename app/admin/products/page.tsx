@@ -3,6 +3,10 @@ import { getProducts, getCategories } from '@/app/actions/products';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import ProductsContent from '@/components/admin/products/products-content';
 
+// ✅ ADD THESE TWO LINES
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function ProductsPage() {
   // Fetch initial data
   const [productsResult, categoriesResult, venuesResult] = await Promise.all([
