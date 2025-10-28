@@ -475,3 +475,74 @@ export function getRelativeDateDescription(dateStr: string): string {
   if (dateStr === getTomorrow()) return 'Tomorrow';
   return formatDateDisplay(dateStr);
 }
+
+/**
+ * Shift interface for availability checking
+ */
+export interface ShiftForAvailability {
+  team_member_id: string;
+  shift_date: string;
+  start_time: string; // "HH:MM:SS" format
+  end_time: string; // "HH:MM:SS" format
+}
+
+/**
+ * Check if a time slot falls within a team member's shift
+ * @param timeSlot - Time in "HH:MM" format (e.g., "14:00")
+ * @param shifts - Array of shifts to check against
+ * @returns true if the time slot is within any shift period
+ */
+export function isTimeInShift(
+  timeSlot: string,
+  shifts: ShiftForAvailability[]
+): boolean {
+  if (shifts.length === 0) return false;
+
+  // Convert time slot to comparable format (add :00 seconds)
+  const slotTime = `${timeSlot}:00`;
+
+  // Check if time falls within any shift
+  return shifts.some((shift) => {
+    return slotTime >= shift.start_time && slotTime < shift.end_time;
+  });
+}
+
+/**
+ * Get shifts for a specific team member and date
+ * @param teamMemberId - Team member's user ID
+ * @param date - Date in "YYYY-MM-DD" format
+ * @param allShifts - All shifts to filter from
+ * @returns Filtered shifts for the specific team member and date
+ */
+export function getShiftsForMemberAndDate(
+  teamMemberId: string,
+  date: string,
+  allShifts: ShiftForAvailability[]
+): ShiftForAvailability[] {
+  return allShifts.filter(
+    (shift) =>
+      shift.team_member_id === teamMemberId && shift.shift_date === date
+  );
+}
+
+/**
+ * Check if a time slot has a blocked time
+ * @param timeSlot - Time in "HH:MM" format
+ * @param blockedTimes - Array of blocked times
+ * @returns true if the time slot is blocked
+ */
+export function isTimeBlocked(
+  timeSlot: string,
+  blockedTimes: Array<{
+    start_time: string; // "HH:MM:SS" format
+    end_time: string; // "HH:MM:SS" format
+  }>
+): boolean {
+  if (blockedTimes.length === 0) return false;
+
+  const slotTime = `${timeSlot}:00`;
+
+  return blockedTimes.some((blocked) => {
+    return slotTime >= blocked.start_time && slotTime < blocked.end_time;
+  });
+}

@@ -4,6 +4,12 @@
 import { useMemo, useState } from 'react';
 import { TimeSlotActionsModal } from './time-slot-actions-modal';
 import { BlockedTimeModal } from './blocked-time-modal';
+import { AppointmentCard } from './appointment-card';
+import {
+  isTimeInShift,
+  getShiftsForMemberAndDate,
+  isTimeBlocked,
+} from '@/lib/shift-helpers';
 import type {
   CalendarBooking,
   CalendarTeamMember,
@@ -41,6 +47,7 @@ interface DayViewProps {
 
 export function DayView({
   bookings,
+  shifts,
   assignedTeamMembers,
   currentDate,
   blockedTimes,
@@ -138,38 +145,6 @@ export function DayView({
     return grouped;
   }, [blockedTimes]);
 
-  // Check if a time slot is available (not occupied by appointment or blocked time)
-  const isSlotAvailable = (
-    time: string,
-    appointments: AppointmentWithBooking[],
-    memberBlockedTimes: BlockedTime[]
-  ): boolean => {
-    // Normalize time to HH:MM format for comparison
-    const normalizeTime = (timeStr: string): string => {
-      return timeStr.substring(0, 5); // Get HH:MM from HH:MM or HH:MM:SS
-    };
-
-    const currentTime = normalizeTime(time);
-
-    // Check appointments - time slot is unavailable if it falls within an appointment
-    const hasAppointment = appointments.some((apt) => {
-      const aptStart = normalizeTime(apt.start_time);
-      const aptEnd = normalizeTime(apt.end_time);
-      return currentTime >= aptStart && currentTime < aptEnd;
-    });
-
-    if (hasAppointment) return false;
-
-    // Check blocked times - time slot is unavailable if it falls within blocked time
-    const hasBlockedTime = memberBlockedTimes.some((blocked) => {
-      const blockStart = normalizeTime(blocked.start_time);
-      const blockEnd = normalizeTime(blocked.end_time);
-      return currentTime >= blockStart && currentTime < blockEnd;
-    });
-
-    return !hasBlockedTime;
-  };
-
   // Format time for display (12-hour format)
   const formatTime12Hour = (time: string): string => {
     const [hour, min] = time.split(':');
@@ -187,10 +162,10 @@ export function DayView({
     const period = hourNum >= 12 ? 'pm' : 'am';
     const displayHour =
       hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
-    return `${displayHour} ${period}`;
+    return `${displayHour}${period}`;
   };
 
-  // Calculate position and height for absolute positioning
+  // Calculate position and height for appointments/blocked times
   const getStyle = (
     startTime: string,
     endTime: string
@@ -232,360 +207,270 @@ export function DayView({
     setShowBlockedTimeModal(true);
   };
 
-  // Calculate flexible column width
-  const teamMemberCount = appointmentsByMember.length;
-  const gridTemplateColumns = `80px repeat(${teamMemberCount}, 1fr)`;
+  // Calculate dynamic column width based on number of team members
+  const getColumnWidth = (memberCount: number): string => {
+    if (memberCount === 1) return '100%';
+    if (memberCount === 2) return '50%';
+    if (memberCount === 3) return '33.333%';
+    if (memberCount === 4) return '25%';
+    if (memberCount === 5) return '20%';
+    return '200px'; // Fixed width for 6+ members, allows horizontal scroll
+  };
+
+  const columnWidth = getColumnWidth(appointmentsByMember.length);
+  const useFixedWidth = appointmentsByMember.length >= 6;
 
   return (
     <>
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         {appointmentsByMember.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-96 text-gray-500">
-            <p className="text-lg font-medium">No team members scheduled</p>
-            <p className="text-sm mt-1">
-              Assign team members to shifts to view the calendar
+          // Empty state
+          <div className="p-8 text-center">
+            <p className="text-gray-500">
+              No team members assigned to this venue
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="min-w-[800px]">
-              {/* Header with Team Member Photos */}
-              <div
-                className="grid border-b border-gray-200 bg-gray-50 sticky top-0 z-30"
-                style={{ gridTemplateColumns }}
-              >
+          <div className={useFixedWidth ? 'overflow-x-auto' : ''}>
+            <div
+              style={{
+                minWidth: useFixedWidth
+                  ? `${60 + appointmentsByMember.length * 200}px`
+                  : 'auto',
+              }}
+            >
+              {/* Header Row - Team Member Photos and Names */}
+              <div className="flex border-b border-gray-200 bg-gray-50">
                 {/* Time column header */}
-                <div className="p-3 border-r border-gray-200" />
+                <div className="flex-shrink-0 w-16 border-r border-gray-200 p-2">
+                  <div className="text-xs font-semibold text-gray-700">
+                    Time
+                  </div>
+                </div>
 
-                {/* Team member columns */}
-                {appointmentsByMember.map(({ member }) => {
-                  const memberName = `${member.first_name} ${
-                    member.last_name || ''
-                  }`.trim();
+                {/* Team member headers */}
+                {appointmentsByMember.map(({ member, appointments }) => {
+                  const memberName = `${member.first_name} ${member.last_name}`;
 
                   return (
                     <div
                       key={member.id}
-                      className="flex flex-col items-center justify-center p-4 border-r border-gray-200"
+                      className="border-r border-gray-200 p-3 flex flex-col items-center justify-center gap-2"
+                      style={{
+                        width: useFixedWidth ? '200px' : columnWidth,
+                        minWidth: useFixedWidth ? '200px' : 'auto',
+                      }}
                     >
-                      {/* Circular Profile Photo */}
-                      <div className="relative w-16 h-16 mb-2">
-                        <div className="w-full h-full rounded-full overflow-hidden border-2 border-white shadow-md bg-gradient-to-br from-purple-400 to-purple-600">
-                          {member.photo_url ? (
-                            <Image
-                              src={member.photo_url}
-                              alt={memberName}
-                              fill
-                              className="object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-white font-semibold text-lg">
-                              {member.first_name.charAt(0)}
-                            </div>
-                          )}
-                        </div>
+                      {/* Profile Photo */}
+                      <div className="relative h-12 w-12 rounded-full overflow-hidden bg-gray-200">
+                        {member.photo_url ? (
+                          <Image
+                            src={member.photo_url}
+                            alt={memberName}
+                            fill
+                            className="object-cover"
+                          />
+                        ) : (
+                          <div className="h-full w-full flex items-center justify-center text-gray-500 font-semibold text-sm">
+                            {member.first_name[0]}
+                            {member.last_name[0]}
+                          </div>
+                        )}
                       </div>
 
                       {/* Name */}
-                      <div className="text-sm font-semibold text-gray-900">
-                        {memberName}
+                      <div className="text-center">
+                        <div className="font-semibold text-gray-900 text-sm">
+                          {member.first_name}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {appointments.length} apt
+                          {appointments.length !== 1 ? 's' : ''}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Calendar Grid */}
-              <div className="relative">
-                {/* Time slots grid */}
-                <div className="grid" style={{ gridTemplateColumns }}>
-                  {/* Time column */}
-                  <div className="border-r border-gray-200">
-                    {timeSlots.map((time) => {
-                      const showLabel = hourLabels.includes(time);
-                      return (
-                        <div
-                          key={time}
-                          className="h-[20px] flex items-center justify-end pr-2 text-xs text-gray-600 border-b border-gray-100"
-                        >
-                          {showLabel && formatTimeLabel(time)}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Team member columns */}
-                  {appointmentsByMember.map(({ member, appointments }) => {
-                    const memberName = `${member.first_name} ${
-                      member.last_name || ''
-                    }`.trim();
-                    const memberBlockedTimes =
-                      blockedTimesByMember.get(member.id) || [];
+              {/* Calendar Grid - Time slots with columns for each member */}
+              <div className="flex">
+                {/* Time Labels Column */}
+                <div className="flex-shrink-0 w-16 border-r border-gray-200 bg-gray-50">
+                  {timeSlots.map((time) => {
+                    const isHourMark = time.endsWith(':00');
+                    const showLabel = hourLabels.includes(time);
 
                     return (
                       <div
-                        key={member.id}
-                        className="relative border-r border-gray-200"
+                        key={time}
+                        className={`h-5 flex items-center justify-end pr-2 text-xs ${
+                          showLabel
+                            ? 'text-gray-600 font-medium'
+                            : 'text-transparent'
+                        } ${isHourMark ? 'border-t-2 border-t-gray-300' : ''}`}
                       >
-                        {/* Time slot cells */}
-                        {timeSlots.map((time) => {
-                          const available = isSlotAvailable(
-                            time,
-                            appointments,
-                            memberBlockedTimes
-                          );
-
-                          return (
-                            <div
-                              key={time}
-                              className={`h-[20px] border-b border-gray-100 transition-colors ${
-                                available
-                                  ? 'bg-white hover:bg-purple-50 cursor-pointer'
-                                  : 'bg-gray-200 cursor-not-allowed'
-                              }`}
-                              onClick={() => {
-                                if (available) {
-                                  handleSlotClick(time, member.id, memberName);
-                                }
-                              }}
-                              title={
-                                available
-                                  ? `Click to add appointment or block time at ${formatTime12Hour(
-                                      time
-                                    )}`
-                                  : 'Time slot unavailable'
-                              }
-                            />
-                          );
-                        })}
-
-                        {/* Appointments and Blocked Times Overlay */}
-                        <div
-                          className="absolute inset-0 pointer-events-none"
-                          style={{ height: `${timeSlots.length * 20}px` }}
-                        >
-                          {/* Appointments */}
-                          {appointments.map((appointment) => {
-                            const { top, height } = getStyle(
-                              appointment.start_time,
-                              appointment.end_time
-                            );
-
-                            // Get client name
-                            const clientName = `${
-                              appointment.booking.guest_first_name
-                            } ${
-                              appointment.booking.guest_last_name || ''
-                            }`.trim();
-
-                            // Get service category color
-                            const categoryColor =
-                              appointment.category_color || '#8B5CF6';
-
-                            // Format time range
-                            const startTime = formatTime12Hour(
-                              appointment.start_time
-                            );
-                            const endTime = formatTime12Hour(
-                              appointment.end_time
-                            );
-
-                            return (
-                              <div
-                                key={appointment.id}
-                                className="absolute inset-x-0 pointer-events-auto group"
-                                style={{
-                                  top: `${top}px`,
-                                  height: `${height}px`,
-                                }}
-                              >
-                                <div
-                                  className="h-full rounded-md px-2 py-1.5 shadow-sm border border-white/20 cursor-pointer transition-all hover:shadow-md overflow-hidden"
-                                  style={{
-                                    backgroundColor: categoryColor,
-                                    color: '#1F2937', // gray-900
-                                  }}
-                                >
-                                  {/* Time range and Client name on same row */}
-                                  <div className="text-xs font-medium leading-tight truncate">
-                                    {startTime} - {endTime}{' '}
-                                    <span className="font-bold">
-                                      {clientName}
-                                    </span>
-                                  </div>
-
-                                  {/* Service name on next row */}
-                                  <div className="text-xs leading-tight mt-0.5 truncate">
-                                    {appointment.service_name}
-                                  </div>
-
-                                  {/* Hover tooltip with white background and full details */}
-                                  <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-50 w-80 pointer-events-none">
-                                    <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4">
-                                      {/* Status Badge */}
-                                      <div className="flex items-center justify-between mb-3">
-                                        <h3 className="text-lg font-bold text-gray-900">
-                                          Booking Details
-                                        </h3>
-                                        <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded-full">
-                                          {appointment.status}
-                                        </span>
-                                      </div>
-
-                                      {/* Client Info */}
-                                      <div className="mb-3">
-                                        <h4 className="text-sm font-semibold text-gray-700 mb-2">
-                                          Client
-                                        </h4>
-                                        <div className="space-y-1.5">
-                                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                                            <span>👤</span>
-                                            <span>{clientName}</span>
-                                          </div>
-                                          {appointment.booking.guest_email && (
-                                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                                              <span>✉️</span>
-                                              <span>
-                                                {
-                                                  appointment.booking
-                                                    .guest_email
-                                                }
-                                              </span>
-                                            </div>
-                                          )}
-                                          {appointment.booking.guest_phone && (
-                                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                                              <span>📞</span>
-                                              <span>
-                                                {
-                                                  appointment.booking
-                                                    .guest_phone
-                                                }
-                                              </span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Appointment Info */}
-                                      <div className="mb-3">
-                                        <h4 className="text-sm font-semibold text-gray-700 mb-2">
-                                          Appointment
-                                        </h4>
-                                        <div className="space-y-1.5">
-                                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                                            <span>📅</span>
-                                            <span>
-                                              {appointment.booking.booking_date}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                                            <span>🕐</span>
-                                            <span>
-                                              {startTime} - {endTime} (
-                                              {appointment.duration_minutes}{' '}
-                                              min)
-                                            </span>
-                                          </div>
-                                          {appointment.team_member && (
-                                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                                              <span>💇</span>
-                                              <span>
-                                                with{' '}
-                                                {
-                                                  appointment.team_member
-                                                    .first_name
-                                                }{' '}
-                                                {
-                                                  appointment.team_member
-                                                    .last_name
-                                                }
-                                              </span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Service & Price */}
-                                      <div className="bg-gray-50 rounded-lg p-3">
-                                        <div className="flex items-center justify-between">
-                                          <div>
-                                            <p className="font-semibold text-sm text-gray-900">
-                                              {appointment.service_name}
-                                            </p>
-                                            <p className="text-xs text-gray-500 mt-0.5">
-                                              {appointment.duration_minutes}{' '}
-                                              minutes
-                                            </p>
-                                          </div>
-                                          <div className="text-right">
-                                            <p className="text-lg font-bold text-gray-900">
-                                              ${appointment.price.toFixed(2)}
-                                            </p>
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      {/* Notes */}
-                                      {(appointment.notes ||
-                                        appointment.booking.notes) && (
-                                        <div className="mt-3 pt-3 border-t border-gray-200">
-                                          <h4 className="text-sm font-semibold text-gray-700 mb-1">
-                                            Notes
-                                          </h4>
-                                          <p className="text-sm text-gray-600">
-                                            {appointment.notes ||
-                                              appointment.booking.notes}
-                                          </p>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-
-                          {/* Blocked Times */}
-                          {memberBlockedTimes.map((blockedTime) => {
-                            const { top, height } = getStyle(
-                              blockedTime.start_time,
-                              blockedTime.end_time
-                            );
-                            return (
-                              <div
-                                key={blockedTime.id}
-                                className="absolute inset-x-0 pointer-events-auto cursor-pointer"
-                                style={{
-                                  top: `${top}px`,
-                                  height: `${height}px`,
-                                }}
-                                onClick={() =>
-                                  handleBlockedTimeClick(
-                                    blockedTime,
-                                    memberName
-                                  )
-                                }
-                              >
-                                <div className="h-full rounded-md border-2 border-dashed border-gray-400 bg-gray-100/80 px-2 py-1.5 hover:bg-gray-200/80 transition-colors flex flex-col overflow-hidden">
-                                  <div className="text-xs text-gray-600 font-medium flex items-center gap-1 leading-tight">
-                                    <span>🚫</span>
-                                    <span>Blocked</span>
-                                  </div>
-                                  {blockedTime.reason && (
-                                    <div className="text-xs text-gray-500 mt-0.5 truncate leading-tight">
-                                      {blockedTime.reason}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {showLabel ? formatTimeLabel(time) : '·'}
                       </div>
                     );
                   })}
                 </div>
+
+                {/* Team Member Columns */}
+                {appointmentsByMember.map(({ member, appointments }) => {
+                  const memberName = `${member.first_name} ${member.last_name}`;
+                  const memberBlockedTimes =
+                    blockedTimesByMember.get(member.id) || [];
+
+                  return (
+                    <div
+                      key={member.id}
+                      className="border-r border-gray-200 relative"
+                      style={{
+                        width: useFixedWidth ? '200px' : columnWidth,
+                        minWidth: useFixedWidth ? '200px' : 'auto',
+                      }}
+                    >
+                      {/* Time Slots Grid */}
+                      <div>
+                        {timeSlots.map((time) => {
+                          // Get shifts for this team member on current date
+                          const memberShifts = getShiftsForMemberAndDate(
+                            member.id,
+                            currentDate,
+                            shifts
+                          );
+
+                          // Check if this time slot is within team member's shift
+                          const hasShift = isTimeInShift(time, memberShifts);
+
+                          // Check if this time slot is blocked
+                          const isBlocked = isTimeBlocked(
+                            time,
+                            memberBlockedTimes
+                          );
+
+                          // Check if time slot has an appointment
+                          const hasAppointment = appointments.some((apt) => {
+                            const aptStart = apt.start_time.substring(0, 5);
+                            const aptEnd = apt.end_time.substring(0, 5);
+                            return time >= aptStart && time < aptEnd;
+                          });
+
+                          // Determine if slot is clickable (not booked, not blocked)
+                          const isClickable = !hasAppointment && !isBlocked;
+
+                          // Determine background color based on state
+                          let bgColorClass = '';
+                          let cursorClass = '';
+                          let titleText = '';
+
+                          if (!hasShift) {
+                            // No shift = light gray, clickable
+                            bgColorClass = 'bg-gray-100 hover:bg-purple-50';
+                            cursorClass = 'cursor-pointer';
+                            titleText = `Click to add appointment or block time at ${formatTime12Hour(
+                              time
+                            )} (no shift scheduled)`;
+                          } else if (isBlocked) {
+                            // Has shift but blocked = dark gray, not clickable
+                            bgColorClass = 'bg-gray-400';
+                            cursorClass = 'cursor-not-allowed';
+                            titleText = 'Time blocked';
+                          } else if (hasAppointment) {
+                            // Has shift with appointment = gray, not clickable
+                            bgColorClass = 'bg-gray-200';
+                            cursorClass = 'cursor-not-allowed';
+                            titleText = 'Time slot booked';
+                          } else {
+                            // Has shift, available = white, clickable
+                            bgColorClass = 'bg-white hover:bg-purple-50';
+                            cursorClass = 'cursor-pointer';
+                            titleText = `Click to add appointment or block time at ${formatTime12Hour(
+                              time
+                            )}`;
+                          }
+
+                          return (
+                            <div
+                              key={time}
+                              className={`h-5 border-t border-gray-100 transition-colors ${bgColorClass} ${cursorClass}`}
+                              onClick={() => {
+                                if (isClickable) {
+                                  handleSlotClick(time, member.id, memberName);
+                                }
+                              }}
+                              title={titleText}
+                            />
+                          );
+                        })}
+                      </div>
+
+                      {/* Appointments and Blocked Times Overlay */}
+                      <div
+                        className="absolute inset-0 pointer-events-none"
+                        style={{ height: `${timeSlots.length * 20}px` }}
+                      >
+                        {/* Appointments */}
+                        {appointments.map((appointment) => {
+                          const { top, height } = getStyle(
+                            appointment.start_time,
+                            appointment.end_time
+                          );
+
+                          return (
+                            <div
+                              key={appointment.id}
+                              className="absolute inset-x-0 pointer-events-auto px-1"
+                              style={{
+                                top: `${top}px`,
+                                height: `${height}px`,
+                              }}
+                            >
+                              <AppointmentCard
+                                appointment={appointment}
+                                booking={appointment.booking}
+                              />
+                            </div>
+                          );
+                        })}
+
+                        {/* Blocked Times */}
+                        {memberBlockedTimes.map((blockedTime) => {
+                          const { top, height } = getStyle(
+                            blockedTime.start_time,
+                            blockedTime.end_time
+                          );
+                          return (
+                            <div
+                              key={blockedTime.id}
+                              className="absolute inset-x-0 pointer-events-auto cursor-pointer px-1"
+                              style={{
+                                top: `${top}px`,
+                                height: `${height}px`,
+                              }}
+                              onClick={() =>
+                                handleBlockedTimeClick(blockedTime, memberName)
+                              }
+                            >
+                              <div className="h-full rounded-md border-2 border-dashed border-gray-400 bg-gray-100/80 px-2 py-1.5 hover:bg-gray-200/80 transition-colors flex flex-col overflow-hidden">
+                                <div className="text-xs text-gray-600 font-medium flex items-center gap-1 leading-tight">
+                                  <span>🚫</span>
+                                  <span>Blocked</span>
+                                </div>
+                                {blockedTime.reason && (
+                                  <div className="text-xs text-gray-500 mt-0.5 truncate leading-tight">
+                                    {blockedTime.reason}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -605,7 +490,7 @@ export function DayView({
           teamMemberId={selectedSlot.teamMemberId}
           teamMemberName={selectedSlot.teamMemberName}
           venueId={venueId}
-          venueName="" // TODO: Pass venue name if needed
+          venueName=""
           onSuccess={onRefresh}
         />
       )}
@@ -621,7 +506,7 @@ export function DayView({
           teamMemberId={selectedSlot.teamMemberId}
           teamMemberName={selectedSlot.teamMemberName}
           venueId={venueId}
-          venueName="" // TODO: Pass venue name if needed
+          venueName=""
           date={currentDate}
           defaultStartTime={selectedSlot.time}
           existingBlockedTime={selectedBlockedTime}

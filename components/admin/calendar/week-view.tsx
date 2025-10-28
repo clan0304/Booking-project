@@ -5,7 +5,12 @@ import { useMemo, useState } from 'react';
 import { AppointmentCard } from './appointment-card';
 import { TimeSlotActionsModal } from './time-slot-actions-modal';
 import { BlockedTimeModal } from './blocked-time-modal';
-import { addDays } from '@/lib/shift-helpers';
+import {
+  addDays,
+  isTimeInShift,
+  getShiftsForMemberAndDate,
+  isTimeBlocked,
+} from '@/lib/shift-helpers';
 import type {
   CalendarBooking,
   CalendarTeamMember,
@@ -45,6 +50,8 @@ interface WeekViewProps {
 export function WeekView({
   weekStart,
   bookings,
+  shifts,
+  assignedTeamMembers,
   blockedTimes,
   venueId,
   onRefresh,
@@ -139,8 +146,18 @@ export function WeekView({
         });
       });
 
+      // Add team members from assignedTeamMembers who don't have bookings
+      assignedTeamMembers.forEach((member) => {
+        if (!grouped.has(member.id)) {
+          grouped.set(member.id, {
+            member,
+            appointmentsByDate: new Map(),
+          });
+        }
+      });
+
       return Array.from(grouped.values());
-    }, [bookings]);
+    }, [bookings, assignedTeamMembers]);
 
   // Group blocked times by team member and date
   const blockedTimesByMemberAndDate = useMemo(() => {
@@ -157,51 +174,6 @@ export function WeekView({
     });
     return grouped;
   }, [blockedTimes]);
-
-  // Check if a time slot is available for a specific day
-  const isSlotAvailable = (
-    date: string,
-    time: string,
-    appointments: AppointmentWithBooking[],
-    blockedTimes: BlockedTime[]
-  ): boolean => {
-    const [hour, min] = time.split(':').map(Number);
-    const slotMinutes = hour * 60 + min;
-
-    // Check appointments
-    const hasAppointment = appointments.some((appt) => {
-      const [startHour, startMin] = appt.start_time.split(':').map(Number);
-      const [endHour, endMin] = appt.end_time.split(':').map(Number);
-      const startMinutes = startHour * 60 + startMin;
-      const endMinutes = endHour * 60 + endMin;
-
-      return slotMinutes >= startMinutes && slotMinutes < endMinutes;
-    });
-
-    if (hasAppointment) return false;
-
-    // Check blocked times
-    const hasBlockedTime = blockedTimes.some((bt) => {
-      const [startHour, startMin] = bt.start_time.split(':').map(Number);
-      const [endHour, endMin] = bt.end_time.split(':').map(Number);
-      const startMinutes = startHour * 60 + startMin;
-      const endMinutes = endHour * 60 + endMin;
-
-      return slotMinutes >= startMinutes && slotMinutes < endMinutes;
-    });
-
-    return !hasBlockedTime;
-  };
-
-  // Format time for display (12-hour format)
-  const formatTime = (time: string): string => {
-    const [hour, min] = time.split(':');
-    const hourNum = parseInt(hour);
-    const period = hourNum >= 12 ? 'PM' : 'AM';
-    const displayHour =
-      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
-    return `${displayHour}:${min} ${period}`;
-  };
 
   // Calculate position and height
   const getStyle = (
@@ -431,33 +403,85 @@ export function WeekView({
                               {showLabel ? time : '·'}
                             </div>
                             {weekDays.map((day) => {
+                              // Get shifts for this team member on this specific date
+                              const memberShifts = getShiftsForMemberAndDate(
+                                member.id,
+                                day.date,
+                                shifts
+                              );
+
+                              // Check if this time slot is within team member's shift
+                              const hasShift = isTimeInShift(
+                                time,
+                                memberShifts
+                              );
+
+                              // Get appointments and blocked times for this day
                               const dayAppointments = getAppointmentsForDate(
                                 appointmentsByDate,
                                 day.date
                               );
                               const dayBlockedTimes =
                                 memberBlockedTimes.get(day.date) || [];
-                              const isAvailable = isSlotAvailable(
-                                day.date,
+
+                              // Check if time is blocked
+                              const isBlocked = isTimeBlocked(
                                 time,
-                                dayAppointments,
                                 dayBlockedTimes
                               );
+
+                              // Check if time has an appointment
+                              const hasAppointment = dayAppointments.some(
+                                (apt) => {
+                                  const aptStart = apt.start_time.substring(
+                                    0,
+                                    5
+                                  );
+                                  const aptEnd = apt.end_time.substring(0, 5);
+                                  return time >= aptStart && time < aptEnd;
+                                }
+                              );
+
+                              // Determine if slot is clickable (not booked, not blocked)
+                              const isClickable = !hasAppointment && !isBlocked;
+
+                              // Determine background color based on state
+                              let bgColorClass = '';
+                              let cursorClass = '';
+                              let titleText = '';
+
+                              if (!hasShift) {
+                                // No shift = light gray, clickable
+                                bgColorClass = 'bg-gray-100 hover:bg-purple-50';
+                                cursorClass = 'cursor-pointer';
+                                titleText = 'Click to add (no shift scheduled)';
+                              } else if (isBlocked) {
+                                // Has shift but blocked = dark gray, not clickable
+                                bgColorClass = 'bg-gray-400';
+                                cursorClass = 'cursor-not-allowed';
+                                titleText = 'Time blocked';
+                              } else if (hasAppointment) {
+                                // Has shift with appointment = gray, not clickable
+                                bgColorClass = 'bg-gray-200';
+                                cursorClass = 'cursor-not-allowed';
+                                titleText = 'Booked';
+                              } else {
+                                // Has shift, available = white, clickable
+                                bgColorClass = 'bg-white hover:bg-purple-50';
+                                cursorClass = 'cursor-pointer';
+                                titleText = 'Click to add';
+                              }
 
                               return (
                                 <div
                                   key={`${day.date}-${time}`}
-                                  className={`border-r border-gray-200 relative group cursor-pointer transition-colors ${
-                                    isAvailable
-                                      ? 'bg-white hover:bg-blue-50'
-                                      : 'bg-gray-100'
-                                  } ${
+                                  className={`border-r border-gray-200 relative group transition-colors ${bgColorClass} ${cursorClass} ${
                                     isHourMark
                                       ? 'border-t-2 border-t-gray-300'
                                       : 'border-t border-t-gray-100'
                                   }`}
                                   onClick={() => {
-                                    if (isAvailable) {
+                                    if (isClickable) {
                                       handleSlotClick(
                                         time,
                                         day.date,
@@ -466,21 +490,8 @@ export function WeekView({
                                       );
                                     }
                                   }}
-                                  title={
-                                    isAvailable
-                                      ? `Click to add appointment or block time`
-                                      : undefined
-                                  }
-                                >
-                                  {/* Hover tooltip */}
-                                  {isAvailable && (
-                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                      <span className="text-[10px] font-medium text-gray-700 bg-white/90 px-1 rounded">
-                                        {formatTime(time)}
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
+                                  title={titleText}
+                                />
                               );
                             })}
                           </div>
@@ -552,19 +563,13 @@ export function WeekView({
                                           )
                                         }
                                       >
-                                        <div className="h-full rounded border-2 border-dashed border-gray-400 bg-gray-100/80 p-1 hover:bg-gray-200/80 transition-colors">
-                                          <div className="text-[9px] text-gray-600 font-medium flex items-center gap-0.5">
+                                        <div className="h-full rounded-md border-2 border-dashed border-gray-400 bg-gray-100/80 px-1 py-1 hover:bg-gray-200/80 transition-colors flex flex-col overflow-hidden">
+                                          <div className="text-[10px] text-gray-600 font-medium flex items-center gap-1 leading-tight">
                                             <span>🚫</span>
                                             <span className="truncate">
                                               Blocked
                                             </span>
                                           </div>
-                                          {blockedTime.reason &&
-                                            height > 30 && (
-                                              <div className="text-[8px] text-gray-500 mt-0.5 truncate">
-                                                {blockedTime.reason}
-                                              </div>
-                                            )}
                                         </div>
                                       </div>
                                     );
@@ -597,7 +602,7 @@ export function WeekView({
           teamMemberId={selectedSlot.teamMemberId}
           teamMemberName={selectedSlot.teamMemberName}
           venueId={venueId}
-          venueName="" // TODO: Pass venue name if needed
+          venueName=""
           onSuccess={onRefresh}
         />
       )}
@@ -613,7 +618,7 @@ export function WeekView({
           teamMemberId={selectedSlot.teamMemberId}
           teamMemberName={selectedSlot.teamMemberName}
           venueId={venueId}
-          venueName="" // TODO: Pass venue name if needed
+          venueName=""
           date={selectedSlot.date}
           defaultStartTime={selectedSlot.time}
           existingBlockedTime={selectedBlockedTime}

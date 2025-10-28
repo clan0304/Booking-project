@@ -1618,19 +1618,31 @@ Updated: Phase 5 (Booking System + Calendar Improvements)
 New "Lessons Learned" entries: 3
 
 🎯 Key Improvements Documented
-Phase 5 Completion Status Updated:
-diff- [ ] **Admin Calendar View** (TODO)
 
 - [x] **Admin Calendar View** ✅
 
-* [ ] **Calendar Components** (TODO)
+  - [x] **Day View - Horizontal Layout:**
 
-- [x] **Calendar Components** ✅
+    - [x] Fresha-style column layout (team members side-by-side)
+    - [x] Profile photos at top of each column
+    - [x] Dynamic column widths (1-5 optimized, 6+ scrollable)
+    - [x] Clickable unavailable slots (light gray areas)
+    - [x] Shift availability visualization (4 states)
+    - [x] Hover effects on interactive slots
 
-- [x] **Calendar Fixes** ✅
--     - Fixed positioning (30px → 20px)
--     - Hover tooltip (replaced modal)
--     - Type safety improvements
+  - [x] **Week View - Grid Layout:**
+
+    - [x] Team members as rows, days as columns
+    - [x] Clickable unavailable slots
+    - [x] Same availability logic as day view
+
+  - [x] **Calendar Components:**
+    - [x] CalendarClient (main container)
+    - [x] CalendarFilters (navigation)
+    - [x] DayView (horizontal columns)
+    - [x] WeekView (grid layout)
+    - [x] AppointmentCard, BlockedTimeModal, TimeSlotActionsModal
+
   Recent Updates Section Enhanced:
 
 Calendar UX enhancement details
