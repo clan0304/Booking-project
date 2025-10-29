@@ -53,7 +53,8 @@ export async function createClient(formData: FormData) {
     await requireAdmin();
 
     // Get form data
-    const email = (formData.get('email') as string)?.toLowerCase().trim();
+    const email =
+      (formData.get('email') as string)?.toLowerCase().trim() || null;
     const firstName = (formData.get('firstName') as string)?.trim();
     const lastName = (formData.get('lastName') as string)?.trim();
     const phoneNumber = (formData.get('phoneNumber') as string)?.trim();
@@ -61,24 +62,21 @@ export async function createClient(formData: FormData) {
     const alertNote = (formData.get('alertNote') as string)?.trim();
     const photoFile = formData.get('photo') as File | null;
 
-    // Validate required fields
-    if (!email) {
-      return { success: false, error: 'Email is required' };
-    }
-
     if (!firstName) {
       return { success: false, error: 'First name is required' };
     }
 
     // Check if email already exists
-    const { data: existingUser } = await supabaseAdmin
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle();
+    if (email) {
+      const { data: existingUser } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle();
 
-    if (existingUser) {
-      return { success: false, error: 'Email already exists' };
+      if (existingUser) {
+        return { success: false, error: 'Email already exists' };
+      }
     }
 
     let photoUrl: string | null = null;

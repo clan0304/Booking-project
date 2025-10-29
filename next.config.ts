@@ -14,6 +14,16 @@ const nextConfig: NextConfig = {
         hostname: '*.supabase.co',
         pathname: '/storage/**',
       },
+      // Clerk user profile images (proxied images from OAuth providers)
+      {
+        protocol: 'https',
+        hostname: 'img.clerk.com',
+      },
+      // Clerk OAuth provider images (Google, GitHub, etc. profile pictures)
+      {
+        protocol: 'https',
+        hostname: 'images.clerk.dev',
+      },
     ],
   },
 };

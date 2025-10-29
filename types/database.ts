@@ -6,7 +6,7 @@ export type UserRole = 'client' | 'team_member' | 'admin';
 export interface User {
   id: string;
   clerk_user_id: string | null;
-  email: string;
+  email: string | null;
   first_name: string;
   last_name: string | null;
   phone_number: string | null;
