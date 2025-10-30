@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { X, Calendar, XCircle } from 'lucide-react';
 import { BlockedTimeModal } from './blocked-time-modal';
+import { CreateAppointmentModal } from './appointment/create-appointment-modal';
 
 interface TimeSlotActionsModalProps {
   isOpen: boolean;
@@ -29,6 +30,7 @@ export function TimeSlotActionsModal({
   onSuccess,
 }: TimeSlotActionsModalProps) {
   const [showBlockTime, setShowBlockTime] = useState(false);
+  const [showAddAppointment, setShowAddAppointment] = useState(false);
 
   // Format time for display (12-hour format)
   const formatTime = (time: string): string => {
@@ -52,6 +54,30 @@ export function TimeSlotActionsModal({
   };
 
   if (!isOpen) return null;
+
+  // Show add appointment modal if active
+  if (showAddAppointment) {
+    return (
+      <CreateAppointmentModal
+        isOpen={showAddAppointment}
+        onClose={() => {
+          setShowAddAppointment(false);
+          onClose(); // Close parent modal too
+        }}
+        venueId={venueId}
+        venueName={venueName}
+        teamMemberId={teamMemberId}
+        teamMemberName={teamMemberName}
+        date={date}
+        startTime={timeSlot}
+        onSuccess={() => {
+          setShowAddAppointment(false);
+          onClose();
+          onSuccess();
+        }}
+      />
+    );
+  }
 
   // Show blocked time modal if active
   if (showBlockTime) {
@@ -110,13 +136,9 @@ export function TimeSlotActionsModal({
 
           {/* Action Buttons */}
           <div className="p-6 space-y-3">
-            {/* Add Appointment - Placeholder for Phase 6 */}
+            {/* Add Appointment */}
             <button
-              onClick={() => {
-                alert(
-                  'Add Appointment functionality will be implemented in Phase 6'
-                );
-              }}
+              onClick={() => setShowAddAppointment(true)}
               className="w-full flex items-center gap-3 p-4 rounded-lg border-2 border-gray-200 hover:border-purple-600 hover:bg-purple-50 transition-all group"
             >
               <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-purple-100 group-hover:bg-purple-200 flex items-center justify-center transition-colors">

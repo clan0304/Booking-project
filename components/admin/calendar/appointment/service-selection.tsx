@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { Plus, X, Sparkles } from 'lucide-react';
+import { getAvailableServices } from '@/app/actions/services';
 import type { SelectedService } from './types';
 
 interface ServiceSelectionProps {
@@ -41,16 +42,14 @@ export function ServiceSelection({
       setError('');
 
       try {
-        const response = await fetch(
-          `/api/services/available?venueId=${venueId}&teamMemberId=${teamMemberId}`
-        );
+        // ✅ FIXED: Use server action instead of fetch
+        const result = await getAvailableServices(venueId, teamMemberId);
 
-        if (!response.ok) {
-          throw new Error('Failed to load services');
+        if (result.success) {
+          setAvailableServices(result.services || []);
+        } else {
+          throw new Error(result.error || 'Failed to load services');
         }
-
-        const data = await response.json();
-        setAvailableServices(data.services || []);
       } catch (err) {
         console.error('Error loading services:', err);
         setError('Failed to load services');
@@ -58,6 +57,7 @@ export function ServiceSelection({
         setIsLoading(false);
       }
     };
+
     loadServices();
   }, [venueId, teamMemberId]);
 
@@ -146,10 +146,11 @@ export function ServiceSelection({
             className="fixed inset-0 bg-black bg-opacity-50"
             onClick={() => setShowServicePicker(false)}
           />
+
           <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden">
+            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] flex flex-col">
               {/* Header */}
-              <div className="border-b border-gray-200 px-6 py-4">
+              <div className="flex-shrink-0 border-b border-gray-200 px-4 py-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold text-gray-900">
                     Select Service
@@ -164,47 +165,46 @@ export function ServiceSelection({
               </div>
 
               {/* Service List */}
-              <div
-                className="overflow-y-auto p-6 space-y-2"
-                style={{ maxHeight: 'calc(80vh - 80px)' }}
-              >
+              <div className="flex-1 overflow-y-auto p-4">
                 {availableServices.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    No services available
+                    No services available for this team member at this venue
                   </div>
                 ) : (
-                  availableServices.map((service) => (
-                    <button
-                      key={service.id}
-                      onClick={() => handleAddService(service)}
-                      className="w-full text-left p-4 rounded-lg border border-gray-200 hover:border-purple-400 hover:bg-purple-50 transition-all"
-                    >
-                      <div className="font-medium text-gray-900">
-                        {service.name}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        {service.service_categories && (
-                          <span
-                            className="text-xs px-2 py-0.5 rounded"
-                            style={{
-                              backgroundColor: `${service.service_categories.color}20`,
-                              color: service.service_categories.color,
-                            }}
-                          >
-                            {service.service_categories.name}
-                          </span>
-                        )}
-                        <span className="text-sm text-gray-600">
-                          {service.base_duration} min
-                        </span>
-                        {service.base_price && (
-                          <span className="text-sm text-gray-600">
-                            • ${service.base_price.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  ))
+                  <div className="space-y-2">
+                    {availableServices.map((service) => (
+                      <button
+                        key={service.id}
+                        onClick={() => handleAddService(service)}
+                        className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-purple-400 hover:bg-purple-50 transition-all"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900">
+                              {service.name}
+                            </div>
+                            <div className="text-sm text-gray-600 mt-1">
+                              {service.base_duration} min
+                              {service.base_price !== null && (
+                                <> • ${service.base_price.toFixed(2)}</>
+                              )}
+                            </div>
+                          </div>
+                          {service.service_categories && (
+                            <div
+                              className="flex-shrink-0 px-2 py-1 rounded text-xs font-medium text-white"
+                              style={{
+                                backgroundColor:
+                                  service.service_categories.color,
+                              }}
+                            >
+                              {service.service_categories.name}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>

@@ -3,7 +3,53 @@
 
 import { revalidatePath } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth, requireStaff } from '@/lib/auth';
+
+/**
+ * Service category info from database
+ */
+interface ServiceCategoryInfo {
+  name: string;
+  color: string;
+}
+
+/**
+ * Custom pricing info for team member
+ */
+interface ServiceTeamMemberInfo {
+  team_member_id: string;
+  custom_price: number | null;
+  custom_duration_minutes: number | null;
+}
+
+/**
+ * Raw service data from Supabase query
+ * Supabase joins can return nested data as array or single object
+ */
+interface RawServiceFromDB {
+  id: string;
+  name: string;
+  type: 'service' | 'variant_group' | 'bundle';
+  duration_minutes: number;
+  price: number | null;
+  service_categories: ServiceCategoryInfo | ServiceCategoryInfo[] | null;
+  service_team_members: ServiceTeamMemberInfo | ServiceTeamMemberInfo[];
+}
+
+/**
+ * Transformed service for client consumption
+ */
+interface AvailableService {
+  id: string;
+  name: string;
+  type: 'service' | 'variant_group' | 'bundle';
+  base_duration: number;
+  base_price: number | null;
+  service_categories: {
+    name: string;
+    color: string;
+  } | null;
+}
 
 // =====================================================
 // SERVICE CATEGORIES
@@ -594,4 +640,125 @@ export async function getAllTeamMembers() {
   }
 
   return data || [];
+}
+
+/**
+ * Get services available for a specific venue and team member
+ * Used in calendar appointment creation modal
+ * Returns services that:
+ * - Are active and bookable
+ * - Are available at the specified venue
+ * - Can be performed by the specified team member
+ * - Include custom pricing if set for that team member
+ */
+export async function getAvailableServices(
+  venueId: string,
+  teamMemberId: string
+): Promise<{
+  success: boolean;
+  services: AvailableService[];
+  error?: string;
+}> {
+  try {
+    await requireStaff();
+
+    // Query services with all necessary joins
+    const { data, error } = await supabaseAdmin
+      .from('services')
+      .select(
+        `
+        id,
+        name,
+        type,
+        duration_minutes,
+        price,
+        service_categories!services_category_id_fkey (
+          name,
+          color
+        ),
+        service_venues!inner (
+          venue_id
+        ),
+        service_team_members!inner (
+          team_member_id,
+          custom_price,
+          custom_duration_minutes
+        )
+      `
+      )
+      .eq('is_active', true)
+      .eq('is_bookable', true)
+      .eq('service_venues.venue_id', venueId)
+      .eq('service_team_members.team_member_id', teamMemberId)
+      .eq('service_team_members.is_active', true)
+      .order('name');
+
+    if (error) {
+      console.error('Error fetching available services:', error);
+      throw new Error('Failed to fetch available services');
+    }
+
+    // Cast to our known type structure
+    const rawServices = (data || []) as RawServiceFromDB[];
+
+    // Transform data to match expected format
+    const services: AvailableService[] = rawServices.map((service) => {
+      // Get custom pricing from service_team_members if it exists
+      // Supabase can return this as array or single object
+      const teamMemberData: ServiceTeamMemberInfo = Array.isArray(
+        service.service_team_members
+      )
+        ? service.service_team_members[0]
+        : service.service_team_members;
+
+      const basePrice: number = service.price || 0;
+      const baseDuration: number = service.duration_minutes;
+
+      // Use custom pricing if set, otherwise use base
+      const finalPrice: number =
+        teamMemberData?.custom_price !== null &&
+        teamMemberData?.custom_price !== undefined
+          ? teamMemberData.custom_price
+          : basePrice;
+
+      const finalDuration: number =
+        teamMemberData?.custom_duration_minutes !== null &&
+        teamMemberData?.custom_duration_minutes !== undefined
+          ? teamMemberData.custom_duration_minutes
+          : baseDuration;
+
+      // Get category info - can be array or single object from Supabase
+      const category: ServiceCategoryInfo | null = Array.isArray(
+        service.service_categories
+      )
+        ? service.service_categories[0] || null
+        : service.service_categories;
+
+      return {
+        id: service.id,
+        name: service.name,
+        type: service.type,
+        base_duration: finalDuration,
+        base_price: finalPrice,
+        service_categories: category
+          ? {
+              name: category.name,
+              color: category.color,
+            }
+          : null,
+      };
+    });
+
+    return { success: true, services };
+  } catch (error) {
+    console.error('Error in getAvailableServices:', error);
+    return {
+      success: false,
+      services: [],
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Failed to fetch available services',
+    };
+  }
 }

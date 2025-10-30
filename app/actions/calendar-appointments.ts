@@ -30,6 +30,7 @@ interface CreateCalendarAppointmentData {
     variantId?: string;
     addonIds?: string[];
     duration: number;
+    serviceName: string;
     price: number;
   }>;
 
@@ -38,17 +39,7 @@ interface CreateCalendarAppointmentData {
   internalNotes?: string;
 }
 
-interface BookingWithUser {
-  client_id: string | null;
-  users: {
-    id: string;
-    first_name: string;
-    last_name: string | null;
-    email: string | null;
-    phone_number: string | null;
-    photo_url: string | null;
-  }[];
-}
+// REPLACE the entire createCalendarAppointment function in app/actions/calendar-appointments.ts
 
 export async function createCalendarAppointment(
   data: CreateCalendarAppointmentData
@@ -76,16 +67,17 @@ export async function createCalendarAppointment(
     // =====================================================
 
     let finalClientId: string | null = null;
-    let guestFirstName: string | null = null;
-    const guestLastName: string | null = null;
-    const guestEmail: string | null = null;
-    const guestPhone: string | null = null;
+    let guestFirstName: string;
+    let guestLastName: string | null = null;
+    let guestEmail: string | null = null;
+    let guestPhone: string | null = null;
 
     if (data.walkIn) {
-      // Walk-in: No user record, just guest info
+      // ✅ Walk-in: No user record, just guest info
       guestFirstName = 'Walk-In';
+      finalClientId = null;
     } else if (data.newClient) {
-      // Create new client user record
+      // ✅ Create new client user record
       const { firstName, lastName, email, phone, birthday } = data.newClient;
 
       if (!firstName) {
@@ -127,10 +119,31 @@ export async function createCalendarAppointment(
         return { success: false, error: 'Failed to create client' };
       }
 
+      // ✅ NEW: Populate guest fields from newly created user
       finalClientId = newUser.id;
+      guestFirstName = newUser.first_name;
+      guestLastName = newUser.last_name;
+      guestEmail = newUser.email;
+      guestPhone = newUser.phone_number;
     } else if (data.clientId) {
-      // Use existing client
-      finalClientId = data.clientId;
+      // ✅ NEW: Fetch existing client's information
+      const { data: existingClient, error: fetchError } = await supabaseAdmin
+        .from('users')
+        .select('id, first_name, last_name, email, phone_number')
+        .eq('id', data.clientId)
+        .single();
+
+      if (fetchError || !existingClient) {
+        console.error('Error fetching client:', fetchError);
+        return { success: false, error: 'Client not found' };
+      }
+
+      // ✅ NEW: Populate guest fields from existing user
+      finalClientId = existingClient.id;
+      guestFirstName = existingClient.first_name;
+      guestLastName = existingClient.last_name;
+      guestEmail = existingClient.email;
+      guestPhone = existingClient.phone_number;
     } else {
       return {
         success: false,
@@ -161,6 +174,7 @@ export async function createCalendarAppointment(
         booking_date: data.bookingDate,
         booking_source: 'admin',
         client_id: finalClientId,
+        // ✅ FIXED: Guest fields now properly populated
         guest_first_name: guestFirstName,
         guest_last_name: guestLastName,
         guest_email: guestEmail,
@@ -189,11 +203,12 @@ export async function createCalendarAppointment(
         booking_group_id: bookingGroup.id,
         team_member_id: data.teamMemberId,
         service_id: service.serviceId,
+        service_name: service.serviceName,
         start_time: times.startTime + ':00', // Add seconds
         end_time: times.endTime + ':00',
         duration_minutes: service.duration,
         price: service.price,
-        status: 'scheduled',
+        status: 'confirmed',
       };
     });
 
@@ -231,7 +246,6 @@ export async function createCalendarAppointment(
     };
   }
 }
-
 /**
  * Search clients for booking (simplified version for calendar)
  */
@@ -264,18 +278,20 @@ export async function searchClientsForBooking(query: string) {
 
 /**
  * Get recent clients (for quick selection)
+ * FIXED: Specify exact foreign key relationship to avoid ambiguity
  */
 export async function getRecentClients(venueId: string, limit: number = 10) {
   try {
     await requireAdmin();
 
     // Get clients who have bookings at this venue, ordered by most recent
+    // ✅ FIXED: Use explicit relationship hint to avoid PGRST201 error
     const { data, error } = await supabaseAdmin
       .from('booking_groups')
       .select(
         `
         client_id,
-        users!inner (
+        users!booking_groups_client_id_fkey (
           id,
           first_name,
           last_name,
@@ -290,7 +306,10 @@ export async function getRecentClients(venueId: string, limit: number = 10) {
       .order('created_at', { ascending: false })
       .limit(limit * 3); // Get more to account for duplicates
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error fetching recent clients:', error);
+      throw error;
+    }
 
     // Deduplicate clients by ID
     const uniqueClients = new Map<
@@ -305,9 +324,35 @@ export async function getRecentClients(venueId: string, limit: number = 10) {
       }
     >();
 
-    data?.forEach((booking: BookingWithUser) => {
-      // users is an array from Supabase join, get first element
-      const user = booking.users?.[0];
+    // Type for the booking with user relationship
+    interface BookingWithUser {
+      client_id: string;
+      users:
+        | {
+            id: string;
+            first_name: string;
+            last_name: string | null;
+            email: string | null;
+            phone_number: string | null;
+            photo_url: string | null;
+          }
+        | {
+            id: string;
+            first_name: string;
+            last_name: string | null;
+            email: string | null;
+            phone_number: string | null;
+            photo_url: string | null;
+          }[]
+        | null;
+    }
+
+    (data as BookingWithUser[])?.forEach((booking) => {
+      // Handle both array and single object from Supabase
+      const user = Array.isArray(booking.users)
+        ? booking.users[0]
+        : booking.users;
+
       if (user && !uniqueClients.has(user.id)) {
         uniqueClients.set(user.id, user);
       }
