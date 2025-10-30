@@ -321,7 +321,7 @@ export function ClientListClient({ initialClients }: ClientListClientProps) {
 
                       {/* Sales */}
                       <td className="px-6 py-4 text-sm text-gray-900 font-medium">
-                        £0.00
+                        $0.00
                       </td>
 
                       {/* Created At */}
