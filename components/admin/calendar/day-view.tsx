@@ -45,6 +45,91 @@ interface DayViewProps {
   onRefresh: () => void;
 }
 
+// =====================================================
+// OVERLAP HANDLING HELPERS
+// =====================================================
+
+/**
+ * Convert HH:MM time to minutes since midnight
+ */
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+/**
+ * Check if two appointments overlap in time
+ */
+function appointmentsOverlap(
+  appt1: AppointmentWithBooking,
+  appt2: AppointmentWithBooking
+): boolean {
+  const start1 = timeToMinutes(appt1.start_time);
+  const end1 = timeToMinutes(appt1.end_time);
+  const start2 = timeToMinutes(appt2.start_time);
+  const end2 = timeToMinutes(appt2.end_time);
+
+  // Overlaps if one starts before the other ends
+  return start1 < end2 && start2 < end1;
+}
+
+/**
+ * Layout information for positioning overlapping appointments
+ */
+interface AppointmentLayout {
+  width: string;
+  left: string;
+  zIndex: number;
+}
+
+/**
+ * Calculate layout for overlapping appointments
+ * Returns a Map of appointment ID to layout properties
+ */
+function calculateAppointmentLayouts(
+  appointments: AppointmentWithBooking[]
+): Map<string, AppointmentLayout> {
+  const layouts = new Map<string, AppointmentLayout>();
+
+  // Sort appointments by start time for consistent column assignment
+  const sorted = [...appointments].sort((a, b) => {
+    const startA = timeToMinutes(a.start_time);
+    const startB = timeToMinutes(b.start_time);
+    return startA - startB;
+  });
+
+  // For each appointment, find overlapping ones and assign layout
+  for (const appointment of sorted) {
+    // Find all appointments that overlap with this one
+    const overlapping = appointments.filter((other) =>
+      appointmentsOverlap(appointment, other)
+    );
+
+    const maxConcurrent = overlapping.length;
+
+    // Find this appointment's position among overlapping ones
+    const position = overlapping
+      .sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time))
+      .findIndex((a) => a.id === appointment.id);
+
+    // Calculate width and left position
+    const widthPercent = 100 / maxConcurrent;
+    const leftPercent = (position / maxConcurrent) * 100;
+
+    layouts.set(appointment.id, {
+      width: `${widthPercent - 0.5}%`, // Subtract 0.5% for visual gap
+      left: `${leftPercent}%`,
+      zIndex: position,
+    });
+  }
+
+  return layouts;
+}
+
+// =====================================================
+// MAIN COMPONENT
+// =====================================================
+
 export function DayView({
   bookings,
   shifts,
@@ -145,6 +230,17 @@ export function DayView({
     return grouped;
   }, [blockedTimes]);
 
+  // ✅ NEW: Calculate appointment layouts for ALL members (must be at component level)
+  const allAppointmentLayouts = useMemo(() => {
+    const layouts = new Map<string, Map<string, AppointmentLayout>>();
+
+    appointmentsByMember.forEach(({ member, appointments }) => {
+      layouts.set(member.id, calculateAppointmentLayouts(appointments));
+    });
+
+    return layouts;
+  }, [appointmentsByMember]);
+
   // Format time for display (12-hour format)
   const formatTime12Hour = (time: string): string => {
     const [hour, min] = time.split(':');
@@ -235,62 +331,54 @@ export function DayView({
             <div
               style={{
                 minWidth: useFixedWidth
-                  ? `${60 + appointmentsByMember.length * 200}px`
-                  : 'auto',
+                  ? `${appointmentsByMember.length * 200}px`
+                  : '100%',
               }}
             >
-              {/* Header Row - Team Member Photos and Names */}
+              {/* Team Member Headers */}
               <div className="flex border-b border-gray-200 bg-gray-50">
-                {/* Time column header */}
-                <div className="flex-shrink-0 w-16 border-r border-gray-200 p-2">
-                  <div className="text-xs font-semibold text-gray-700">
-                    Time
-                  </div>
-                </div>
+                {/* Empty space for time labels column */}
+                <div className="flex-shrink-0 w-16" />
 
-                {/* Team member headers */}
-                {appointmentsByMember.map(({ member, appointments }) => {
-                  const memberName = `${member.first_name} ${member.last_name}`;
-
-                  return (
-                    <div
-                      key={member.id}
-                      className="border-r border-gray-200 p-3 flex flex-col items-center justify-center gap-2"
-                      style={{
-                        width: useFixedWidth ? '200px' : columnWidth,
-                        minWidth: useFixedWidth ? '200px' : 'auto',
-                      }}
-                    >
-                      {/* Profile Photo */}
-                      <div className="relative h-12 w-12 rounded-full overflow-hidden bg-gray-200">
-                        {member.photo_url ? (
-                          <Image
-                            src={member.photo_url}
-                            alt={memberName}
-                            fill
-                            className="object-cover"
-                          />
-                        ) : (
-                          <div className="h-full w-full flex items-center justify-center text-gray-500 font-semibold text-sm">
+                {/* Team Member Headers */}
+                {appointmentsByMember.map(({ member, appointments }) => (
+                  <div
+                    key={member.id}
+                    className="border-r border-gray-200 p-3"
+                    style={{
+                      width: useFixedWidth ? '200px' : columnWidth,
+                      minWidth: useFixedWidth ? '200px' : 'auto',
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      {member.photo_url ? (
+                        <Image
+                          src={member.photo_url}
+                          alt={`${member.first_name} ${member.last_name}`}
+                          width={32}
+                          height={32}
+                          className="rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+                          <span className="text-xs font-medium text-gray-600">
                             {member.first_name[0]}
                             {member.last_name[0]}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Name */}
-                      <div className="text-center">
-                        <div className="font-semibold text-gray-900 text-sm">
-                          {member.first_name}
+                          </span>
                         </div>
-                        <div className="text-xs text-gray-500">
-                          {appointments.length} apt
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {member.first_name} {member.last_name}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {appointments.length} booking
                           {appointments.length !== 1 ? 's' : ''}
-                        </div>
+                        </p>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
 
               {/* Calendar Grid - Time slots with columns for each member */}
@@ -321,6 +409,10 @@ export function DayView({
                   const memberName = `${member.first_name} ${member.last_name}`;
                   const memberBlockedTimes =
                     blockedTimesByMember.get(member.id) || [];
+
+                  // ✅ NEW: Get pre-calculated layouts for this member
+                  const appointmentLayouts =
+                    allAppointmentLayouts.get(member.id) || new Map();
 
                   return (
                     <div
@@ -378,8 +470,8 @@ export function DayView({
                             cursorClass = 'cursor-not-allowed';
                             titleText = 'Time blocked';
                           } else if (hasAppointment) {
-                            // Has shift with appointment = gray, not clickable
-                            bgColorClass = 'bg-gray-200';
+                            // Has shift with appointment = white, not clickable (stylist is working)
+                            bgColorClass = 'bg-white';
                             cursorClass = 'cursor-not-allowed';
                             titleText = 'Time slot booked';
                           } else {
@@ -418,13 +510,25 @@ export function DayView({
                             appointment.end_time
                           );
 
+                          // ✅ NEW: Get layout for this appointment
+                          const layout = appointmentLayouts.get(
+                            appointment.id
+                          ) || {
+                            width: '100%',
+                            left: '0%',
+                            zIndex: 0,
+                          };
+
                           return (
                             <div
                               key={appointment.id}
-                              className="absolute inset-x-0 pointer-events-auto px-1"
+                              className="absolute pointer-events-auto px-1 hover:z-[100]"
                               style={{
                                 top: `${top}px`,
                                 height: `${height}px`,
+                                width: layout.width, // ✅ NEW: Dynamic width
+                                left: layout.left, // ✅ NEW: Dynamic left position
+                                zIndex: layout.zIndex, // ✅ NEW: Proper stacking (but hover:z-[100] overrides)
                               }}
                             >
                               <AppointmentCard

@@ -1,18 +1,19 @@
 // components/admin/calendar/appointment/create-appointment-modal.tsx
 'use client';
 
-import { useState } from 'react';
-import { X, User } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, User, AlertCircle, ChevronDown } from 'lucide-react';
 import { ClientSelection } from './client-selection';
 import { ServiceSelection } from './service-selection';
 import { createCalendarAppointment } from '@/app/actions/calendar-appointments';
+import { checkAvailability } from '@/app/actions/bookings';
 import type { ClientSelectionType, SelectedService } from './types';
 
 interface CreateAppointmentModalProps {
   isOpen: boolean;
   onClose: () => void;
 
-  // Pre-filled from calendar
+  // Pre-filled from calendar (but now editable!)
   venueId: string;
   venueName: string;
   teamMemberId: string;
@@ -23,39 +24,25 @@ interface CreateAppointmentModalProps {
   onSuccess: () => void;
 }
 
-// FIXED: Proper type instead of 'any'
-interface AppointmentRequestData {
-  venueId: string;
-  bookingDate: string;
-  teamMemberId: string;
-  startTime: string;
-  services: SelectedService[];
-  bookingNotes?: string;
-  internalNotes?: string;
-  // Client info (one of these will be set)
-  walkIn?: boolean;
-  clientId?: string;
-  newClient?: {
-    firstName: string;
-    lastName?: string;
-    email?: string;
-    phone?: string;
-    birthday?: string;
-  };
-}
-
 export function CreateAppointmentModal({
   isOpen,
   onClose,
   venueId,
   venueName,
-  teamMemberId,
-  teamMemberName,
+  teamMemberId: initialTeamMemberId,
+  teamMemberName: initialTeamMemberName,
   date,
-  startTime,
+  startTime: initialStartTime,
   onSuccess,
 }: CreateAppointmentModalProps) {
-  // State
+  // ✅ Editable fields
+  const [selectedTeamMemberId] = useState(initialTeamMemberId); // TODO: Make editable when team member selection is implemented
+  const [selectedTeamMemberName] = useState(initialTeamMemberName);
+  const [selectedStartTime, setSelectedStartTime] = useState(initialStartTime);
+  const [manualPrice, setManualPrice] = useState<number | null>(null);
+  const [manualDuration, setManualDuration] = useState<number | null>(null);
+
+  // Existing state
   const [clientSelectionOpen, setClientSelectionOpen] = useState(false);
   const [selectedClient, setSelectedClient] =
     useState<ClientSelectionType>(null);
@@ -64,6 +51,86 @@ export function CreateAppointmentModal({
   const [internalNotes, setInternalNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // ✅ Availability checking
+  const [availabilityStatus, setAvailabilityStatus] = useState<{
+    available: boolean;
+    message: string;
+  } | null>(null);
+
+  // ✅ Time dropdown state
+  const [showTimeDropdown, setShowTimeDropdown] = useState(false);
+
+  // Calculate total duration and price
+  const totalDuration =
+    manualDuration || services.reduce((sum, s) => sum + s.duration, 0);
+  const totalPrice =
+    manualPrice || services.reduce((sum, s) => sum + s.price, 0);
+
+  // Generate time slots (15-min intervals from 8 AM to 8 PM)
+  const generateTimeSlots = (): string[] => {
+    const slots: string[] = [];
+    for (let hour = 8; hour <= 20; hour++) {
+      for (let min = 0; min < 60; min += 15) {
+        if (hour === 20 && min > 0) break; // Stop at 8:00 PM
+        const timeStr = `${hour.toString().padStart(2, '0')}:${min
+          .toString()
+          .padStart(2, '0')}`;
+        slots.push(timeStr);
+      }
+    }
+    return slots;
+  };
+
+  const timeSlots = generateTimeSlots();
+
+  // ✅ Check availability when time changes
+  useEffect(() => {
+    const checkSlotAvailability = async () => {
+      if (!selectedTeamMemberId || !selectedStartTime || totalDuration === 0) {
+        return;
+      }
+
+      try {
+        // Calculate end time
+        const [hours, minutes] = selectedStartTime.split(':').map(Number);
+        const startMinutes = hours * 60 + minutes;
+        const endMinutes = startMinutes + totalDuration;
+        const endHours = Math.floor(endMinutes / 60);
+        const endMins = endMinutes % 60;
+        const endTime = `${endHours.toString().padStart(2, '0')}:${endMins
+          .toString()
+          .padStart(2, '0')}`;
+
+        const result = await checkAvailability(
+          selectedTeamMemberId,
+          date,
+          selectedStartTime,
+          endTime
+        );
+
+        if (result.success && result.available !== undefined) {
+          if (result.available) {
+            setAvailabilityStatus({
+              available: true,
+              message: 'Time slot available',
+            });
+          } else {
+            setAvailabilityStatus({
+              available: false,
+              message: `Not available at ${formatTime12Hour(
+                selectedStartTime
+              )}`,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error checking availability:', err);
+      }
+    };
+
+    checkSlotAvailability();
+  }, [selectedTeamMemberId, selectedStartTime, totalDuration, date]);
 
   // Handlers
   const handleClientSelect = (client: ClientSelectionType) => {
@@ -83,22 +150,35 @@ export function CreateAppointmentModal({
       return;
     }
 
+    if (availabilityStatus && !availabilityStatus.available) {
+      setError('Selected time slot is not available');
+      return;
+    }
+
     setIsSubmitting(true);
     setError('');
 
     try {
-      // FIXED: Build request data with proper type
-      const requestData: AppointmentRequestData = {
+      // Build services with manual overrides
+      const finalServices = services.map((service, index) => ({
+        ...service,
+        duration:
+          manualDuration && index === 0 ? manualDuration : service.duration,
+        price: manualPrice && index === 0 ? manualPrice : service.price,
+      }));
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const requestData: any = {
         venueId,
         bookingDate: date,
-        teamMemberId,
-        startTime,
-        services,
+        teamMemberId: selectedTeamMemberId,
+        startTime: selectedStartTime,
+        services: finalServices,
         bookingNotes: bookingNotes || undefined,
         internalNotes: internalNotes || undefined,
       };
 
-      // Add client info based on selection type
+      // Add client info
       if (selectedClient.type === 'walkin') {
         requestData.walkIn = true;
       } else if (selectedClient.type === 'existing') {
@@ -123,6 +203,16 @@ export function CreateAppointmentModal({
     }
   };
 
+  // Format time to 12-hour format
+  const formatTime12Hour = (time: string): string => {
+    const [hour, min] = time.split(':');
+    const hourNum = parseInt(hour);
+    const period = hourNum >= 12 ? 'pm' : 'am';
+    const displayHour =
+      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+    return `${displayHour}:${min}${period}`;
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -145,10 +235,7 @@ export function CreateAppointmentModal({
                     Add Appointment
                   </h2>
                   <p className="text-sm text-gray-600 mt-1">
-                    {formatDate(date)} at {startTime}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {teamMemberName} • {venueName}
+                    {formatDate(date)} • {venueName}
                   </p>
                 </div>
                 <button
@@ -164,7 +251,8 @@ export function CreateAppointmentModal({
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Error Message */}
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                   <p className="text-sm text-red-800">{error}</p>
                 </div>
               )}
@@ -177,23 +265,21 @@ export function CreateAppointmentModal({
                 {!selectedClient ? (
                   <button
                     onClick={() => setClientSelectionOpen(true)}
-                    className="w-full flex items-center gap-3 p-4 rounded-lg border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50 transition-all"
+                    className="w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-purple-600 hover:text-purple-600 transition-colors flex items-center justify-center gap-2"
                   >
-                    <User className="h-5 w-5 text-gray-400" />
-                    <div className="text-left">
-                      <div className="font-medium text-gray-900">
-                        Add client
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Or leave empty for walk-ins
-                      </div>
-                    </div>
+                    <User className="w-5 h-5" />
+                    <span>Add client or walk-in</span>
                   </button>
                 ) : (
-                  <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
+                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                     <div>
                       {selectedClient.type === 'walkin' && (
-                        <p className="font-medium">Walk-In</p>
+                        <>
+                          <p className="font-medium">Walk-in</p>
+                          <p className="text-sm text-gray-600">
+                            No client info
+                          </p>
+                        </>
                       )}
                       {selectedClient.type === 'existing' && (
                         <>
@@ -203,8 +289,7 @@ export function CreateAppointmentModal({
                           </p>
                           <p className="text-sm text-gray-600">
                             {selectedClient.client.email ||
-                              selectedClient.client.phone_number ||
-                              'No contact info'}
+                              selectedClient.client.phone_number}
                           </p>
                         </>
                       )}
@@ -235,10 +320,148 @@ export function CreateAppointmentModal({
                 </label>
                 <ServiceSelection
                   venueId={venueId}
-                  teamMemberId={teamMemberId}
+                  teamMemberId={selectedTeamMemberId}
                   services={services}
                   onServicesChange={setServices}
                 />
+              </div>
+
+              {/* Team Member (Read-only for now) */}
+              <div>
+                <label className="text-sm font-medium text-gray-900 block mb-2">
+                  Team member
+                </label>
+                <div className="px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 flex items-center gap-3">
+                  <User className="w-5 h-5 text-gray-400" />
+                  <span className="text-gray-900">
+                    {selectedTeamMemberName}
+                  </span>
+                </div>
+                {availabilityStatus && !availabilityStatus.available && (
+                  <div className="mt-2 flex items-start gap-2 text-orange-600">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm">
+                      {selectedTeamMemberName} isn&apos;t scheduled to work at
+                      this time
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Time and Duration Row */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Start Time */}
+                <div>
+                  <label className="text-sm font-medium text-gray-900 block mb-2">
+                    Start time
+                  </label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowTimeDropdown(!showTimeDropdown)}
+                      className={`w-full px-4 py-3 border rounded-lg text-left flex items-center justify-between transition-colors ${
+                        availabilityStatus && !availabilityStatus.available
+                          ? 'border-orange-300 bg-orange-50'
+                          : 'border-gray-300 hover:border-gray-400'
+                      }`}
+                    >
+                      <span className="text-gray-900">
+                        {formatTime12Hour(selectedStartTime)}
+                      </span>
+                      <ChevronDown className="w-5 h-5 text-gray-400" />
+                    </button>
+
+                    {/* Time Dropdown */}
+                    {showTimeDropdown && (
+                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {timeSlots.map((time) => (
+                          <button
+                            key={time}
+                            type="button"
+                            onClick={() => {
+                              setSelectedStartTime(time);
+                              setShowTimeDropdown(false);
+                            }}
+                            className={`w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors ${
+                              time === selectedStartTime
+                                ? 'bg-purple-50 text-purple-600 font-medium'
+                                : ''
+                            }`}
+                          >
+                            {formatTime12Hour(time)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Availability Status */}
+                  {availabilityStatus && !availabilityStatus.available && (
+                    <div className="mt-2 flex items-start gap-2 text-orange-600">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm">{availabilityStatus.message}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Duration */}
+                <div>
+                  <label className="text-sm font-medium text-gray-900 block mb-2">
+                    Duration
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={manualDuration || totalDuration}
+                      onChange={(e) =>
+                        setManualDuration(parseInt(e.target.value) || null)
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="Minutes"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">
+                      min
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Price and Discount Row */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Service Price */}
+                <div>
+                  <label className="text-sm font-medium text-gray-900 block mb-2">
+                    Service price
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+                      AUD
+                    </span>
+                    <input
+                      type="number"
+                      value={manualPrice !== null ? manualPrice : totalPrice}
+                      onChange={(e) =>
+                        setManualPrice(parseFloat(e.target.value) || null)
+                      }
+                      className="w-full pl-14 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      placeholder="0.00"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+
+                {/* Discount (placeholder) */}
+                <div>
+                  <label className="text-sm font-medium text-gray-900 block mb-2">
+                    Discount
+                  </label>
+                  <select
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
+                    disabled
+                  >
+                    <option>No discount</option>
+                  </select>
+                </div>
               </div>
 
               {/* Booking Notes */}
@@ -250,7 +473,7 @@ export function CreateAppointmentModal({
                   value={bookingNotes}
                   onChange={(e) => setBookingNotes(e.target.value)}
                   placeholder="Any notes for this booking..."
-                  rows={3}
+                  rows={2}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 />
               </div>
@@ -270,24 +493,46 @@ export function CreateAppointmentModal({
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="flex-shrink-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-end gap-3">
-              <button
-                onClick={onClose}
-                disabled={isSubmitting}
-                className="px-4 py-2 text-gray-700 hover:text-gray-900 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={
-                  isSubmitting || !selectedClient || services.length === 0
-                }
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSubmitting ? 'Creating...' : 'Create Appointment'}
-              </button>
+            {/* Footer with Total and Actions */}
+            <div className="flex-shrink-0 border-t border-gray-200">
+              {/* Total Summary */}
+              <div className="px-6 py-4 bg-gray-50 flex items-center justify-between">
+                <span className="text-lg font-bold text-gray-900">Total</span>
+                <div className="text-right">
+                  <div className="text-sm text-gray-600">
+                    {totalDuration}min
+                  </div>
+                  <div className="text-xl font-bold text-gray-900">
+                    A${' '}
+                    {(manualPrice !== null ? manualPrice : totalPrice).toFixed(
+                      2
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="px-6 py-4 flex justify-end gap-3">
+                <button
+                  onClick={onClose}
+                  disabled={isSubmitting}
+                  className="px-4 py-2 text-gray-700 hover:text-gray-900 disabled:opacity-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={
+                    isSubmitting ||
+                    !selectedClient ||
+                    services.length === 0 ||
+                    availabilityStatus?.available === false
+                  }
+                  className="px-8 py-3 bg-black text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
+                >
+                  {isSubmitting ? 'Creating...' : 'Apply'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

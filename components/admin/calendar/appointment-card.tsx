@@ -101,7 +101,8 @@ export function AppointmentCard({
       </div>
 
       {/* Hover Tooltip - Appears on the right side */}
-      <div className="absolute left-full top-0 ml-2 w-80 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
+      {/* ✅ CHANGED: z-50 → z-[100] for highest priority */}
+      <div className="absolute left-full top-0 ml-2 w-80 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-[100] pointer-events-none">
         <div className="bg-white rounded-lg shadow-2xl border border-gray-200 p-4">
           {/* Header */}
           <div className="mb-3 pb-3 border-b border-gray-200">
