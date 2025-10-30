@@ -34,7 +34,7 @@ export interface AssignedTeamMember {
 }
 
 export function CalendarClient() {
-  const [viewType, setViewType] = useState<CalendarViewType>('week');
+  const [viewType, setViewType] = useState<CalendarViewType>('day');
   const [selectedVenue, setSelectedVenue] = useState<string>(''); // Empty string initially
   const [selectedTeamMember, setSelectedTeamMember] = useState<string>('all');
   const [currentDate, setCurrentDate] = useState<string>(getToday());

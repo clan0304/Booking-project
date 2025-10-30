@@ -23,13 +23,13 @@ const navItems = [
   { href: '/admin/calendar', icon: Calendar, label: 'Calendar' },
   { href: '/admin/services', icon: Tag, label: 'Services' },
   { href: '/admin/clients', icon: Smile, label: 'Clients' },
-  { href: '/admin/bookings', icon: BookOpen, label: 'Bookings' },
+  // { href: '/admin/bookings', icon: BookOpen, label: 'Bookings' },
   { href: '/admin/staff-management', icon: User, label: 'Shift' },
   { href: '/admin/marketplace', icon: Megaphone, label: 'Marketplace' },
   { href: '/admin/team', icon: Users, label: 'Team' },
-  { href: '/admin/analytics', icon: TrendingUp, label: 'Analytics' },
+  // { href: '/admin/analytics', icon: TrendingUp, label: 'Analytics' },
   { href: '/admin/products', icon: LayoutGrid, label: 'Products' },
-  { href: '/admin/settings', icon: Settings, label: 'Settings' },
+  // { href: '/admin/settings', icon: Settings, label: 'Settings' },
 ];
 
 export function AdminSidebar() {

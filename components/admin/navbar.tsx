@@ -11,7 +11,9 @@ export function AdminNavbar() {
       <div className="flex h-full items-center justify-between px-6">
         {/* Logo */}
         <Link href="/admin" className="flex items-center">
-          <span className="text-2xl font-bold text-gray-900">fresha</span>
+          <span className="text-2xl font-bold text-gray-900">
+            Hair by hongshop
+          </span>
         </Link>
 
         {/* Right Actions */}
