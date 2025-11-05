@@ -95,7 +95,7 @@ async function getVenueServices(venueId: string): Promise<Service[]> {
       is_active,
       is_bookable,
       category_id,
-      parent_service_id,
+
       service_categories (
         id,
         name,
@@ -106,7 +106,7 @@ async function getVenueServices(venueId: string): Promise<Service[]> {
     .in('id', serviceIds)
     .eq('is_active', true)
     .eq('is_bookable', true)
-    .is('parent_service_id', null)
+
     .order('display_order', { ascending: true });
 
   if (error) {
@@ -125,14 +125,14 @@ async function getVenueServices(venueId: string): Promise<Service[]> {
       id: string;
       name: string;
       description: string | null;
-      type: 'service' | 'variant_group' | 'bundle';
+      type: 'service' | 'bundle';
       price_type: 'fixed' | 'from';
       duration_minutes: number;
       price: number;
       is_active: boolean;
       is_bookable: boolean;
       category_id: string | null;
-      parent_service_id: string | null;
+
       service_categories: ServiceCategory[] | ServiceCategory | null;
     }) => ({
       id: service.id,
@@ -145,7 +145,7 @@ async function getVenueServices(venueId: string): Promise<Service[]> {
       is_active: service.is_active,
       is_bookable: service.is_bookable,
       category_id: service.category_id,
-      parent_service_id: service.parent_service_id,
+
       service_categories: Array.isArray(service.service_categories)
         ? service.service_categories[0] || null
         : service.service_categories,
