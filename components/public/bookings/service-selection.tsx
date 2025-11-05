@@ -23,9 +23,6 @@ export function ServiceSelection({
 
   // Group services by category
   const servicesByCategory = services.reduce((acc, service) => {
-    // Only show bookable services (excludes variant_group parent services)
-    if (service.type === 'variant_group') return acc;
-
     const categoryName = service.service_categories?.name || 'Other Services';
     if (!acc[categoryName]) {
       acc[categoryName] = [];
@@ -48,7 +45,6 @@ export function ServiceSelection({
       return {
         serviceId: service.id,
         serviceName: service.name,
-        variantId: null,
         teamMemberId: '', // Will be selected in next step
         teamMemberName: '',
         startTime: '',
