@@ -1,6 +1,7 @@
 // components/admin/calendar/appointment/types.ts
 /**
  * Type definitions for calendar appointment creation
+ * Updated: Removed variant support (migrated to Service Groups)
  */
 
 export interface ClientInfo {
@@ -10,13 +11,12 @@ export interface ClientInfo {
   email: string | null;
   phone_number: string | null;
   photo_url: string | null;
+  alert_note?: string | null;
 }
 
 export interface SelectedService {
   serviceId: string;
   serviceName: string;
-  variantId?: string;
-  variantName?: string;
   duration: number; // minutes
   price: number;
   categoryColor?: string | null;
