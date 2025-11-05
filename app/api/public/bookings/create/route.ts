@@ -13,7 +13,7 @@ interface CreateBookingRequest {
   notes?: string;
   appointments: Array<{
     service_id: string;
-    variant_id?: string | null;
+
     team_member_id: string;
     start_time: string;
     end_time: string;
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
     const appointmentsData = body.appointments.map((appt) => ({
       booking_group_id: bookingGroup.id,
       service_id: appt.service_id,
-      variant_id: appt.variant_id || null,
+
       team_member_id: appt.team_member_id,
       start_time: appt.start_time,
       end_time: appt.end_time,

@@ -8,13 +8,10 @@ import {
   Calendar,
   Tag,
   Smile,
-  BookOpen,
   User,
   Megaphone,
   Users,
-  TrendingUp,
   LayoutGrid,
-  Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
