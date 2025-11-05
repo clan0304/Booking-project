@@ -3,7 +3,11 @@
 
 import { revalidatePath } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { requireAuth, requireStaff } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+
+// =====================================================
+// TYPES
+// =====================================================
 
 /**
  * Service category info from database
@@ -24,12 +28,11 @@ interface ServiceTeamMemberInfo {
 
 /**
  * Raw service data from Supabase query
- * Supabase joins can return nested data as array or single object
  */
 interface RawServiceFromDB {
   id: string;
   name: string;
-  type: 'service' | 'variant_group' | 'bundle';
+  type: 'service' | 'bundle';
   duration_minutes: number;
   price: number | null;
   service_categories: ServiceCategoryInfo | ServiceCategoryInfo[] | null;
@@ -42,7 +45,7 @@ interface RawServiceFromDB {
 interface AvailableService {
   id: string;
   name: string;
-  type: 'service' | 'variant_group' | 'bundle';
+  type: 'service' | 'bundle';
   base_duration: number;
   base_price: number | null;
   service_categories: {
@@ -169,7 +172,6 @@ export async function getServices() {
       service_team_members(team_member_id, custom_price, custom_duration_minutes, users(id, first_name, last_name, photo_url))
     `
     )
-    .is('parent_service_id', null)
     .eq('is_active', true)
     .order('display_order', { ascending: true })
     .order('name', { ascending: true });
@@ -179,23 +181,7 @@ export async function getServices() {
     throw new Error('Failed to fetch services');
   }
 
-  // Calculate display price for variant groups
-  const servicesWithPrices = await Promise.all(
-    (data || []).map(async (service) => {
-      if (service.type === 'variant_group') {
-        const { data: minPrice } = await supabaseAdmin.rpc(
-          'get_variant_min_price',
-          {
-            p_parent_service_id: service.id,
-          }
-        );
-        return { ...service, display_price: minPrice || 0 };
-      }
-      return { ...service, display_price: service.price };
-    })
-  );
-
-  return servicesWithPrices;
+  return data || [];
 }
 
 export async function getServiceById(serviceId: string) {
@@ -227,39 +213,18 @@ export async function getServiceById(serviceId: string) {
   return data;
 }
 
-export async function getServiceVariants(parentServiceId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('services')
-    .select('*')
-    .eq('parent_service_id', parentServiceId)
-    .eq('is_active', true)
-    .order('display_order', { ascending: true })
-    .order('price', { ascending: true });
-
-  if (error) {
-    console.error('Error fetching variants:', error);
-    throw new Error('Failed to fetch variants');
-  }
-
-  return data || [];
-}
-
 export async function createService(formData: {
   name: string;
   category_id?: string;
   description?: string;
-  type: 'service' | 'bundle' | 'variant_group';
+  type: 'service' | 'bundle';
   price_type: 'fixed' | 'from';
-  price?: number;
+  price: number;
   duration_minutes: number;
   venue_ids?: string[];
   team_member_ids?: string[];
 }) {
   const user = await requireAuth();
-
-  // For variant_group, price should be NULL (calculated from variants)
-  const servicePrice =
-    formData.type === 'variant_group' ? null : formData.price;
 
   // Create service
   const { data: service, error: serviceError } = await supabaseAdmin
@@ -270,9 +235,9 @@ export async function createService(formData: {
       description: formData.description?.trim() || null,
       type: formData.type,
       price_type: formData.price_type,
-      price: servicePrice,
+      price: formData.price,
       duration_minutes: formData.duration_minutes,
-      is_bookable: formData.type !== 'variant_group', // variant groups are not bookable
+      is_bookable: true, // All services are now bookable
       created_by: user.supabaseUserId,
     })
     .select()
@@ -297,40 +262,6 @@ export async function createService(formData: {
   return service;
 }
 
-export async function createVariant(formData: {
-  name: string;
-  parent_service_id: string;
-  price: number;
-  duration_minutes: number;
-  category_id?: string;
-}) {
-  const user = await requireAuth();
-
-  const { data, error } = await supabaseAdmin
-    .from('services')
-    .insert({
-      name: formData.name.trim(),
-      parent_service_id: formData.parent_service_id,
-      category_id: formData.category_id || null,
-      type: 'service',
-      price_type: 'fixed',
-      price: formData.price,
-      duration_minutes: formData.duration_minutes,
-      is_bookable: true,
-      created_by: user.supabaseUserId,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating variant:', error);
-    throw new Error('Failed to create variant');
-  }
-
-  revalidatePath('/admin/services');
-  return data;
-}
-
 export async function updateService(
   serviceId: string,
   formData: {
@@ -338,24 +269,13 @@ export async function updateService(
     category_id?: string;
     description?: string;
     price_type: 'fixed' | 'from';
-    price?: number;
+    price: number;
     duration_minutes: number;
     venue_ids?: string[];
     team_member_ids?: string[];
   }
 ) {
   await requireAuth();
-
-  // Get service type to check if it's a variant_group
-  const { data: existingService } = await supabaseAdmin
-    .from('services')
-    .select('type')
-    .eq('id', serviceId)
-    .single();
-
-  // For variant_group, price should remain NULL
-  const servicePrice =
-    existingService?.type === 'variant_group' ? null : formData.price;
 
   const { data, error } = await supabaseAdmin
     .from('services')
@@ -364,7 +284,7 @@ export async function updateService(
       category_id: formData.category_id || null,
       description: formData.description?.trim() || null,
       price_type: formData.price_type,
-      price: servicePrice,
+      price: formData.price,
       duration_minutes: formData.duration_minutes,
     })
     .eq('id', serviceId)
@@ -393,16 +313,27 @@ export async function updateService(
 export async function deleteService(serviceId: string) {
   await requireAuth();
 
-  // Check if this is a variant group with variants
-  const { count } = await supabaseAdmin
-    .from('services')
+  // Check if service is part of any bundles
+  const { count: bundleCount } = await supabaseAdmin
+    .from('bundle_items')
     .select('id', { count: 'exact', head: true })
-    .eq('parent_service_id', serviceId)
-    .eq('is_active', true);
+    .eq('service_id', serviceId);
 
-  if (count && count > 0) {
+  if (bundleCount && bundleCount > 0) {
     throw new Error(
-      'Cannot delete variant group with active variants. Delete variants first.'
+      'Cannot delete service that is part of a bundle. Remove from bundles first.'
+    );
+  }
+
+  // Check if service is in any service groups
+  const { count: groupCount } = await supabaseAdmin
+    .from('service_group_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('service_id', serviceId);
+
+  if (groupCount && groupCount > 0) {
+    throw new Error(
+      'Cannot delete service that belongs to service groups. Remove from groups first.'
     );
   }
 
@@ -420,18 +351,224 @@ export async function deleteService(serviceId: string) {
   revalidatePath('/admin/services');
 }
 
-export async function deleteVariant(variantId: string) {
-  await requireAuth();
+// =====================================================
+// SERVICE GROUPS
+// =====================================================
 
-  // Soft delete
-  const { error } = await supabaseAdmin
-    .from('services')
-    .update({ is_active: false })
-    .eq('id', variantId);
+export async function getServiceGroups() {
+  const { data, error } = await supabaseAdmin
+    .from('service_groups')
+    .select(
+      `
+      *,
+      category:service_categories(id, name, color)
+    `
+    )
+    .eq('is_active', true)
+    .order('display_order', { ascending: true })
+    .order('name', { ascending: true });
 
   if (error) {
-    console.error('Error deleting variant:', error);
-    throw new Error('Failed to delete variant');
+    console.error('Error fetching service groups:', error);
+    throw new Error('Failed to fetch service groups');
+  }
+
+  return data || [];
+}
+
+export async function getServiceGroupById(groupId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('service_groups')
+    .select(
+      `
+      *,
+      category:service_categories(id, name, color)
+    `
+    )
+    .eq('id', groupId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching service group:', error);
+    throw new Error('Failed to fetch service group');
+  }
+
+  return data;
+}
+
+export async function getServicesInGroup(groupId: string) {
+  const { data, error } = await supabaseAdmin.rpc('get_services_in_group', {
+    p_service_group_id: groupId,
+  });
+
+  if (error) {
+    console.error('Error fetching services in group:', error);
+    throw new Error('Failed to fetch services in group');
+  }
+
+  return data || [];
+}
+
+export async function getServiceGroupsForService(serviceId: string) {
+  const { data, error } = await supabaseAdmin.rpc(
+    'get_service_groups_for_service',
+    {
+      p_service_id: serviceId,
+    }
+  );
+
+  if (error) {
+    console.error('Error fetching groups for service:', error);
+    throw new Error('Failed to fetch groups for service');
+  }
+
+  return data || [];
+}
+
+export async function createServiceGroup(formData: {
+  name: string;
+  category_id?: string;
+  description?: string;
+  display_mode: 'modal' | 'list';
+  display_order?: number;
+}) {
+  const user = await requireAuth();
+
+  const { data, error } = await supabaseAdmin
+    .from('service_groups')
+    .insert({
+      name: formData.name.trim(),
+      category_id: formData.category_id || null,
+      description: formData.description?.trim() || null,
+      display_mode: formData.display_mode,
+      display_order: formData.display_order || 0,
+      created_by: user.supabaseUserId,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating service group:', error);
+    throw new Error('Failed to create service group');
+  }
+
+  revalidatePath('/admin/services');
+  return data;
+}
+
+export async function updateServiceGroup(
+  groupId: string,
+  formData: {
+    name: string;
+    category_id?: string;
+    description?: string;
+    display_mode: 'modal' | 'list';
+    display_order?: number;
+  }
+) {
+  await requireAuth();
+
+  const { data, error } = await supabaseAdmin
+    .from('service_groups')
+    .update({
+      name: formData.name.trim(),
+      category_id: formData.category_id || null,
+      description: formData.description?.trim() || null,
+      display_mode: formData.display_mode,
+      display_order: formData.display_order || 0,
+    })
+    .eq('id', groupId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating service group:', error);
+    throw new Error('Failed to update service group');
+  }
+
+  revalidatePath('/admin/services');
+  return data;
+}
+
+export async function deleteServiceGroup(groupId: string) {
+  await requireAuth();
+
+  // Soft delete by setting is_active to false
+  const { error } = await supabaseAdmin
+    .from('service_groups')
+    .update({ is_active: false })
+    .eq('id', groupId);
+
+  if (error) {
+    console.error('Error deleting service group:', error);
+    throw new Error('Failed to delete service group');
+  }
+
+  revalidatePath('/admin/services');
+}
+
+export async function addServiceToGroup(
+  groupId: string,
+  serviceId: string,
+  displayOrder?: number
+) {
+  await requireAuth();
+
+  const { error } = await supabaseAdmin.from('service_group_items').insert({
+    service_group_id: groupId,
+    service_id: serviceId,
+    display_order: displayOrder || 0,
+  });
+
+  if (error) {
+    console.error('Error adding service to group:', error);
+    throw new Error('Failed to add service to group');
+  }
+
+  revalidatePath('/admin/services');
+}
+
+export async function removeServiceFromGroup(
+  groupId: string,
+  serviceId: string
+) {
+  await requireAuth();
+
+  const { error } = await supabaseAdmin
+    .from('service_group_items')
+    .delete()
+    .eq('service_group_id', groupId)
+    .eq('service_id', serviceId);
+
+  if (error) {
+    console.error('Error removing service from group:', error);
+    throw new Error('Failed to remove service from group');
+  }
+
+  revalidatePath('/admin/services');
+}
+
+export async function updateServiceGroupOrder(
+  groupId: string,
+  serviceOrders: { serviceId: string; displayOrder: number }[]
+) {
+  await requireAuth();
+
+  // Update each service's display order
+  const updates = serviceOrders.map(({ serviceId, displayOrder }) =>
+    supabaseAdmin
+      .from('service_group_items')
+      .update({ display_order: displayOrder })
+      .eq('service_group_id', groupId)
+      .eq('service_id', serviceId)
+  );
+
+  const results = await Promise.all(updates);
+
+  const hasError = results.some((result) => result.error);
+  if (hasError) {
+    console.error('Error updating service group order');
+    throw new Error('Failed to update service group order');
   }
 
   revalidatePath('/admin/services');
@@ -602,7 +739,7 @@ export async function resetTeamMemberToDefault(
 
   if (error) {
     console.error('Error resetting to default:', error);
-    throw new Error('Failed to reset pricing to default');
+    throw new Error('Failed to reset to default');
   }
 
   revalidatePath('/admin/services');
@@ -630,7 +767,7 @@ export async function getAllVenues() {
 export async function getAllTeamMembers() {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, first_name, last_name, photo_url, roles')
+    .select('id, first_name, last_name, photo_url')
     .contains('roles', ['team_member'])
     .order('first_name', { ascending: true });
 
@@ -642,27 +779,19 @@ export async function getAllTeamMembers() {
   return data || [];
 }
 
+// =====================================================
+// BOOKING-RELATED QUERIES
+// =====================================================
+
 /**
- * Get services available for a specific venue and team member
- * Used in calendar appointment creation modal
- * Returns services that:
- * - Are active and bookable
- * - Are available at the specified venue
- * - Can be performed by the specified team member
- * - Include custom pricing if set for that team member
+ * Get available services for booking (filtered by venue and team member)
+ * Used in booking flow
  */
 export async function getAvailableServices(
   venueId: string,
   teamMemberId: string
-): Promise<{
-  success: boolean;
-  services: AvailableService[];
-  error?: string;
-}> {
+) {
   try {
-    await requireStaff();
-
-    // Query services with all necessary joins
     const { data, error } = await supabaseAdmin
       .from('services')
       .select(
@@ -672,12 +801,9 @@ export async function getAvailableServices(
         type,
         duration_minutes,
         price,
-        service_categories!services_category_id_fkey (
+        service_categories (
           name,
           color
-        ),
-        service_venues!inner (
-          venue_id
         ),
         service_team_members!inner (
           team_member_id,
@@ -688,66 +814,48 @@ export async function getAvailableServices(
       )
       .eq('is_active', true)
       .eq('is_bookable', true)
-      .eq('service_venues.venue_id', venueId)
       .eq('service_team_members.team_member_id', teamMemberId)
-      .eq('service_team_members.is_active', true)
-      .order('name');
+      .eq('service_team_members.is_active', true);
 
     if (error) {
-      console.error('Error fetching available services:', error);
-      throw new Error('Failed to fetch available services');
+      console.error('Supabase error:', error);
+      throw new Error('Failed to fetch services from database');
     }
 
-    // Cast to our known type structure
-    const rawServices = (data || []) as RawServiceFromDB[];
+    // Filter services that are assigned to this venue
+    const { data: venueServices } = await supabaseAdmin
+      .from('service_venues')
+      .select('service_id')
+      .eq('venue_id', venueId)
+      .eq('is_active', true);
 
-    // Transform data to match expected format
-    const services: AvailableService[] = rawServices.map((service) => {
-      // Get custom pricing from service_team_members if it exists
-      // Supabase can return this as array or single object
-      const teamMemberData: ServiceTeamMemberInfo = Array.isArray(
-        service.service_team_members
-      )
-        ? service.service_team_members[0]
-        : service.service_team_members;
+    const venueServiceIds = new Set(
+      venueServices?.map((vs) => vs.service_id) || []
+    );
 
-      const basePrice: number = service.price || 0;
-      const baseDuration: number = service.duration_minutes;
+    // Transform and filter the data
+    const services: AvailableService[] = (data as RawServiceFromDB[])
+      .filter((service) => venueServiceIds.has(service.id))
+      .map((service) => {
+        // Handle service_categories being array or single object
+        const category = Array.isArray(service.service_categories)
+          ? service.service_categories[0]
+          : service.service_categories;
 
-      // Use custom pricing if set, otherwise use base
-      const finalPrice: number =
-        teamMemberData?.custom_price !== null &&
-        teamMemberData?.custom_price !== undefined
-          ? teamMemberData.custom_price
-          : basePrice;
-
-      const finalDuration: number =
-        teamMemberData?.custom_duration_minutes !== null &&
-        teamMemberData?.custom_duration_minutes !== undefined
-          ? teamMemberData.custom_duration_minutes
-          : baseDuration;
-
-      // Get category info - can be array or single object from Supabase
-      const category: ServiceCategoryInfo | null = Array.isArray(
-        service.service_categories
-      )
-        ? service.service_categories[0] || null
-        : service.service_categories;
-
-      return {
-        id: service.id,
-        name: service.name,
-        type: service.type,
-        base_duration: finalDuration,
-        base_price: finalPrice,
-        service_categories: category
-          ? {
-              name: category.name,
-              color: category.color,
-            }
-          : null,
-      };
-    });
+        return {
+          id: service.id,
+          name: service.name,
+          type: service.type,
+          base_duration: service.duration_minutes,
+          base_price: service.price,
+          service_categories: category
+            ? {
+                name: category.name,
+                color: category.color,
+              }
+            : null,
+        };
+      });
 
     return { success: true, services };
   } catch (error) {

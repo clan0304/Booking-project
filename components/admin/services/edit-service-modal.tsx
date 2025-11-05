@@ -24,7 +24,7 @@ interface Service {
   name: string;
   category_id: string | null;
   description: string | null;
-  type: 'service' | 'bundle' | 'variant_group';
+  type: 'service' | 'bundle';
   price_type: 'fixed' | 'from';
   price: number | null;
   duration_minutes: number;
@@ -264,13 +264,11 @@ export function EditServiceModal({
       setCurrentStep(1);
       return;
     }
-
-    if (service.type !== 'variant_group' && parseFloat(price) < 0) {
-      setError('Price must be a positive number');
+    if (parseFloat(price) <= 0) {
+      setError('Price must be greater than 0');
       setCurrentStep(1);
       return;
     }
-
     if (selectedVenues.length === 0) {
       setError('Please select at least one location');
       setCurrentStep(2);
@@ -291,7 +289,7 @@ export function EditServiceModal({
         category_id: categoryId || undefined,
         description: description.trim() || undefined,
         price_type: priceType,
-        price: service.type === 'variant_group' ? undefined : parseFloat(price),
+        price: parseFloat(price),
         duration_minutes: duration,
         venue_ids: selectedVenues,
         team_member_ids: selectedTeamMembers,
@@ -377,7 +375,7 @@ export function EditServiceModal({
                 </label>
                 <div className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
                   {service.type === 'service' && 'Regular Service'}
-                  {service.type === 'variant_group' && 'Service with Variants'}
+
                   {service.type === 'bundle' && 'Service Bundle'}
                   <span className="text-gray-500 ml-2">
                     (Cannot be changed)
@@ -432,54 +430,51 @@ export function EditServiceModal({
                 />
               </div>
 
-              {/* Price - Hidden for variant_group */}
-              {service.type !== 'variant_group' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 mb-2">
-                    Price type
-                  </label>
-                  <div className="flex gap-2 mb-3">
-                    <button
-                      type="button"
-                      onClick={() => setPriceType('fixed')}
-                      disabled={isSubmitting}
-                      className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
-                        priceType === 'fixed'
-                          ? 'border-purple-600 bg-purple-50 text-purple-700'
-                          : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                      }`}
-                    >
-                      Fixed price
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPriceType('from')}
-                      disabled={isSubmitting}
-                      className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
-                        priceType === 'from'
-                          ? 'border-purple-600 bg-purple-50 text-purple-700'
-                          : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                      }`}
-                    >
-                      From price
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
-                      £
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                      disabled={isSubmitting}
-                      className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                    />
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Price type
+                </label>
+                <div className="flex gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setPriceType('fixed')}
+                    disabled={isSubmitting}
+                    className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
+                      priceType === 'fixed'
+                        ? 'border-purple-600 bg-purple-50 text-purple-700'
+                        : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                    }`}
+                  >
+                    Fixed price
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPriceType('from')}
+                    disabled={isSubmitting}
+                    className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
+                      priceType === 'from'
+                        ? 'border-purple-600 bg-purple-50 text-purple-700'
+                        : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                    }`}
+                  >
+                    From price
+                  </button>
                 </div>
-              )}
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
+                    £
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    disabled={isSubmitting}
+                    className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                  />
+                </div>
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">

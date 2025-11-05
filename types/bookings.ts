@@ -10,15 +10,35 @@ export interface Service {
   id: string;
   name: string;
   description: string | null;
-  type: 'service' | 'variant_group' | 'bundle';
+  type: 'service' | 'bundle';
   price_type: 'fixed' | 'from';
   duration_minutes: number;
   price: number;
   is_active: boolean;
   is_bookable: boolean;
   category_id: string | null;
-  parent_service_id: string | null;
+
   service_categories: ServiceCategory | null;
+}
+export interface ServiceGroup {
+  id: string;
+  name: string;
+  category_id: string | null;
+  description: string | null;
+  display_mode: 'modal' | 'list';
+  display_order: number;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceGroupItem {
+  id: string;
+  service_group_id: string;
+  service_id: string;
+  display_order: number;
+  created_at: string;
 }
 
 export interface TeamMemberInfo {

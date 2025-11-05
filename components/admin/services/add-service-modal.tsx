@@ -1,4 +1,6 @@
 // components/admin/services/add-service-modal.tsx
+// Updated to support returning created service data for nested usage
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -32,7 +34,13 @@ interface AddServiceModalProps {
   isOpen: boolean;
   onClose: () => void;
   categories: Category[];
-  onSuccess?: () => void; // ✅ Added
+  onSuccess?: (serviceData?: {
+    id: string;
+    name: string;
+    price: number;
+    duration_minutes: number;
+  }) => void; // ✅ Updated to return service data
+  zIndex?: number; // ✅ Added for nested modal support
 }
 
 const DURATION_OPTIONS = [
@@ -55,11 +63,6 @@ const SERVICE_TYPES = [
     description: 'Standalone bookable service',
   },
   {
-    value: 'variant_group' as const,
-    label: 'Service with Variants',
-    description: 'Group with options (e.g., hair lengths)',
-  },
-  {
     value: 'bundle' as const,
     label: 'Service Bundle',
     description: 'Package of multiple services',
@@ -72,7 +75,8 @@ export function AddServiceModal({
   isOpen,
   onClose,
   categories,
-  onSuccess, // ✅ Added
+  onSuccess,
+  zIndex = 50, // ✅ Default z-50, can be overridden for nesting
 }: AddServiceModalProps) {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
@@ -88,35 +92,64 @@ export function AddServiceModal({
   const [price, setPrice] = useState('0.00');
   const [duration, setDuration] = useState(30);
 
-  // Venues and team members
+  // Step 2 data
   const [venues, setVenues] = useState<Venue[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [selectedVenues, setSelectedVenues] = useState<string[]>([]);
   const [selectedTeamMembers, setSelectedTeamMembers] = useState<string[]>([]);
   const [allLocations, setAllLocations] = useState(false);
   const [allTeam, setAllTeam] = useState(false);
+  const [loadingStep2, setLoadingStep2] = useState(false);
 
+  // Load venues and team members when moving to step 2
   useEffect(() => {
-    if (isOpen) {
-      loadData();
+    if (currentStep === 2 && venues.length === 0) {
+      loadStep2Data();
     }
-  }, [isOpen]);
+  }, [currentStep, venues.length]);
 
-  const loadData = async () => {
+  const loadStep2Data = async () => {
+    setLoadingStep2(true);
     try {
-      const [venuesData, teamData] = await Promise.all([
+      const [venuesData, teamMembersData] = await Promise.all([
         getAllVenues(),
         getAllTeamMembers(),
       ]);
       setVenues(venuesData);
-      setTeamMembers(teamData);
+      setTeamMembers(teamMembersData);
     } catch (err) {
-      console.error('Failed to load venues and team members:', err);
-      setError('Failed to load data');
+      console.error('Failed to load data:', err);
+      setError('Failed to load locations and team members');
+    } finally {
+      setLoadingStep2(false);
     }
   };
 
-  const handleAllLocationsToggle = () => {
+  const handleNext = () => {
+    setError('');
+
+    if (currentStep === 1) {
+      // Validate Step 1
+      if (!name.trim()) {
+        setError('Service name is required');
+        return;
+      }
+
+      if (!price || parseFloat(price) <= 0) {
+        setError('Price must be greater than 0');
+        return;
+      }
+
+      setCurrentStep(2);
+    }
+  };
+
+  const handleBack = () => {
+    setError('');
+    setCurrentStep(1);
+  };
+
+  const handleLocationToggleAll = () => {
     if (allLocations) {
       setSelectedVenues([]);
       setAllLocations(false);
@@ -126,7 +159,7 @@ export function AddServiceModal({
     }
   };
 
-  const handleVenueToggle = (venueId: string) => {
+  const handleLocationToggle = (venueId: string) => {
     if (selectedVenues.includes(venueId)) {
       const newSelected = selectedVenues.filter((id) => id !== venueId);
       setSelectedVenues(newSelected);
@@ -138,7 +171,7 @@ export function AddServiceModal({
     }
   };
 
-  const handleAllTeamToggle = () => {
+  const handleTeamToggleAll = () => {
     if (allTeam) {
       setSelectedTeamMembers([]);
       setAllTeam(false);
@@ -170,7 +203,7 @@ export function AddServiceModal({
       return;
     }
 
-    if (serviceType !== 'variant_group' && (!price || parseFloat(price) <= 0)) {
+    if (!price || parseFloat(price) <= 0) {
       setError('Price must be greater than 0');
       return;
     }
@@ -188,13 +221,13 @@ export function AddServiceModal({
     setIsSubmitting(true);
 
     try {
-      await createService({
+      const newService = await createService({
         name: name.trim(),
         category_id: categoryId || undefined,
         description: description.trim() || undefined,
         type: serviceType,
         price_type: priceType,
-        price: serviceType === 'variant_group' ? undefined : parseFloat(price),
+        price: parseFloat(price),
         duration_minutes: duration,
         venue_ids: selectedVenues,
         team_member_ids: selectedTeamMembers,
@@ -216,9 +249,14 @@ export function AddServiceModal({
 
       router.refresh();
 
-      // ✅ Call onSuccess instead of onClose
+      // ✅ Call onSuccess with service data
       if (onSuccess) {
-        onSuccess();
+        onSuccess({
+          id: newService.id,
+          name: newService.name,
+          price: newService.price,
+          duration_minutes: newService.duration_minutes,
+        });
       } else {
         onClose();
       }
@@ -241,11 +279,19 @@ export function AddServiceModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      style={{ zIndex }} // ✅ Dynamic z-index
+    >
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Add Service</h2>
+          <div>
+            <h2 className="text-xl font-semibold">Add Service</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Step {currentStep} of 2
+            </p>
+          </div>
           <button
             onClick={handleClose}
             disabled={isSubmitting}
@@ -288,7 +334,7 @@ export function AddServiceModal({
                           className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
                             serviceType === type.value
                               ? 'bg-purple-600'
-                              : 'bg-white border-2 border-gray-300'
+                              : 'border-2 border-gray-300'
                           }`}
                         >
                           {serviceType === type.value && (
@@ -296,12 +342,12 @@ export function AddServiceModal({
                           )}
                         </div>
                         <div className="text-left">
-                          <div className="font-medium text-gray-900">
+                          <p className="font-medium text-gray-900">
                             {type.label}
-                          </div>
-                          <div className="text-sm text-gray-600 mt-0.5">
+                          </p>
+                          <p className="text-sm text-gray-500">
                             {type.description}
-                          </div>
+                          </p>
                         </div>
                       </button>
                     ))}
@@ -316,7 +362,7 @@ export function AddServiceModal({
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Haircut, Color, Balayage"
+                    placeholder="e.g., Women's Haircut"
                     disabled={isSubmitting}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
                   />
@@ -324,7 +370,7 @@ export function AddServiceModal({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">
-                    Category
+                    Category (optional)
                   </label>
                   <select
                     value={categoryId}
@@ -332,7 +378,7 @@ export function AddServiceModal({
                     disabled={isSubmitting}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
                   >
-                    <option value="">Uncategorized</option>
+                    <option value="">No category</option>
                     {categories.map((cat) => (
                       <option key={cat.id} value={cat.id}>
                         {cat.name}
@@ -343,66 +389,51 @@ export function AddServiceModal({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">
-                    Description
+                    Description (optional)
                   </label>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Brief description of the service..."
+                    placeholder="Describe this service..."
                     rows={3}
                     disabled={isSubmitting}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
                   />
                 </div>
 
-                {/* Price - Hidden for variant_group */}
-                {serviceType !== 'variant_group' && (
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 mb-2">
                       Price type
                     </label>
-                    <div className="flex gap-2 mb-3">
-                      <button
-                        type="button"
-                        onClick={() => setPriceType('fixed')}
-                        disabled={isSubmitting}
-                        className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
-                          priceType === 'fixed'
-                            ? 'border-purple-600 bg-purple-50 text-purple-700'
-                            : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                        }`}
-                      >
-                        Fixed price
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPriceType('from')}
-                        disabled={isSubmitting}
-                        className={`flex-1 px-4 py-2 rounded-lg border-2 transition-colors ${
-                          priceType === 'from'
-                            ? 'border-purple-600 bg-purple-50 text-purple-700'
-                            : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                        }`}
-                      >
-                        From price
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">
-                        £
-                      </span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        disabled={isSubmitting}
-                        className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
-                      />
-                    </div>
+                    <select
+                      value={priceType}
+                      onChange={(e) =>
+                        setPriceType(e.target.value as 'fixed' | 'from')
+                      }
+                      disabled={isSubmitting}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                    >
+                      <option value="fixed">Fixed price</option>
+                      <option value="from">From (minimum)</option>
+                    </select>
                   </div>
-                )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                      Price (AUD) *
+                    </label>
+                    <input
+                      type="number"
+                      value={price}
+                      onChange={(e) => setPrice(e.target.value)}
+                      step="0.01"
+                      min="0"
+                      disabled={isSubmitting}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
+                    />
+                  </div>
+                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -410,7 +441,7 @@ export function AddServiceModal({
                   </label>
                   <select
                     value={duration}
-                    onChange={(e) => setDuration(parseInt(e.target.value))}
+                    onChange={(e) => setDuration(Number(e.target.value))}
                     disabled={isSubmitting}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100"
                   >
@@ -427,105 +458,117 @@ export function AddServiceModal({
             {/* Step 2: Locations & Team */}
             {currentStep === 2 && (
               <>
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-medium text-gray-900">
-                      Locations *
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleAllLocationsToggle}
-                      className="text-sm text-purple-600 hover:text-purple-700"
-                    >
-                      {allLocations ? 'Deselect all' : 'Select all'}
-                    </button>
+                {loadingStep2 ? (
+                  <div className="text-center py-12">
+                    <div className="inline-block w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-gray-500 mt-4">Loading...</p>
                   </div>
-                  <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                    {venues.map((venue) => (
-                      <label
-                        key={venue.id}
-                        className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedVenues.includes(venue.id)}
-                          onChange={() => handleVenueToggle(venue.id)}
-                          disabled={isSubmitting}
-                          className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                        />
-                        <span className="text-sm text-gray-700">
-                          {venue.name}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    {/* Locations */}
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="block text-sm font-medium text-gray-900">
+                          Available at locations *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleLocationToggleAll}
+                          className="text-sm text-purple-600 hover:text-purple-700"
+                        >
+                          {allLocations ? 'Deselect all' : 'Select all'}
+                        </button>
+                      </div>
+                      <div className="border border-gray-200 rounded-lg divide-y divide-gray-200">
+                        {venues.map((venue) => (
+                          <label
+                            key={venue.id}
+                            className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedVenues.includes(venue.id)}
+                              onChange={() => handleLocationToggle(venue.id)}
+                              className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                            />
+                            <span className="text-sm text-gray-900">
+                              {venue.name}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-medium text-gray-900">
-                      Team members *
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleAllTeamToggle}
-                      className="text-sm text-purple-600 hover:text-purple-700"
-                    >
-                      {allTeam ? 'Deselect all' : 'Select all'}
-                    </button>
-                  </div>
-                  <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                    {teamMembers.map((member) => (
-                      <label
-                        key={member.id}
-                        className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedTeamMembers.includes(member.id)}
-                          onChange={() => handleTeamMemberToggle(member.id)}
-                          disabled={isSubmitting}
-                          className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                        />
-                        <span className="text-sm text-gray-700">
-                          {member.first_name} {member.last_name}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
+                    {/* Team Members */}
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="block text-sm font-medium text-gray-900">
+                          Provided by team members *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleTeamToggleAll}
+                          className="text-sm text-purple-600 hover:text-purple-700"
+                        >
+                          {allTeam ? 'Deselect all' : 'Select all'}
+                        </button>
+                      </div>
+                      <div className="border border-gray-200 rounded-lg divide-y divide-gray-200 max-h-64 overflow-y-auto">
+                        {teamMembers.map((member) => (
+                          <label
+                            key={member.id}
+                            className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedTeamMembers.includes(member.id)}
+                              onChange={() => handleTeamMemberToggle(member.id)}
+                              className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                            />
+                            <span className="text-sm text-gray-900">
+                              {member.first_name} {member.last_name}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
 
           {/* Footer */}
-          <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-3">
-            <div className="text-sm text-gray-600">Step {currentStep} of 2</div>
-            <div className="flex gap-3">
+          <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+            <div>
               {currentStep === 2 && (
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(1)}
+                  onClick={handleBack}
                   disabled={isSubmitting}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
                 >
                   Back
                 </button>
               )}
+            </div>
+
+            <div className="flex gap-3">
               <button
                 type="button"
                 onClick={handleClose}
                 disabled={isSubmitting}
-                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
               >
                 Cancel
               </button>
+
               {currentStep === 1 ? (
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(2)}
-                  disabled={isSubmitting || !name.trim()}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleNext}
+                  disabled={isSubmitting}
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
                 >
                   Next
                 </button>
@@ -533,7 +576,7 @@ export function AddServiceModal({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
                 >
                   {isSubmitting ? 'Creating...' : 'Create Service'}
                 </button>

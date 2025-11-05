@@ -525,7 +525,7 @@ export function DayView({
                               className="absolute pointer-events-auto px-1 hover:z-[100]"
                               style={{
                                 top: `${top}px`,
-                                height: `${height}px`,
+                                height: `${height * 0.99}px`,
                                 width: layout.width, // ✅ NEW: Dynamic width
                                 left: layout.left, // ✅ NEW: Dynamic left position
                                 zIndex: layout.zIndex, // ✅ NEW: Proper stacking (but hover:z-[100] overrides)
@@ -551,7 +551,7 @@ export function DayView({
                               className="absolute inset-x-0 pointer-events-auto cursor-pointer px-1"
                               style={{
                                 top: `${top}px`,
-                                height: `${height}px`,
+                                height: `${height * 0.99}px`,
                               }}
                               onClick={() =>
                                 handleBlockedTimeClick(blockedTime, memberName)

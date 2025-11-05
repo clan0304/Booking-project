@@ -529,7 +529,7 @@ export function WeekView({
                                       className="absolute left-1 right-1 pointer-events-auto z-20"
                                       style={{
                                         top: `${top}px`,
-                                        height: `${height}px`,
+                                        height: `${height * 0.99}px`,
                                       }}
                                     >
                                       <AppointmentCard
@@ -554,7 +554,7 @@ export function WeekView({
                                         className="absolute left-1 right-1 pointer-events-auto z-10 cursor-pointer"
                                         style={{
                                           top: `${top}px`,
-                                          height: `${height}px`,
+                                          height: `${height * 0.99}px`,
                                         }}
                                         onClick={() =>
                                           handleBlockedTimeClick(
