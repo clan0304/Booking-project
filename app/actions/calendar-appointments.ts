@@ -39,6 +39,55 @@ interface CreateCalendarAppointmentData {
   internalNotes?: string;
 }
 
+interface UpdateCalendarAppointmentData {
+  appointmentId: string;
+  bookingId: string;
+
+  // Optional fields to update
+  serviceId?: string;
+  serviceName?: string;
+  teamMemberId?: string;
+  startTime?: string; // HH:MM
+  duration?: number;
+  price?: number;
+  bookingNotes?: string;
+  internalNotes?: string;
+}
+
+interface AppointmentUpdateFields {
+  service_id?: string;
+  service_name?: string;
+  team_member_id?: string;
+  start_time?: string;
+  end_time?: string;
+  duration_minutes?: number;
+  price?: number;
+  notes?: string;
+}
+
+interface BookingGroupUpdateFields {
+  total_price?: number;
+  total_appointments?: number;
+  internal_notes?: string;
+}
+
+interface ExistingAppointment {
+  id: string;
+  service_id: string;
+  service_name: string;
+  team_member_id: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  price: number;
+  notes: string | null;
+  booking_group_id: string;
+}
+
+interface AppointmentPriceData {
+  price: number;
+  duration_minutes: number;
+}
 // REPLACE the entire createCalendarAppointment function in app/actions/calendar-appointments.ts
 
 export async function createCalendarAppointment(
@@ -364,5 +413,304 @@ export async function getRecentClients(venueId: string, limit: number = 10) {
   } catch (error) {
     console.error('Error fetching recent clients:', error);
     return { success: false, error: 'Failed to fetch recent clients' };
+  }
+}
+
+// =====================================================
+// UPDATE APPOINTMENT
+// =====================================================
+
+/**
+ * Update calendar appointment
+ */
+export async function updateCalendarAppointment(
+  data: UpdateCalendarAppointmentData
+) {
+  try {
+    await requireAdmin();
+
+    // =====================================================
+    // 1. VALIDATE INPUTS
+    // =====================================================
+
+    if (!data.appointmentId || !data.bookingId) {
+      return { success: false, error: 'Missing required IDs' };
+    }
+
+    // =====================================================
+    // 2. GET EXISTING APPOINTMENT DATA
+    // =====================================================
+
+    const { data: existingAppointment, error: fetchError } = await supabaseAdmin
+      .from('appointments')
+      .select('*')
+      .eq('id', data.appointmentId)
+      .eq('booking_group_id', data.bookingId)
+      .single();
+
+    if (fetchError || !existingAppointment) {
+      return { success: false, error: 'Appointment not found' };
+    }
+
+    const existing = existingAppointment as ExistingAppointment;
+
+    // =====================================================
+    // 3. PREPARE UPDATE DATA
+    // =====================================================
+
+    const appointmentUpdate: AppointmentUpdateFields = {};
+    let needsRecalculation = false;
+
+    // Update service if changed
+    if (data.serviceId && data.serviceId !== existing.service_id) {
+      appointmentUpdate.service_id = data.serviceId;
+      appointmentUpdate.service_name =
+        data.serviceName || existing.service_name;
+      needsRecalculation = true;
+    }
+
+    // Update team member if changed
+    if (data.teamMemberId && data.teamMemberId !== existing.team_member_id) {
+      appointmentUpdate.team_member_id = data.teamMemberId;
+    }
+
+    // Update times if changed
+    if (data.startTime || data.duration !== undefined) {
+      const startTime = data.startTime || existing.start_time.substring(0, 5); // Remove :00 if present
+      const duration =
+        data.duration !== undefined ? data.duration : existing.duration_minutes;
+
+      // Calculate end time manually
+      const [startHours, startMinutes] = startTime.split(':').map(Number);
+      const totalMinutes = startHours * 60 + startMinutes + duration;
+      const endHours = Math.floor(totalMinutes / 60);
+      const endMinutes = totalMinutes % 60;
+      const endTime = `${String(endHours).padStart(2, '0')}:${String(
+        endMinutes
+      ).padStart(2, '0')}`;
+
+      appointmentUpdate.start_time = startTime + ':00'; // Add seconds
+      appointmentUpdate.end_time = endTime + ':00';
+      appointmentUpdate.duration_minutes = duration;
+      needsRecalculation = true;
+    }
+
+    // Update price if changed
+    if (data.price !== undefined && data.price !== existing.price) {
+      appointmentUpdate.price = data.price;
+      needsRecalculation = true;
+    }
+
+    // Update notes if provided
+    if (data.bookingNotes !== undefined) {
+      appointmentUpdate.notes = data.bookingNotes;
+    }
+
+    // =====================================================
+    // 4. UPDATE APPOINTMENT
+    // =====================================================
+
+    if (Object.keys(appointmentUpdate).length > 0) {
+      const { error: updateError } = await supabaseAdmin
+        .from('appointments')
+        .update(appointmentUpdate)
+        .eq('id', data.appointmentId);
+
+      if (updateError) {
+        console.error('Error updating appointment:', updateError);
+        return { success: false, error: 'Failed to update appointment' };
+      }
+    }
+
+    // =====================================================
+    // 5. UPDATE BOOKING GROUP (if price/duration changed)
+    // =====================================================
+
+    if (needsRecalculation || data.internalNotes !== undefined) {
+      // Get all appointments for this booking to recalculate totals
+      const { data: allAppointments, error: appointmentsError } =
+        await supabaseAdmin
+          .from('appointments')
+          .select('price, duration_minutes')
+          .eq('booking_group_id', data.bookingId);
+
+      if (appointmentsError || !allAppointments) {
+        return {
+          success: false,
+          error: 'Failed to fetch booking appointments',
+        };
+      }
+
+      const appointments = allAppointments as AppointmentPriceData[];
+      const totalPrice = appointments.reduce(
+        (sum, appt) => sum + (appt.price || 0),
+        0
+      );
+      const totalAppointments = appointments.length;
+
+      const bookingUpdate: BookingGroupUpdateFields = {
+        total_price: totalPrice,
+        total_appointments: totalAppointments,
+      };
+
+      if (data.internalNotes !== undefined) {
+        bookingUpdate.internal_notes = data.internalNotes;
+      }
+
+      const { error: bookingUpdateError } = await supabaseAdmin
+        .from('booking_groups')
+        .update(bookingUpdate)
+        .eq('id', data.bookingId);
+
+      if (bookingUpdateError) {
+        console.error('Error updating booking group:', bookingUpdateError);
+        return { success: false, error: 'Failed to update booking totals' };
+      }
+    }
+
+    // =====================================================
+    // 6. SUCCESS - REVALIDATE & RETURN
+    // =====================================================
+
+    revalidatePath('/admin/calendar');
+    revalidatePath('/admin/bookings');
+
+    return {
+      success: true,
+      message: 'Appointment updated successfully',
+    };
+  } catch (error) {
+    console.error('Error in updateCalendarAppointment:', error);
+    return {
+      success: false,
+      error: 'An unexpected error occurred',
+    };
+  }
+}
+
+// =====================================================
+// DELETE APPOINTMENT
+// =====================================================
+
+/**
+ * Delete calendar appointment
+ */
+export async function deleteCalendarAppointment(
+  appointmentId: string,
+  bookingId: string
+) {
+  try {
+    await requireAdmin();
+
+    // =====================================================
+    // 1. VALIDATE INPUTS
+    // =====================================================
+
+    if (!appointmentId || !bookingId) {
+      return { success: false, error: 'Missing required IDs' };
+    }
+
+    // =====================================================
+    // 2. CHECK IF THIS IS THE ONLY APPOINTMENT
+    // =====================================================
+
+    const { data: appointments, error: fetchError } = await supabaseAdmin
+      .from('appointments')
+      .select('id')
+      .eq('booking_group_id', bookingId);
+
+    if (fetchError) {
+      console.error('Error fetching appointments:', fetchError);
+      return { success: false, error: 'Failed to check booking' };
+    }
+
+    const isOnlyAppointment = appointments && appointments.length === 1;
+
+    // =====================================================
+    // 3. DELETE APPOINTMENT
+    // =====================================================
+
+    const { error: deleteError } = await supabaseAdmin
+      .from('appointments')
+      .delete()
+      .eq('id', appointmentId);
+
+    if (deleteError) {
+      console.error('Error deleting appointment:', deleteError);
+      return { success: false, error: 'Failed to delete appointment' };
+    }
+
+    // =====================================================
+    // 4. IF ONLY APPOINTMENT, DELETE BOOKING GROUP TOO
+    // =====================================================
+
+    if (isOnlyAppointment) {
+      const { error: deleteBookingError } = await supabaseAdmin
+        .from('booking_groups')
+        .delete()
+        .eq('id', bookingId);
+
+      if (deleteBookingError) {
+        console.error('Error deleting booking group:', deleteBookingError);
+        return { success: false, error: 'Failed to delete booking' };
+      }
+    } else {
+      // =====================================================
+      // 5. RECALCULATE BOOKING TOTALS
+      // =====================================================
+
+      const { data: remainingAppointments, error: remainingError } =
+        await supabaseAdmin
+          .from('appointments')
+          .select('price, duration_minutes')
+          .eq('booking_group_id', bookingId);
+
+      if (remainingError || !remainingAppointments) {
+        return {
+          success: false,
+          error: 'Failed to recalculate booking totals',
+        };
+      }
+
+      const appointments = remainingAppointments as AppointmentPriceData[];
+      const totalPrice = appointments.reduce(
+        (sum, appt) => sum + (appt.price || 0),
+        0
+      );
+      const totalAppointments = appointments.length;
+
+      const { error: updateBookingError } = await supabaseAdmin
+        .from('booking_groups')
+        .update({
+          total_price: totalPrice,
+          total_appointments: totalAppointments,
+        })
+        .eq('id', bookingId);
+
+      if (updateBookingError) {
+        console.error('Error updating booking totals:', updateBookingError);
+        return { success: false, error: 'Failed to update booking totals' };
+      }
+    }
+
+    // =====================================================
+    // 6. SUCCESS - REVALIDATE & RETURN
+    // =====================================================
+
+    revalidatePath('/admin/calendar');
+    revalidatePath('/admin/bookings');
+
+    return {
+      success: true,
+      message: isOnlyAppointment
+        ? 'Appointment and booking deleted successfully'
+        : 'Appointment deleted successfully',
+    };
+  } catch (error) {
+    console.error('Error in deleteCalendarAppointment:', error);
+    return {
+      success: false,
+      error: 'An unexpected error occurred',
+    };
   }
 }
