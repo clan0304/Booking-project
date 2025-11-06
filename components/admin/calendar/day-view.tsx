@@ -355,7 +355,7 @@ export function DayView({
                 <div className="flex-shrink-0 w-16" />
 
                 {/* Team Member Headers */}
-                {appointmentsByMember.map(({ member, appointments }) => (
+                {appointmentsByMember.map(({ member }) => (
                   <div
                     key={member.id}
                     className="border-r border-gray-200 p-3"
@@ -364,30 +364,27 @@ export function DayView({
                       minWidth: useFixedWidth ? '200px' : 'auto',
                     }}
                   >
-                    <div className="flex items-center gap-2">
+                    {/* ✅ CHANGED: Vertical layout with centered items */}
+                    <div className="flex flex-col items-center gap-2">
                       {member.photo_url ? (
                         <Image
                           src={member.photo_url}
                           alt={`${member.first_name} ${member.last_name}`}
-                          width={32}
-                          height={32}
+                          width={48}
+                          height={48}
                           className="rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
-                          <span className="text-xs font-medium text-gray-600">
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center">
+                          <span className="text-sm font-semibold text-white">
                             {member.first_name[0]}
-                            {member.last_name[0]}
                           </span>
                         </div>
                       )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {member.first_name} {member.last_name}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {appointments.length} booking
-                          {appointments.length !== 1 ? 's' : ''}
+                      {/* ✅ CHANGED: Name below photo, centered */}
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-gray-900">
+                          {member.first_name}
                         </p>
                       </div>
                     </div>
@@ -524,7 +521,6 @@ export function DayView({
                             appointment.end_time
                           );
 
-                          // ✅ NEW: Get layout for this appointment
                           const layout = appointmentLayouts.get(
                             appointment.id
                           ) || {
@@ -536,26 +532,27 @@ export function DayView({
                           return (
                             <div
                               key={appointment.id}
-                              className="absolute pointer-events-auto px-1 hover:z-[100]"
+                              className="absolute pointer-events-none px-1 group"
                               style={{
                                 top: `${top}px`,
                                 height: `${height * 0.99}px`,
-                                width: layout.width, // ✅ NEW: Dynamic width
-                                left: layout.left, // ✅ NEW: Dynamic left position
-                                zIndex: layout.zIndex, // ✅ NEW: Proper stacking (but hover:z-[100] overrides)
+                                width: layout.width,
+                                left: layout.left,
+                                zIndex: layout.zIndex,
                               }}
                             >
-                              <AppointmentCard
-                                appointment={appointment}
-                                booking={appointment.booking}
-                                onClick={() =>
-                                  handleAppointmentClick(appointment)
-                                }
-                              />
+                              <div className="h-full w-full group-hover:w-[98%] pointer-events-auto transition-all duration-200 hover:z-[100]">
+                                <AppointmentCard
+                                  appointment={appointment}
+                                  booking={appointment.booking}
+                                  onClick={() =>
+                                    handleAppointmentClick(appointment)
+                                  }
+                                />
+                              </div>
                             </div>
                           );
                         })}
-
                         {/* Blocked Times */}
                         {memberBlockedTimes.map((blockedTime) => {
                           const { top, height } = getStyle(

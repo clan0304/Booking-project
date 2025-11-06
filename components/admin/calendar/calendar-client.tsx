@@ -1,7 +1,7 @@
 // components/admin/calendar/calendar-client.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { PageHeader } from '@/components/admin';
 import { CalendarFilters } from './calendar-filters';
 import { DayView } from './day-view';
@@ -12,6 +12,7 @@ import { getBlockedTimes } from '@/app/actions/blocked-times';
 import type { CalendarBooking, BlockedTime } from '@/types/calendar';
 
 export type CalendarViewType = 'day' | 'week';
+export type TeamFilterMode = 'scheduled' | 'all';
 
 export interface ShiftWithTeamMember {
   team_member_id: string;
@@ -35,8 +36,7 @@ export interface AssignedTeamMember {
 
 export function CalendarClient() {
   const [viewType, setViewType] = useState<CalendarViewType>('day');
-  const [selectedVenue, setSelectedVenue] = useState<string>(''); // Empty string initially
-  const [selectedTeamMember, setSelectedTeamMember] = useState<string>('all');
+  const [selectedVenue, setSelectedVenue] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>(getToday());
   const [currentWeekStart, setCurrentWeekStart] = useState<string>(
     getStartOfWeek(getToday())
@@ -47,13 +47,51 @@ export function CalendarClient() {
   const [assignedTeamMembers, setAssignedTeamMembers] = useState<
     AssignedTeamMember[]
   >([]);
-  // NEW: State for blocked times
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([]);
+
+  // NEW: Team filtering state
+  const [teamFilterMode, setTeamFilterMode] =
+    useState<TeamFilterMode>('scheduled');
+  const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState<string[]>(
+    []
+  );
+
+  // Compute scheduled team member IDs
+  const scheduledTeamMemberIds = useMemo(() => {
+    const scheduledIds = new Set<string>();
+
+    // From shifts
+    shifts.forEach((shift) => scheduledIds.add(shift.team_member_id));
+
+    // From appointments
+    bookings.forEach((booking) => {
+      booking.appointments.forEach((appt) => {
+        scheduledIds.add(appt.team_member_id);
+      });
+    });
+
+    // From blocked times
+    blockedTimes.forEach((blocked) => {
+      scheduledIds.add(blocked.team_member_id);
+    });
+
+    return Array.from(scheduledIds);
+  }, [shifts, bookings, blockedTimes]);
+
+  // Auto-select team members when mode changes or data loads
+  useEffect(() => {
+    if (assignedTeamMembers.length === 0) return;
+
+    if (teamFilterMode === 'scheduled') {
+      setSelectedTeamMemberIds(scheduledTeamMemberIds);
+    } else if (teamFilterMode === 'all') {
+      setSelectedTeamMemberIds(assignedTeamMembers.map((m) => m.id));
+    }
+  }, [teamFilterMode, assignedTeamMembers, scheduledTeamMemberIds]);
 
   // Fetch bookings and blocked times when filters change
   useEffect(() => {
     const fetchData = async () => {
-      // Don't fetch if no venue is selected yet
       if (!selectedVenue) return;
 
       setLoading(true);
@@ -69,14 +107,13 @@ export function CalendarClient() {
           endDate = addDays(currentWeekStart, 6);
         }
 
-        // Fetch bookings
+        // Fetch bookings (no team member filter - get all for venue)
         const bookingsResult = await getCalendarBookings({
           venueId: selectedVenue,
-          teamMemberId:
-            selectedTeamMember === 'all' ? undefined : selectedTeamMember,
+          teamMemberId: undefined,
           startDate,
           endDate,
-          viewType, // FIXED: Added viewType parameter
+          viewType,
         });
 
         if (bookingsResult.success && bookingsResult.data) {
@@ -89,7 +126,6 @@ export function CalendarClient() {
           setAssignedTeamMembers([]);
         }
 
-        // NEW: Fetch blocked times
         const blockedTimesResult = await getBlockedTimes(
           selectedVenue,
           startDate,
@@ -113,15 +149,9 @@ export function CalendarClient() {
     };
 
     fetchData();
-  }, [
-    viewType,
-    selectedVenue,
-    selectedTeamMember,
-    currentDate,
-    currentWeekStart,
-  ]);
+  }, [viewType, selectedVenue, currentDate, currentWeekStart]);
 
-  // Refresh calendar data (for after creating/editing/deleting blocked times)
+  // Refresh calendar data
   const refreshCalendar = async () => {
     if (!selectedVenue) return;
 
@@ -140,11 +170,10 @@ export function CalendarClient() {
 
       const bookingsResult = await getCalendarBookings({
         venueId: selectedVenue,
-        teamMemberId:
-          selectedTeamMember === 'all' ? undefined : selectedTeamMember,
+        teamMemberId: undefined,
         startDate,
         endDate,
-        viewType, // FIXED: Added viewType parameter
+        viewType,
       });
 
       if (bookingsResult.success && bookingsResult.data) {
@@ -169,6 +198,38 @@ export function CalendarClient() {
     }
   };
 
+  // Filter data by selected team members
+  const filteredBookings = useMemo(() => {
+    if (selectedTeamMemberIds.length === 0) return [];
+    return bookings.filter((booking) =>
+      booking.appointments.some((appt) =>
+        selectedTeamMemberIds.includes(appt.team_member_id)
+      )
+    );
+  }, [bookings, selectedTeamMemberIds]);
+
+  const filteredShifts = useMemo(() => {
+    if (selectedTeamMemberIds.length === 0) return [];
+    return shifts.filter((shift) =>
+      selectedTeamMemberIds.includes(shift.team_member_id)
+    );
+  }, [shifts, selectedTeamMemberIds]);
+
+  const filteredBlockedTimes = useMemo(() => {
+    if (selectedTeamMemberIds.length === 0) return [];
+    return blockedTimes.filter((blocked) =>
+      selectedTeamMemberIds.includes(blocked.team_member_id)
+    );
+  }, [blockedTimes, selectedTeamMemberIds]);
+
+  // Get filtered assigned team members for views
+  const filteredAssignedTeamMembers = useMemo(() => {
+    if (selectedTeamMemberIds.length === 0) return [];
+    return assignedTeamMembers.filter((member) =>
+      selectedTeamMemberIds.includes(member.id)
+    );
+  }, [assignedTeamMembers, selectedTeamMemberIds]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -184,12 +245,16 @@ export function CalendarClient() {
           onViewTypeChange={setViewType}
           selectedVenue={selectedVenue}
           onVenueChange={setSelectedVenue}
-          selectedTeamMember={selectedTeamMember}
-          onTeamMemberChange={setSelectedTeamMember}
           currentDate={currentDate}
           onDateChange={setCurrentDate}
           currentWeekStart={currentWeekStart}
           onWeekChange={setCurrentWeekStart}
+          teamFilterMode={teamFilterMode}
+          onTeamFilterModeChange={setTeamFilterMode}
+          assignedTeamMembers={assignedTeamMembers}
+          scheduledTeamMemberIds={scheduledTeamMemberIds}
+          selectedTeamMemberIds={selectedTeamMemberIds}
+          onTeamMemberIdsChange={setSelectedTeamMemberIds}
         />
       </div>
 
@@ -205,23 +270,30 @@ export function CalendarClient() {
               Please select a venue to view calendar
             </p>
           </div>
+        ) : selectedTeamMemberIds.length === 0 ? (
+          <div className="flex items-center justify-center h-96 border-2 border-dashed border-gray-200 rounded-lg">
+            <p className="text-gray-600">
+              No team members selected. Please select team members to view their
+              schedules.
+            </p>
+          </div>
         ) : viewType === 'day' ? (
           <DayView
-            bookings={bookings}
-            shifts={shifts}
-            assignedTeamMembers={assignedTeamMembers}
+            bookings={filteredBookings}
+            shifts={filteredShifts}
+            assignedTeamMembers={filteredAssignedTeamMembers}
             currentDate={currentDate}
-            blockedTimes={blockedTimes}
+            blockedTimes={filteredBlockedTimes}
             venueId={selectedVenue}
             onRefresh={refreshCalendar}
           />
         ) : (
           <WeekView
             weekStart={currentWeekStart}
-            bookings={bookings}
-            shifts={shifts}
-            assignedTeamMembers={assignedTeamMembers}
-            blockedTimes={blockedTimes}
+            bookings={filteredBookings}
+            shifts={filteredShifts}
+            assignedTeamMembers={filteredAssignedTeamMembers}
+            blockedTimes={filteredBlockedTimes}
             venueId={selectedVenue}
             onRefresh={refreshCalendar}
           />
