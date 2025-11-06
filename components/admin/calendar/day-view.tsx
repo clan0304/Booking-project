@@ -17,6 +17,7 @@ import type {
   AppointmentsByMember,
   BlockedTime,
 } from '@/types/calendar';
+import { EditAppointmentModal } from './appointment/edit-appointment-modal';
 import Image from 'next/image';
 
 interface DayViewProps {
@@ -149,6 +150,9 @@ export function DayView({
   } | null>(null);
   const [selectedBlockedTime, setSelectedBlockedTime] =
     useState<BlockedTime | null>(null);
+  const [selectedAppointment, setSelectedAppointment] =
+    useState<AppointmentWithBooking | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
@@ -303,6 +307,16 @@ export function DayView({
     setShowBlockedTimeModal(true);
   };
 
+  const handleAppointmentClick = (appointment: AppointmentWithBooking) => {
+    setSelectedAppointment(appointment);
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditSuccess = () => {
+    setIsEditModalOpen(false);
+    setSelectedAppointment(null);
+    onRefresh();
+  };
   // Calculate dynamic column width based on number of team members
   const getColumnWidth = (memberCount: number): string => {
     if (memberCount === 1) return '100%';
@@ -534,6 +548,9 @@ export function DayView({
                               <AppointmentCard
                                 appointment={appointment}
                                 booking={appointment.booking}
+                                onClick={() =>
+                                  handleAppointmentClick(appointment)
+                                }
                               />
                             </div>
                           );
@@ -615,6 +632,14 @@ export function DayView({
           defaultStartTime={selectedSlot.time}
           existingBlockedTime={selectedBlockedTime}
           onSuccess={onRefresh}
+        />
+      )}
+      {selectedAppointment && (
+        <EditAppointmentModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          appointment={selectedAppointment}
+          onSuccess={handleEditSuccess}
         />
       )}
     </>

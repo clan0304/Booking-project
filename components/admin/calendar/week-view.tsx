@@ -19,6 +19,7 @@ import type {
   WeekDay,
   BlockedTime,
 } from '@/types/calendar';
+import { EditAppointmentModal } from './appointment/edit-appointment-modal';
 import Image from 'next/image';
 
 interface WeekViewProps {
@@ -67,6 +68,10 @@ export function WeekView({
   } | null>(null);
   const [selectedBlockedTime, setSelectedBlockedTime] =
     useState<BlockedTime | null>(null);
+  // ✅ ADD THESE TWO LINES after the existing state declarations
+  const [selectedAppointment, setSelectedAppointment] =
+    useState<AppointmentWithBooking | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
@@ -227,6 +232,17 @@ export function WeekView({
     return memberAppointments.get(date) || [];
   };
 
+  // ✅ ADD THESE TWO FUNCTIONS after handleBlockedTimeClick
+  const handleAppointmentClick = (appointment: AppointmentWithBooking) => {
+    setSelectedAppointment(appointment);
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditSuccess = () => {
+    setIsEditModalOpen(false);
+    setSelectedAppointment(null);
+    onRefresh();
+  };
   return (
     <>
       <div className="space-y-4">
@@ -536,6 +552,9 @@ export function WeekView({
                                         appointment={appointment}
                                         booking={appointment.booking}
                                         compact
+                                        onClick={() =>
+                                          handleAppointmentClick(appointment)
+                                        }
                                       />
                                     </div>
                                   );
@@ -623,6 +642,14 @@ export function WeekView({
           defaultStartTime={selectedSlot.time}
           existingBlockedTime={selectedBlockedTime}
           onSuccess={onRefresh}
+        />
+      )}
+      {selectedAppointment && (
+        <EditAppointmentModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          appointment={selectedAppointment}
+          onSuccess={handleEditSuccess}
         />
       )}
     </>
