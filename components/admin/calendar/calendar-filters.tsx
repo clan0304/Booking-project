@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar as CalendarIcon,
-  Users,
 } from 'lucide-react';
 import {
   getStartOfWeek,
@@ -21,7 +20,7 @@ import type {
   TeamFilterMode,
   AssignedTeamMember,
 } from './calendar-client';
-import Image from 'next/image';
+import { TeamFilterDropdown } from './team-filter-dropdown';
 
 interface CalendarFiltersProps {
   viewType: CalendarViewType;
@@ -120,25 +119,8 @@ export function CalendarFilters({
       ? currentDate === getToday()
       : currentWeekStart === getStartOfWeek(getToday());
 
-  // Handle team member checkbox toggle
-  const handleTeamMemberToggle = (memberId: string) => {
-    if (selectedTeamMemberIds.includes(memberId)) {
-      onTeamMemberIdsChange(
-        selectedTeamMemberIds.filter((id) => id !== memberId)
-      );
-    } else {
-      onTeamMemberIdsChange([...selectedTeamMemberIds, memberId]);
-    }
-  };
-
-  // Handle clear all
-  const handleClearAll = () => {
-    onTeamMemberIdsChange([]);
-  };
-
   return (
-    <div className="space-y-4">
-      {/* Top Row: View Type, Date Navigation, Venue Filter */}
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         {/* Left: View Type Selector */}
         <div className="flex items-center gap-2">
@@ -199,8 +181,9 @@ export function CalendarFilters({
           )}
         </div>
 
-        {/* Right: Venue Filter */}
+        {/* Right: Filters */}
         <div className="flex items-center gap-2">
+          {/* Venue Filter */}
           <select
             value={selectedVenue}
             onChange={(e) => onVenueChange(e.target.value)}
@@ -212,108 +195,15 @@ export function CalendarFilters({
               </option>
             ))}
           </select>
-        </div>
-      </div>
 
-      {/* Bottom Row: Team Filter */}
-      <div className="border border-gray-200 rounded-lg bg-gray-50 p-4">
-        {/* Team Filter Mode Toggle */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-gray-500" />
-            <button
-              onClick={() => onTeamFilterModeChange('scheduled')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                teamFilterMode === 'scheduled'
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Scheduled team
-            </button>
-            <button
-              onClick={() => onTeamFilterModeChange('all')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                teamFilterMode === 'all'
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              All team
-            </button>
-          </div>
-
-          {/* Clear All Link */}
-          {selectedTeamMemberIds.length > 0 && (
-            <button
-              onClick={handleClearAll}
-              className="text-sm text-purple-600 hover:text-purple-700 font-medium"
-            >
-              Clear all
-            </button>
-          )}
-        </div>
-
-        {/* Team Members Checkboxes */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">
-            Team members
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-            {assignedTeamMembers.map((member) => {
-              const isSelected = selectedTeamMemberIds.includes(member.id);
-
-              return (
-                <label
-                  key={member.id}
-                  className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors ${
-                    isSelected
-                      ? 'bg-purple-50 border-purple-300'
-                      : 'bg-white border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => handleTeamMemberToggle(member.id)}
-                    className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                  />
-
-                  {/* Photo */}
-                  <div className="flex-shrink-0">
-                    {member.photo_url ? (
-                      <Image
-                        src={member.photo_url}
-                        alt={member.first_name}
-                        width={32}
-                        height={32}
-                        className="rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white text-xs font-semibold">
-                        {member.first_name[0]}
-                        {member.last_name[0]}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Name */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {member.first_name} {member.last_name}
-                    </p>
-                  </div>
-                </label>
-              );
-            })}
-          </div>
-
-          {/* Empty State */}
-          {assignedTeamMembers.length === 0 && (
-            <div className="text-center py-6 text-gray-500 text-sm">
-              No team members assigned to this venue
-            </div>
-          )}
+          {/* Team Filter Dropdown */}
+          <TeamFilterDropdown
+            teamFilterMode={teamFilterMode}
+            onTeamFilterModeChange={onTeamFilterModeChange}
+            assignedTeamMembers={assignedTeamMembers}
+            selectedTeamMemberIds={selectedTeamMemberIds}
+            onTeamMemberIdsChange={onTeamMemberIdsChange}
+          />
         </div>
       </div>
     </div>

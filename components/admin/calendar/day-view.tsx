@@ -157,9 +157,9 @@ export function DayView({
   // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
     const slots: string[] = [];
-    for (let hour = 8; hour <= 20; hour++) {
+    for (let hour = 0; hour < 24; hour++) {
       slots.push(`${hour.toString().padStart(2, '0')}:00`);
-      if (hour < 20) {
+      if (hour < 23 || (hour === 23 && true)) {
         slots.push(`${hour.toString().padStart(2, '0')}:15`);
         slots.push(`${hour.toString().padStart(2, '0')}:30`);
         slots.push(`${hour.toString().padStart(2, '0')}:45`);
@@ -171,7 +171,7 @@ export function DayView({
   // Generate hour labels (only show on the hour)
   const hourLabels = useMemo((): string[] => {
     const labels: string[] = [];
-    for (let hour = 8; hour <= 20; hour++) {
+    for (let hour = 0; hour < 24; hour++) {
       labels.push(`${hour.toString().padStart(2, '0')}:00`);
     }
     return labels;
@@ -276,7 +276,7 @@ export function DayView({
     const startMinutes = startHour * 60 + startMin;
     const endMinutes = endHour * 60 + endMin;
 
-    const baseMinutes = 8 * 60; // 8 AM
+    const baseMinutes = 0; // 12 AM (midnight)
     const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
     const height = ((endMinutes - startMinutes) / 15) * 20;
 
@@ -358,32 +358,38 @@ export function DayView({
                 {appointmentsByMember.map(({ member }) => (
                   <div
                     key={member.id}
-                    className="border-r border-gray-200 p-3"
+                    className="border-r border-gray-200 p-4"
                     style={{
                       width: useFixedWidth ? '200px' : columnWidth,
                       minWidth: useFixedWidth ? '200px' : 'auto',
                     }}
                   >
-                    {/* ✅ CHANGED: Vertical layout with centered items */}
-                    <div className="flex flex-col items-center gap-2">
-                      {member.photo_url ? (
-                        <Image
-                          src={member.photo_url}
-                          alt={`${member.first_name} ${member.last_name}`}
-                          width={48}
-                          height={48}
-                          className="rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center">
-                          <span className="text-sm font-semibold text-white">
-                            {member.first_name[0]}
-                          </span>
-                        </div>
-                      )}
-                      {/* ✅ CHANGED: Name below photo, centered */}
-                      <div className="text-center">
-                        <p className="text-sm font-medium text-gray-900">
+                    {/* ✅ FIXED: Uniform layout with consistent sizing */}
+                    <div className="flex flex-col items-center gap-3">
+                      {/* Photo Container - Fixed Size */}
+                      <div className="flex-shrink-0">
+                        {member.photo_url ? (
+                          <Image
+                            src={member.photo_url}
+                            alt={`${member.first_name} ${member.last_name}`}
+                            width={56}
+                            height={56}
+                            className="rounded-full object-cover"
+                            style={{ width: '56px', height: '56px' }}
+                          />
+                        ) : (
+                          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center flex-shrink-0">
+                            <span className="text-base font-semibold text-white">
+                              {member.first_name[0]}
+                              {member.last_name[0]}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Text Container - Centered */}
+                      <div className="text-center w-full">
+                        <p className="text-sm font-semibold text-gray-900 truncate px-2">
                           {member.first_name}
                         </p>
                       </div>

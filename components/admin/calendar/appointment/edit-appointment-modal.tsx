@@ -266,12 +266,18 @@ export function EditAppointmentModal({
     }
   };
 
-  // Helper functions
   const generateTimeSlots = (): string[] => {
     const slots: string[] = [];
-    for (let hour = 8; hour <= 20; hour++) {
+    for (let hour = 0; hour < 24; hour++) {
       for (let min = 0; min < 60; min += 15) {
-        if (hour === 20 && min > 0) break;
+        if (hour === 23 && min === 45) {
+          // Include 11:45pm but stop there
+          const timeStr = `${hour.toString().padStart(2, '0')}:${min
+            .toString()
+            .padStart(2, '0')}`;
+          slots.push(timeStr);
+          break;
+        }
         const timeStr = `${hour.toString().padStart(2, '0')}:${min
           .toString()
           .padStart(2, '0')}`;

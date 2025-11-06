@@ -4,6 +4,7 @@ export { CalendarFilters } from './calendar-filters';
 export { DayView } from './day-view';
 export { WeekView } from './week-view';
 export { AppointmentCard } from './appointment-card';
+export { TeamFilterDropdown } from './team-filter-dropdown';
 export type {
   TeamFilterMode,
   CalendarViewType,

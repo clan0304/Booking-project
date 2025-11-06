@@ -73,12 +73,12 @@ export function WeekView({
     useState<AppointmentWithBooking | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  // Generate time slots (8 AM to 8 PM, 15-min intervals)
+  // Generate time slots (12 AM to 11:45 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
     const slots: string[] = [];
-    for (let hour = 8; hour <= 20; hour++) {
+    for (let hour = 0; hour < 24; hour++) {
       slots.push(`${hour.toString().padStart(2, '0')}:00`);
-      if (hour < 20) {
+      if (hour < 23 || (hour === 23 && true)) {
         slots.push(`${hour.toString().padStart(2, '0')}:15`);
         slots.push(`${hour.toString().padStart(2, '0')}:30`);
         slots.push(`${hour.toString().padStart(2, '0')}:45`);
@@ -90,7 +90,7 @@ export function WeekView({
   // Generate hour labels (only show on the hour)
   const hourLabels = useMemo((): string[] => {
     const labels: string[] = [];
-    for (let hour = 8; hour <= 20; hour++) {
+    for (let hour = 0; hour < 24; hour++) {
       labels.push(`${hour.toString().padStart(2, '0')}:00`);
     }
     return labels;
@@ -191,7 +191,7 @@ export function WeekView({
     const startMinutes = startHour * 60 + startMin;
     const endMinutes = endHour * 60 + endMin;
 
-    const baseMinutes = 8 * 60; // 8 AM
+    const baseMinutes = 0; // 12 AM (midnight)
     const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
     const height = ((endMinutes - startMinutes) / 15) * 20;
 

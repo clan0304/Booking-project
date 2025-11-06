@@ -62,9 +62,10 @@ export function BlockedTimeModal({
       } else {
         // Create mode - use defaults
         setStartTime(defaultStartTime);
-        // Auto-set end time to 1 hour later
+
+        // Auto-set end time to 1 hour later (with wrap-around at midnight)
         const [hour, min] = defaultStartTime.split(':');
-        const endHour = (parseInt(hour) + 1).toString().padStart(2, '0');
+        const endHour = ((parseInt(hour) + 1) % 24).toString().padStart(2, '0');
         setEndTime(`${endHour}:${min}`);
         setReason('');
       }
