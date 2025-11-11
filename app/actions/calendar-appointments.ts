@@ -88,6 +88,21 @@ interface AppointmentPriceData {
   price: number;
   duration_minutes: number;
 }
+
+interface ConflictingAppointment {
+  id: string;
+  start_time: string;
+  end_time: string;
+  service_name: string;
+}
+
+/**
+ * Result type for conflict checking
+ */
+interface ConflictCheckResult {
+  hasConflict: boolean;
+  conflictingAppointment?: ConflictingAppointment;
+}
 // REPLACE the entire createCalendarAppointment function in app/actions/calendar-appointments.ts
 
 export async function createCalendarAppointment(
@@ -712,5 +727,278 @@ export async function deleteCalendarAppointment(
       success: false,
       error: 'An unexpected error occurred',
     };
+  }
+}
+
+/**
+ * Helper: Check if two time ranges overlap
+ */
+function timeRangesOverlap(
+  start1: string,
+  end1: string,
+  start2: string,
+  end2: string
+): boolean {
+  // Convert HH:MM to comparable format (add seconds if needed)
+  const formatTime = (time: string) => {
+    return time.length === 5 ? `${time}:00` : time;
+  };
+
+  const s1 = formatTime(start1);
+  const e1 = formatTime(end1);
+  const s2 = formatTime(start2);
+  const e2 = formatTime(end2);
+
+  // Times overlap if one starts before the other ends
+  return s1 < e2 && s2 < e1;
+}
+
+/**
+ * Helper: Check for appointment conflicts
+ */
+async function checkAppointmentConflicts(
+  teamMemberId: string,
+  bookingDate: string,
+  newStartTime: string,
+  newEndTime: string,
+  excludeAppointmentId?: string
+): Promise<ConflictCheckResult> {
+  try {
+    // Get all appointments for this team member on this date
+    let query = supabaseAdmin
+      .from('appointments')
+      .select(
+        `
+        id,
+        start_time,
+        end_time,
+        service_name,
+        booking_groups!inner(booking_date)
+      `
+      )
+      .eq('team_member_id', teamMemberId)
+      .eq('booking_groups.booking_date', bookingDate)
+      .neq('status', 'cancelled');
+
+    // Exclude the current appointment being moved/resized
+    if (excludeAppointmentId) {
+      query = query.neq('id', excludeAppointmentId);
+    }
+
+    const { data: existingAppointments, error } = await query;
+
+    if (error) {
+      console.error('Error checking conflicts:', error);
+      return { hasConflict: false }; // Fail open - allow the change
+    }
+
+    if (!existingAppointments || existingAppointments.length === 0) {
+      return { hasConflict: false };
+    }
+
+    // Check each existing appointment for overlap
+    for (const apt of existingAppointments) {
+      // Extract just HH:MM from the time strings
+      const aptStart = apt.start_time.substring(0, 5);
+      const aptEnd = apt.end_time.substring(0, 5);
+      const newStart = newStartTime.substring(0, 5);
+      const newEnd = newEndTime.substring(0, 5);
+
+      if (timeRangesOverlap(newStart, newEnd, aptStart, aptEnd)) {
+        return {
+          hasConflict: true,
+          conflictingAppointment: {
+            id: apt.id,
+            start_time: apt.start_time,
+            end_time: apt.end_time,
+            service_name: apt.service_name,
+          },
+        };
+      }
+    }
+
+    return { hasConflict: false };
+  } catch (error) {
+    console.error('Error in checkAppointmentConflicts:', error);
+    return { hasConflict: false }; // Fail open - allow the change
+  }
+}
+
+/**
+ * Resize appointment (change start time, end time, or both)
+ * Used for both top and bottom resize handles
+ */
+export async function resizeAppointment({
+  appointmentId,
+  bookingId,
+  newStartTime,
+  newEndTime,
+  newDuration,
+}: {
+  appointmentId: string;
+  bookingId: string;
+  newStartTime: string; // HH:MM format
+  newEndTime: string; // HH:MM format
+  newDuration: number;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireAdmin();
+
+    // 1. Get current appointment
+    const { data: appointment, error: fetchError } = await supabaseAdmin
+      .from('appointments')
+      .select('*, booking_groups!inner(booking_date, venue_id)')
+      .eq('id', appointmentId)
+      .single();
+
+    if (fetchError || !appointment) {
+      return { success: false, error: 'Appointment not found' };
+    }
+
+    // 2. Check for conflicts with other appointments
+    const conflictCheck = await checkAppointmentConflicts(
+      appointment.team_member_id,
+      appointment.booking_groups.booking_date,
+      newStartTime,
+      newEndTime,
+      appointmentId
+    );
+
+    if (conflictCheck.hasConflict) {
+      return {
+        success: false,
+        error: 'Time slot conflicts with another appointment',
+      };
+    }
+
+    // 3. Adjust price based on duration change
+    const pricePerMinute = appointment.price / appointment.duration_minutes;
+    const newPrice = Math.round(pricePerMinute * newDuration * 100) / 100;
+
+    // 4. Update appointment
+    const { error: updateError } = await supabaseAdmin
+      .from('appointments')
+      .update({
+        start_time: newStartTime,
+        end_time: newEndTime,
+        duration_minutes: newDuration,
+        price: newPrice,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', appointmentId);
+
+    if (updateError) {
+      console.error('Error updating appointment:', updateError);
+      return { success: false, error: 'Failed to update appointment' };
+    }
+
+    // 5. Recalculate booking group totals
+    await recalculateBookingTotals(bookingId);
+
+    revalidatePath('/admin/calendar');
+    return { success: true };
+  } catch (error) {
+    console.error('Error resizing appointment:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Move appointment (drag and drop)
+ * Duration and price remain the same, only start/end times change
+ */
+export async function moveAppointment({
+  appointmentId,
+
+  newStartTime,
+  newEndTime,
+}: {
+  appointmentId: string;
+  bookingId: string;
+  newStartTime: string; // HH:MM format
+  newEndTime: string; // HH:MM format
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireAdmin();
+
+    // 1. Get current appointment
+    const { data: appointment, error: fetchError } = await supabaseAdmin
+      .from('appointments')
+      .select('*, booking_groups!inner(booking_date, venue_id)')
+      .eq('id', appointmentId)
+      .single();
+
+    if (fetchError || !appointment) {
+      return { success: false, error: 'Appointment not found' };
+    }
+
+    // 2. Check for conflicts with other appointments
+    const conflictCheck = await checkAppointmentConflicts(
+      appointment.team_member_id,
+      appointment.booking_groups.booking_date,
+      newStartTime,
+      newEndTime,
+      appointmentId
+    );
+
+    if (conflictCheck.hasConflict) {
+      return {
+        success: false,
+        error: 'Time slot conflicts with another appointment',
+      };
+    }
+
+    // 3. Update appointment (duration and price stay the same!)
+    const { error: updateError } = await supabaseAdmin
+      .from('appointments')
+      .update({
+        start_time: newStartTime,
+        end_time: newEndTime,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', appointmentId);
+
+    if (updateError) {
+      console.error('Error moving appointment:', updateError);
+      return { success: false, error: 'Failed to move appointment' };
+    }
+
+    revalidatePath('/admin/calendar');
+    return { success: true };
+  } catch (error) {
+    console.error('Error moving appointment:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Helper function: Recalculate booking group totals
+ * Called after resizing appointments that may change price
+ */
+async function recalculateBookingTotals(bookingId: string): Promise<void> {
+  try {
+    const { data: allAppointments } = await supabaseAdmin
+      .from('appointments')
+      .select('price')
+      .eq('booking_group_id', bookingId)
+      .neq('status', 'cancelled');
+
+    if (allAppointments) {
+      const totalPrice = allAppointments.reduce(
+        (sum, a) => sum + Number(a.price),
+        0
+      );
+
+      await supabaseAdmin
+        .from('booking_groups')
+        .update({
+          total_price: totalPrice,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId);
+    }
+  } catch (error) {
+    console.error('Error recalculating booking totals:', error);
+    // Don't throw - this is a non-critical operation
   }
 }

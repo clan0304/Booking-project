@@ -59,6 +59,28 @@ function timeToMinutes(time: string): number {
 }
 
 /**
+ * Convert minutes since midnight to HH:MM format
+ */
+function minutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+/**
+ * Add minutes to a time string (HH:MM format)
+ */
+function addMinutesToTime(time: string, minutesToAdd: number): string {
+  const [hours, mins] = time.split(':').map(Number);
+  const totalMinutes = hours * 60 + mins + minutesToAdd;
+
+  // Cap at 23:59
+  const cappedMinutes = Math.max(0, Math.min(totalMinutes, 24 * 60 - 1));
+
+  return minutesToTime(cappedMinutes);
+}
+
+/**
  * Check if two appointments overlap in time
  */
 function appointmentsOverlap(
@@ -154,6 +176,22 @@ export function DayView({
     useState<AppointmentWithBooking | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
+  // NEW: Loading state for save operation
+  const [isSaving, setIsSaving] = useState(false);
+
+  // NEW: Interaction state for resize/drag
+  const [interactionState, setInteractionState] = useState<{
+    mode: 'resize-top' | 'resize-bottom' | 'drag';
+    appointmentId: string;
+    startY: number;
+    originalStartTime: string;
+    originalEndTime: string;
+    originalDuration: number;
+    currentStartTime: string;
+    currentEndTime: string;
+    currentDuration: number;
+  } | null>(null);
+
   // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
     const slots: string[] = [];
@@ -234,7 +272,7 @@ export function DayView({
     return grouped;
   }, [blockedTimes]);
 
-  // ✅ NEW: Calculate appointment layouts for ALL members (must be at component level)
+  // Calculate appointment layouts for ALL members (must be at component level)
   const allAppointmentLayouts = useMemo(() => {
     const layouts = new Map<string, Map<string, AppointmentLayout>>();
 
@@ -317,6 +355,233 @@ export function DayView({
     setSelectedAppointment(null);
     onRefresh();
   };
+
+  // ============================================
+  // NEW: INTERACTION HANDLERS
+  // ============================================
+
+  /**
+   * Handle resize from top (change start time)
+   */
+  const handleResizeTopStart = (appointmentId: string, startY: number) => {
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === appointmentId);
+
+    if (!appointment) return;
+
+    setInteractionState({
+      mode: 'resize-top',
+      appointmentId,
+      startY,
+      originalStartTime: appointment.start_time,
+      originalEndTime: appointment.end_time,
+      originalDuration: appointment.duration_minutes,
+      currentStartTime: appointment.start_time,
+      currentEndTime: appointment.end_time,
+      currentDuration: appointment.duration_minutes,
+    });
+  };
+
+  /**
+   * Handle resize from bottom (change end time)
+   */
+  const handleResizeBottomStart = (appointmentId: string, startY: number) => {
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === appointmentId);
+
+    if (!appointment) return;
+
+    setInteractionState({
+      mode: 'resize-bottom',
+      appointmentId,
+      startY,
+      originalStartTime: appointment.start_time,
+      originalEndTime: appointment.end_time,
+      originalDuration: appointment.duration_minutes,
+      currentStartTime: appointment.start_time,
+      currentEndTime: appointment.end_time,
+      currentDuration: appointment.duration_minutes,
+    });
+  };
+
+  /**
+   * Handle drag start (move appointment)
+   */
+  const handleDragStart = (appointmentId: string, startY: number) => {
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === appointmentId);
+
+    if (!appointment) return;
+
+    setInteractionState({
+      mode: 'drag',
+      appointmentId,
+      startY,
+      originalStartTime: appointment.start_time,
+      originalEndTime: appointment.end_time,
+      originalDuration: appointment.duration_minutes,
+      currentStartTime: appointment.start_time,
+      currentEndTime: appointment.end_time,
+      currentDuration: appointment.duration_minutes,
+    });
+  };
+
+  /**
+   * Handle interaction move (resize or drag)
+   */
+  const handleInteractionMove = (clientY: number) => {
+    if (!interactionState) return;
+
+    const deltaY = clientY - interactionState.startY;
+    const deltaMinutes = Math.round((deltaY / 20) * 15); // 20px = 15min
+    const snappedDelta = Math.round(deltaMinutes / 5) * 5; // Snap to 5min intervals
+
+    let newStartTime: string;
+    let newEndTime: string;
+    let newDuration: number;
+
+    switch (interactionState.mode) {
+      case 'resize-top':
+        // Change start time, keep end time fixed
+        newStartTime = addMinutesToTime(
+          interactionState.originalStartTime,
+          snappedDelta
+        );
+        newEndTime = interactionState.originalEndTime;
+
+        // Calculate new duration
+        const startMinutes = timeToMinutes(newStartTime);
+        const endMinutes = timeToMinutes(newEndTime);
+        newDuration = Math.max(5, endMinutes - startMinutes); // Min 5 min
+
+        // Adjust start time if duration would be too small
+        if (newDuration < 5) {
+          newStartTime = addMinutesToTime(newEndTime, -5);
+          newDuration = 5;
+        }
+        break;
+
+      case 'resize-bottom':
+        // Keep start time fixed, change end time
+        newStartTime = interactionState.originalStartTime;
+        newDuration = Math.max(
+          5,
+          interactionState.originalDuration + snappedDelta
+        );
+        newEndTime = addMinutesToTime(newStartTime, newDuration);
+        break;
+
+      case 'drag':
+        // Move both start and end time, keep duration same
+        newStartTime = addMinutesToTime(
+          interactionState.originalStartTime,
+          snappedDelta
+        );
+        newEndTime = addMinutesToTime(
+          interactionState.originalEndTime,
+          snappedDelta
+        );
+        newDuration = interactionState.originalDuration; // Duration unchanged!
+        break;
+
+      default:
+        return;
+    }
+
+    setInteractionState({
+      ...interactionState,
+      currentStartTime: newStartTime,
+      currentEndTime: newEndTime,
+      currentDuration: newDuration,
+    });
+  };
+
+  /**
+   * Handle interaction end (save changes)
+   */
+  const handleInteractionEnd = async () => {
+    if (!interactionState) return;
+
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === interactionState.appointmentId);
+
+    if (!appointment) {
+      setInteractionState(null);
+      return;
+    }
+
+    // Check if anything actually changed
+    const startChanged =
+      interactionState.currentStartTime !== interactionState.originalStartTime;
+    const endChanged =
+      interactionState.currentEndTime !== interactionState.originalEndTime;
+    const durationChanged =
+      interactionState.currentDuration !== interactionState.originalDuration;
+
+    if (!startChanged && !durationChanged && !endChanged) {
+      setInteractionState(null);
+      return;
+    }
+
+    // Store the values we need before clearing state
+    const appointmentId = interactionState.appointmentId;
+    const newStartTime = interactionState.currentStartTime;
+    const newEndTime = interactionState.currentEndTime;
+    const newDuration = interactionState.currentDuration;
+    const mode = interactionState.mode;
+
+    // Clear interaction state immediately (optimistic update - card already shows new times!)
+    setInteractionState(null);
+
+    // Show loading state
+    setIsSaving(true);
+
+    try {
+      // Import the server actions
+      const { resizeAppointment, moveAppointment } = await import(
+        '@/app/actions/calendar-appointments'
+      );
+
+      let result;
+
+      if (mode === 'drag') {
+        // Use move appointment action
+        result = await moveAppointment({
+          appointmentId,
+          bookingId: appointment.booking.id,
+          newStartTime,
+          newEndTime,
+        });
+      } else {
+        // Use resize appointment action
+        result = await resizeAppointment({
+          appointmentId,
+          bookingId: appointment.booking.id,
+          newStartTime,
+          newEndTime,
+          newDuration,
+        });
+      }
+
+      if (!result.success) {
+        // Only show error - let parent handle refresh if needed
+        alert(result.error || 'Failed to update appointment');
+      }
+      // ✅ NO onRefresh() call! The card already shows the updated time
+      // ✅ Server has saved it, we're done!
+    } catch (error) {
+      console.error('Error updating appointment:', error);
+      alert('An unexpected error occurred');
+    } finally {
+      // Hide loading state
+      setIsSaving(false);
+    }
+  };
+
   // Calculate dynamic column width based on number of team members
   const getColumnWidth = (memberCount: number): string => {
     if (memberCount === 1) return '100%';
@@ -364,7 +629,7 @@ export function DayView({
                       minWidth: useFixedWidth ? '200px' : 'auto',
                     }}
                   >
-                    {/* ✅ FIXED: Uniform layout with consistent sizing */}
+                    {/* Uniform layout with consistent sizing */}
                     <div className="flex flex-col items-center gap-3">
                       {/* Photo Container - Fixed Size */}
                       <div className="flex-shrink-0">
@@ -427,7 +692,7 @@ export function DayView({
                   const memberBlockedTimes =
                     blockedTimesByMember.get(member.id) || [];
 
-                  // ✅ NEW: Get pre-calculated layouts for this member
+                  // Get pre-calculated layouts for this member
                   const appointmentLayouts =
                     allAppointmentLayouts.get(member.id) || new Map();
 
@@ -522,9 +787,25 @@ export function DayView({
                       >
                         {/* Appointments */}
                         {appointments.map((appointment) => {
+                          const isInteracting =
+                            interactionState?.appointmentId === appointment.id;
+
+                          // Use interaction state values if actively interacting
+                          const displayStartTime = isInteracting
+                            ? interactionState.currentStartTime
+                            : appointment.start_time;
+
+                          const displayEndTime = isInteracting
+                            ? interactionState.currentEndTime
+                            : appointment.end_time;
+
+                          const displayDuration = isInteracting
+                            ? interactionState.currentDuration
+                            : appointment.duration_minutes;
+
                           const { top, height } = getStyle(
-                            appointment.start_time,
-                            appointment.end_time
+                            displayStartTime,
+                            displayEndTime
                           );
 
                           const layout = appointmentLayouts.get(
@@ -544,13 +825,26 @@ export function DayView({
                                 height: `${height * 0.99}px`,
                                 width: layout.width,
                                 left: layout.left,
-                                zIndex: layout.zIndex,
+                                zIndex: isInteracting ? 100 : layout.zIndex,
                               }}
                             >
                               <div className="h-full w-full group-hover:w-[98%] pointer-events-auto transition-all duration-200 hover:z-[100]">
                                 <AppointmentCard
-                                  appointment={appointment}
+                                  appointment={{
+                                    ...appointment,
+                                    start_time: displayStartTime,
+                                    end_time: displayEndTime,
+                                    duration_minutes: displayDuration,
+                                  }}
                                   booking={appointment.booking}
+                                  interactionMode={
+                                    isInteracting ? interactionState.mode : null
+                                  }
+                                  onResizeTopStart={handleResizeTopStart}
+                                  onResizeBottomStart={handleResizeBottomStart}
+                                  onDragStart={handleDragStart}
+                                  onInteractionMove={handleInteractionMove}
+                                  onInteractionEnd={handleInteractionEnd}
                                   onClick={() =>
                                     handleAppointmentClick(appointment)
                                   }
@@ -644,6 +938,27 @@ export function DayView({
           appointment={selectedAppointment}
           onSuccess={handleEditSuccess}
         />
+      )}
+
+      {/* Loading Overlay */}
+      {isSaving && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[999] flex items-center justify-center animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl p-8 flex flex-col items-center gap-4">
+            {/* Spinning loader */}
+            <div className="relative w-16 h-16">
+              <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-purple-600 rounded-full border-t-transparent animate-spin"></div>
+            </div>
+
+            {/* Loading text */}
+            <div className="text-center">
+              <p className="text-lg font-semibold text-gray-900">
+                Saving changes...
+              </p>
+              <p className="text-sm text-gray-500 mt-1">Please wait</p>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

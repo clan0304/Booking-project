@@ -11,6 +11,13 @@ interface AppointmentCardProps {
   booking: CalendarBooking;
   compact?: boolean;
   onClick?: () => void;
+  // NEW: Interaction mode props
+  interactionMode?: 'resize-top' | 'resize-bottom' | 'drag' | null;
+  onResizeTopStart?: (appointmentId: string, startY: number) => void;
+  onResizeBottomStart?: (appointmentId: string, startY: number) => void;
+  onDragStart?: (appointmentId: string, startY: number) => void;
+  onInteractionMove?: (clientY: number) => void;
+  onInteractionEnd?: () => void;
 }
 
 // Default color if no category color is available
@@ -21,14 +28,20 @@ export function AppointmentCard({
   booking,
   compact = false,
   onClick,
+  interactionMode = null,
+  onResizeTopStart,
+  onResizeBottomStart,
+  onDragStart,
+  onInteractionMove,
+  onInteractionEnd,
 }: AppointmentCardProps) {
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
-  const [arrowPosition, setArrowPosition] = useState(0); // ✅ NEW: Arrow Y position
-  const [showTooltip, setShowTooltip] = useState(false);
+  const [arrowPosition, setArrowPosition] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Use category color from appointment data, fallback to default
+  const isInteracting = interactionMode !== null;
   const backgroundColor = appointment.category_color || DEFAULT_COLOR;
 
   // Ensure component is mounted (for portal)
@@ -39,7 +52,7 @@ export function AppointmentCard({
 
   // Calculate tooltip position when hovering
   useEffect(() => {
-    if (showTooltip && cardRef.current) {
+    if (isHovered && cardRef.current && !isInteracting) {
       const rect = cardRef.current.getBoundingClientRect();
 
       // Calculate position to the right of the card
@@ -61,22 +74,19 @@ export function AppointmentCard({
         top = 20;
       }
 
-      // ✅ NEW: Calculate arrow position relative to tooltip top
-      // Arrow should point to the card's center
+      // Calculate arrow position relative to tooltip top
       const arrowTop = cardCenter - top;
 
       setTooltipPosition({ top, left });
-      setArrowPosition(arrowTop); // ✅ NEW: Set arrow position
+      setArrowPosition(arrowTop);
     }
-  }, [showTooltip]);
+  }, [isHovered, isInteracting]);
 
   // Format time to HH:mm (remove seconds)
   const formatTime = (time: string): string => {
-    // If time is already in HH:mm format, return as is
     if (time.length === 5 && time.includes(':')) {
       return time;
     }
-    // If time has seconds (HH:mm:ss), remove them
     return time.substring(0, 5);
   };
 
@@ -90,49 +100,116 @@ export function AppointmentCard({
 
   const teamMemberName = appointment.team_member
     ? `${appointment.team_member.first_name} ${appointment.team_member.last_name}`
-    : 'Unknown';
+    : 'Team Member';
 
-  // Tooltip content
-  const tooltipContent = showTooltip && mounted && (
+  // ============================================
+  // POINTER EVENT HANDLERS
+  // ============================================
+
+  const handleTopPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    onResizeTopStart?.(appointment.id, e.clientY);
+  };
+
+  const handleBottomPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    onResizeBottomStart?.(appointment.id, e.clientY);
+  };
+
+  const handleBodyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Only drag if clicking on the body, not the resize handles
+    if ((e.target as HTMLElement).classList.contains('resize-handle')) {
+      return;
+    }
+
+    e.stopPropagation();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    onDragStart?.(appointment.id, e.clientY);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isInteracting) {
+      e.preventDefault();
+      onInteractionMove?.(e.clientY);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.hasPointerCapture(e.pointerId)) {
+      target.releasePointerCapture(e.pointerId);
+    }
+    onInteractionEnd?.();
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.hasPointerCapture(e.pointerId)) {
+      target.releasePointerCapture(e.pointerId);
+    }
+    onInteractionEnd?.();
+  };
+
+  // ============================================
+  // TOOLTIP CONTENT
+  // ============================================
+
+  const tooltipContent = mounted && isHovered && !isInteracting && (
     <div
-      className="fixed w-80 z-[9999] pointer-events-none animate-in fade-in duration-200"
+      className="fixed z-[200] pointer-events-none"
       style={{
         top: `${tooltipPosition.top}px`,
         left: `${tooltipPosition.left}px`,
       }}
     >
-      <div className="bg-white rounded-lg shadow-2xl border border-gray-200 p-4 relative">
-        {/* Header */}
+      <div className="bg-white rounded-lg shadow-2xl border border-gray-200 w-80 p-4 pointer-events-auto animate-in fade-in duration-200">
+        {/* Client Section */}
         <div className="mb-3 pb-3 border-b border-gray-200">
-          <h3 className="font-semibold text-gray-900 text-sm mb-1">
-            Booking Details
-          </h3>
-          <div className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-            {appointment.status.charAt(0).toUpperCase() +
-              appointment.status.slice(1)}
-          </div>
-        </div>
-
-        {/* Client Information */}
-        <div className="mb-3">
-          <h4 className="text-xs font-semibold text-gray-700 mb-2">Client</h4>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 text-xs text-gray-600">
-              <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span className="truncate">{clientName}</span>
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0">
+              {booking.client_id ? (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white font-semibold">
+                  {clientName.substring(0, 2).toUpperCase()}
+                </div>
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center text-white font-semibold">
+                  WI
+                </div>
+              )}
             </div>
-            {booking.guest_email && (
-              <div className="flex items-center gap-2 text-xs text-gray-600">
-                <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                <span className="truncate">{booking.guest_email}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="font-semibold text-sm text-gray-900 truncate">
+                  {clientName}
+                </h3>
+                {!booking.client_id && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700">
+                    Walk-in
+                  </span>
+                )}
               </div>
-            )}
-            {booking.guest_phone && (
-              <div className="flex items-center gap-2 text-xs text-gray-600">
-                <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                <span>{booking.guest_phone}</span>
-              </div>
-            )}
+              {(booking.guest_email || booking.guest_phone) && (
+                <div className="space-y-0.5">
+                  {booking.guest_email && (
+                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                      <Mail className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                      <span className="truncate">{booking.guest_email}</span>
+                    </div>
+                  )}
+                  {booking.guest_phone && (
+                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                      <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                      <span>{booking.guest_phone}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -209,7 +286,7 @@ export function AppointmentCard({
           </div>
         )}
 
-        {/* ✅ UPDATED: Dynamic Arrow Position */}
+        {/* Arrow */}
         <div
           className="absolute left-0 w-0 h-0 -ml-2 border-t-8 border-t-transparent border-b-8 border-b-transparent border-r-8 border-r-white"
           style={{ top: `${arrowPosition}px` }}
@@ -218,22 +295,71 @@ export function AppointmentCard({
     </div>
   );
 
+  // ============================================
+  // RENDER
+  // ============================================
+
   return (
     <>
       {/* Main Appointment Card */}
       <div
         ref={cardRef}
         className="relative group h-full"
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
+        onMouseEnter={() => !isInteracting && setIsHovered(true)}
+        onMouseLeave={() => !isInteracting && setIsHovered(false)}
       >
+        {/* TOP RESIZE HANDLE */}
         <div
-          className="h-full rounded-md p-2 cursor-pointer transition-all duration-200 overflow-hidden group-hover:w-[97%]"
+          className={`
+            resize-handle
+            absolute top-0 left-0 right-0 h-3
+            cursor-ns-resize z-20
+            flex items-center justify-center
+            transition-colors touch-none
+            ${
+              isHovered && !isInteracting
+                ? 'bg-purple-600/20'
+                : 'bg-transparent'
+            }
+            ${interactionMode === 'resize-top' ? 'bg-purple-600/30' : ''}
+          `}
+          onPointerDown={handleTopPointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+        >
+          {isHovered && !isInteracting && (
+            <div className="flex gap-1">
+              <div className="w-1 h-1 rounded-full bg-purple-600" />
+              <div className="w-1 h-1 rounded-full bg-purple-600" />
+              <div className="w-1 h-1 rounded-full bg-purple-600" />
+            </div>
+          )}
+        </div>
+
+        {/* MAIN APPOINTMENT CARD BODY (DRAGGABLE) */}
+        <div
+          className={`
+            h-full rounded-md p-2 transition-all duration-200 overflow-hidden
+            ${
+              isInteracting
+                ? 'border-2 border-purple-600 shadow-lg cursor-grabbing'
+                : 'hover:shadow-md cursor-grab group-hover:w-[97%]'
+            }
+          `}
           style={{ backgroundColor }}
-          onClick={onClick}
+          onPointerDown={handleBodyPointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+          onClick={() => {
+            if (!isInteracting) {
+              onClick?.();
+            }
+          }}
         >
           {compact ? (
-            // Compact view for week view - Very tight spacing
+            // Compact view for week view
             <div className="flex flex-col text-white leading-tight">
               <p className="font-semibold text-[10px] mb-0.5 truncate">
                 {timeRange}
@@ -244,9 +370,9 @@ export function AppointmentCard({
               <p className="text-[10px] truncate">{appointment.service_name}</p>
             </div>
           ) : (
-            // Full view for day view - Optimized for space
+            // Full view for day view
             <div className="flex flex-col text-white leading-tight">
-              {/* Mobile: Stack everything - smaller text */}
+              {/* Mobile: Stack everything */}
               <div className="block md:hidden">
                 <p className="font-semibold text-[11px] mb-0.5 truncate">
                   {timeRange}
@@ -259,7 +385,7 @@ export function AppointmentCard({
                 </p>
               </div>
 
-              {/* Tablet/Desktop: Time and name on same row, service on next row */}
+              {/* Tablet/Desktop: Time and name on same row */}
               <div className="hidden md:flex md:flex-col">
                 <div className="flex items-center justify-between gap-1 mb-0.5">
                   <p className="font-semibold text-[11px] truncate">
@@ -275,7 +401,7 @@ export function AppointmentCard({
               </div>
 
               {/* Status badge if not confirmed */}
-              {appointment.status !== 'confirmed' && (
+              {!isInteracting && appointment.status !== 'confirmed' && (
                 <div className="mt-1">
                   <span className="inline-block px-1.5 py-0.5 text-[9px] font-medium rounded-full bg-white/30 truncate">
                     {appointment.status}
@@ -285,9 +411,49 @@ export function AppointmentCard({
             </div>
           )}
         </div>
+
+        {/* BOTTOM RESIZE HANDLE */}
+        <div
+          className={`
+            resize-handle
+            absolute bottom-0 left-0 right-0 h-3
+            cursor-ns-resize z-20
+            flex items-center justify-center
+            transition-colors touch-none
+            ${
+              isHovered && !isInteracting
+                ? 'bg-purple-600/20'
+                : 'bg-transparent'
+            }
+            ${interactionMode === 'resize-bottom' ? 'bg-purple-600/30' : ''}
+          `}
+          onPointerDown={handleBottomPointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+        >
+          {isHovered && !isInteracting && (
+            <div className="flex gap-1">
+              <div className="w-1 h-1 rounded-full bg-purple-600" />
+              <div className="w-1 h-1 rounded-full bg-purple-600" />
+              <div className="w-1 h-1 rounded-full bg-purple-600" />
+            </div>
+          )}
+        </div>
+
+        {/* Active interaction indicators */}
+        {interactionMode === 'resize-top' && (
+          <div className="absolute top-0 left-0 right-0 h-1 bg-purple-600 rounded-t-md" />
+        )}
+        {interactionMode === 'resize-bottom' && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-b-md" />
+        )}
+        {interactionMode === 'drag' && (
+          <div className="absolute inset-0 border-2 border-purple-600 rounded-md pointer-events-none" />
+        )}
       </div>
 
-      {/* Render tooltip via portal to escape all parent containers */}
+      {/* Render tooltip via portal */}
       {typeof window !== 'undefined' &&
         tooltipContent &&
         createPortal(tooltipContent, document.body)}
