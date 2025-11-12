@@ -89,20 +89,6 @@ interface AppointmentPriceData {
   duration_minutes: number;
 }
 
-interface ConflictingAppointment {
-  id: string;
-  start_time: string;
-  end_time: string;
-  service_name: string;
-}
-
-/**
- * Result type for conflict checking
- */
-interface ConflictCheckResult {
-  hasConflict: boolean;
-  conflictingAppointment?: ConflictingAppointment;
-}
 // REPLACE the entire createCalendarAppointment function in app/actions/calendar-appointments.ts
 
 export async function createCalendarAppointment(
@@ -731,100 +717,6 @@ export async function deleteCalendarAppointment(
 }
 
 /**
- * Helper: Check if two time ranges overlap
- */
-function timeRangesOverlap(
-  start1: string,
-  end1: string,
-  start2: string,
-  end2: string
-): boolean {
-  // Convert HH:MM to comparable format (add seconds if needed)
-  const formatTime = (time: string) => {
-    return time.length === 5 ? `${time}:00` : time;
-  };
-
-  const s1 = formatTime(start1);
-  const e1 = formatTime(end1);
-  const s2 = formatTime(start2);
-  const e2 = formatTime(end2);
-
-  // Times overlap if one starts before the other ends
-  return s1 < e2 && s2 < e1;
-}
-
-/**
- * Helper: Check for appointment conflicts
- */
-async function checkAppointmentConflicts(
-  teamMemberId: string,
-  bookingDate: string,
-  newStartTime: string,
-  newEndTime: string,
-  excludeAppointmentId?: string
-): Promise<ConflictCheckResult> {
-  try {
-    // Get all appointments for this team member on this date
-    let query = supabaseAdmin
-      .from('appointments')
-      .select(
-        `
-        id,
-        start_time,
-        end_time,
-        service_name,
-        booking_groups!inner(booking_date)
-      `
-      )
-      .eq('team_member_id', teamMemberId)
-      .eq('booking_groups.booking_date', bookingDate)
-      .neq('status', 'cancelled');
-
-    // Exclude the current appointment being moved/resized
-    if (excludeAppointmentId) {
-      query = query.neq('id', excludeAppointmentId);
-    }
-
-    const { data: existingAppointments, error } = await query;
-
-    if (error) {
-      console.error('Error checking conflicts:', error);
-      return { hasConflict: false }; // Fail open - allow the change
-    }
-
-    if (!existingAppointments || existingAppointments.length === 0) {
-      return { hasConflict: false };
-    }
-
-    // Check each existing appointment for overlap
-    for (const apt of existingAppointments) {
-      // Extract just HH:MM from the time strings
-      const aptStart = apt.start_time.substring(0, 5);
-      const aptEnd = apt.end_time.substring(0, 5);
-      const newStart = newStartTime.substring(0, 5);
-      const newEnd = newEndTime.substring(0, 5);
-
-      if (timeRangesOverlap(newStart, newEnd, aptStart, aptEnd)) {
-        return {
-          hasConflict: true,
-          conflictingAppointment: {
-            id: apt.id,
-            start_time: apt.start_time,
-            end_time: apt.end_time,
-            service_name: apt.service_name,
-          },
-        };
-      }
-    }
-
-    return { hasConflict: false };
-  } catch (error) {
-    console.error('Error in checkAppointmentConflicts:', error);
-    return { hasConflict: false }; // Fail open - allow the change
-  }
-}
-
-/**
  * Resize appointment (change start time, end time, or both)
  * Used for both top and bottom resize handles
  */
@@ -855,27 +747,14 @@ export async function resizeAppointment({
       return { success: false, error: 'Appointment not found' };
     }
 
-    // 2. Check for conflicts with other appointments
-    const conflictCheck = await checkAppointmentConflicts(
-      appointment.team_member_id,
-      appointment.booking_groups.booking_date,
-      newStartTime,
-      newEndTime,
-      appointmentId
-    );
+    // ✅ REMOVED: Conflict checking (lines 2-11 deleted)
+    // Overlapping appointments are now allowed!
 
-    if (conflictCheck.hasConflict) {
-      return {
-        success: false,
-        error: 'Time slot conflicts with another appointment',
-      };
-    }
-
-    // 3. Adjust price based on duration change
+    // 2. Adjust price based on duration change
     const pricePerMinute = appointment.price / appointment.duration_minutes;
     const newPrice = Math.round(pricePerMinute * newDuration * 100) / 100;
 
-    // 4. Update appointment
+    // 3. Update appointment
     const { error: updateError } = await supabaseAdmin
       .from('appointments')
       .update({
@@ -892,7 +771,7 @@ export async function resizeAppointment({
       return { success: false, error: 'Failed to update appointment' };
     }
 
-    // 5. Recalculate booking group totals
+    // 4. Recalculate booking group totals
     await recalculateBookingTotals(bookingId);
 
     revalidatePath('/admin/calendar');
@@ -932,23 +811,10 @@ export async function moveAppointment({
       return { success: false, error: 'Appointment not found' };
     }
 
-    // 2. Check for conflicts with other appointments
-    const conflictCheck = await checkAppointmentConflicts(
-      appointment.team_member_id,
-      appointment.booking_groups.booking_date,
-      newStartTime,
-      newEndTime,
-      appointmentId
-    );
+    // ✅ REMOVED: Conflict checking (lines 2-11 deleted)
+    // Overlapping appointments are now allowed!
 
-    if (conflictCheck.hasConflict) {
-      return {
-        success: false,
-        error: 'Time slot conflicts with another appointment',
-      };
-    }
-
-    // 3. Update appointment (duration and price stay the same!)
+    // 2. Update appointment (duration and price stay the same!)
     const { error: updateError } = await supabaseAdmin
       .from('appointments')
       .update({
@@ -970,7 +836,6 @@ export async function moveAppointment({
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
-
 /**
  * Helper function: Recalculate booking group totals
  * Called after resizing appointments that may change price

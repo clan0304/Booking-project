@@ -1,7 +1,7 @@
 // components/admin/calendar/day-view.tsx
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { TimeSlotActionsModal } from './time-slot-actions-modal';
 import { BlockedTimeModal } from './blocked-time-modal';
 import { AppointmentCard } from './appointment-card';
@@ -179,6 +179,14 @@ export function DayView({
   // NEW: Loading state for save operation
   const [isSaving, setIsSaving] = useState(false);
 
+  // NEW: Local state for updated appointments (persists after save without refresh)
+  const [updatedAppointments, setUpdatedAppointments] = useState<
+    Map<
+      string,
+      { start_time: string; end_time: string; duration_minutes: number }
+    >
+  >(new Map());
+
   // NEW: Interaction state for resize/drag
   const [interactionState, setInteractionState] = useState<{
     mode: 'resize-top' | 'resize-bottom' | 'drag';
@@ -191,6 +199,21 @@ export function DayView({
     currentEndTime: string;
     currentDuration: number;
   } | null>(null);
+
+  // NEW: Flag to prevent onClick after drag/resize
+  const [justInteracted, setJustInteracted] = useState(false);
+
+  // NEW: Current time for time indicator
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Update current time every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Generate time slots (8 AM to 8 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
@@ -215,7 +238,7 @@ export function DayView({
     return labels;
   }, []);
 
-  // Group appointments by team member
+  // Group appointments by team member with local updates applied
   const appointmentsByMember = useMemo((): AppointmentsByMember[] => {
     const grouped = new Map<
       string,
@@ -237,10 +260,22 @@ export function DayView({
           });
         }
 
-        grouped.get(memberId)!.appointments.push({
-          ...appointment,
-          booking,
-        });
+        // Apply local updates if they exist
+        const localUpdate = updatedAppointments.get(appointment.id);
+        const finalAppointment: AppointmentWithBooking = localUpdate
+          ? {
+              ...appointment,
+              start_time: localUpdate.start_time,
+              end_time: localUpdate.end_time,
+              duration_minutes: localUpdate.duration_minutes,
+              booking,
+            }
+          : {
+              ...appointment,
+              booking,
+            };
+
+        grouped.get(memberId)!.appointments.push(finalAppointment);
       });
     });
 
@@ -255,7 +290,7 @@ export function DayView({
     });
 
     return Array.from(grouped.values());
-  }, [bookings, assignedTeamMembers]);
+  }, [bookings, assignedTeamMembers, updatedAppointments]);
 
   // Group blocked times by team member
   const blockedTimesByMember = useMemo(() => {
@@ -346,6 +381,9 @@ export function DayView({
   };
 
   const handleAppointmentClick = (appointment: AppointmentWithBooking) => {
+    // Don't open modal if we just finished dragging/resizing
+    if (justInteracted) return;
+
     setSelectedAppointment(appointment);
     setIsEditModalOpen(true);
   };
@@ -355,6 +393,79 @@ export function DayView({
     setSelectedAppointment(null);
     onRefresh();
   };
+
+  // ============================================
+  // CURRENT TIME INDICATOR HELPERS
+  // ============================================
+
+  /**
+   * Check if current time indicator should be shown
+   * Only show if viewing today
+   */
+  const shouldShowCurrentTime = useMemo(() => {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(
+      today.getMonth() + 1
+    ).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return currentDate === todayStr;
+  }, [currentDate]);
+
+  /**
+   * Calculate position of current time indicator
+   */
+  const getCurrentTimePosition = useMemo(() => {
+    if (!shouldShowCurrentTime) return null;
+
+    // Get local time
+    const hours = currentTime.getHours();
+    const minutes = currentTime.getMinutes();
+    const totalMinutes = hours * 60 + minutes;
+
+    // Calculate top position (20px per 15min slot)
+    const top = (totalMinutes / 15) * 20;
+
+    return { top, time: `${hours}:${String(minutes).padStart(2, '0')}` };
+  }, [currentTime, shouldShowCurrentTime]);
+
+  /**
+   * Format current time for display (12-hour format)
+   */
+  const formatCurrentTime = (time: string): string => {
+    const [hour, min] = time.split(':');
+    const hourNum = parseInt(hour);
+    const period = hourNum >= 12 ? 'pm' : 'am';
+    const displayHour =
+      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+    return `${displayHour}:${min}${period}`;
+  };
+
+  // Auto-scroll to current time when viewing today (MOVED AFTER useMemo declarations)
+  useEffect(() => {
+    if (shouldShowCurrentTime && getCurrentTimePosition) {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        // Scroll window to show current time indicator
+        const indicatorPosition = getCurrentTimePosition.top;
+
+        // Get the calendar element's offset from top of page
+        const calendarElement = document.querySelector(
+          '.bg-white.rounded-lg.border'
+        );
+        if (calendarElement) {
+          const calendarTop =
+            calendarElement.getBoundingClientRect().top + window.scrollY;
+          const targetScroll =
+            calendarTop + indicatorPosition - window.innerHeight / 2 + 200;
+
+          // Smooth scroll to show the current time indicator
+          window.scrollTo({
+            top: Math.max(0, targetScroll),
+            behavior: 'smooth',
+          });
+        }
+      }, 100);
+    }
+  }, [shouldShowCurrentTime, getCurrentTimePosition, currentDate]); // Fixed dependencies
 
   // ============================================
   // NEW: INTERACTION HANDLERS
@@ -534,8 +645,23 @@ export function DayView({
     const newDuration = interactionState.currentDuration;
     const mode = interactionState.mode;
 
-    // Clear interaction state immediately (optimistic update - card already shows new times!)
+    // Clear interaction state immediately
     setInteractionState(null);
+
+    // Set flag to prevent onClick from firing
+    setJustInteracted(true);
+    setTimeout(() => setJustInteracted(false), 100); // Clear after 100ms
+
+    // Update local state immediately (optimistic update that persists!)
+    setUpdatedAppointments((prev) => {
+      const updated = new Map(prev);
+      updated.set(appointmentId, {
+        start_time: newStartTime,
+        end_time: newEndTime,
+        duration_minutes: newDuration,
+      });
+      return updated;
+    });
 
     // Show loading state
     setIsSaving(true);
@@ -568,13 +694,23 @@ export function DayView({
       }
 
       if (!result.success) {
-        // Only show error - let parent handle refresh if needed
+        // Error: revert the local update
+        setUpdatedAppointments((prev) => {
+          const updated = new Map(prev);
+          updated.delete(appointmentId);
+          return updated;
+        });
         alert(result.error || 'Failed to update appointment');
       }
-      // ✅ NO onRefresh() call! The card already shows the updated time
-      // ✅ Server has saved it, we're done!
+      // ✅ Success: local state already updated, no refresh needed!
     } catch (error) {
       console.error('Error updating appointment:', error);
+      // Error: revert the local update
+      setUpdatedAppointments((prev) => {
+        const updated = new Map(prev);
+        updated.delete(appointmentId);
+        return updated;
+      });
       alert('An unexpected error occurred');
     } finally {
       // Hide loading state
@@ -785,6 +921,39 @@ export function DayView({
                         className="absolute inset-0 pointer-events-none"
                         style={{ height: `${timeSlots.length * 20}px` }}
                       >
+                        {/* Current Time Indicator (only on first column) */}
+                        {shouldShowCurrentTime &&
+                          getCurrentTimePosition &&
+                          member.id === appointmentsByMember[0]?.member.id && (
+                            <>
+                              {/* Time Badge - positioned in left margin */}
+                              <div
+                                className="absolute z-50"
+                                style={{
+                                  top: `${getCurrentTimePosition.top}px`,
+                                  left: '-64px', // Position in the time labels column
+                                  transform: 'translateY(-50%)',
+                                }}
+                              >
+                                <div className="bg-white text-red-600 text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm">
+                                  {formatCurrentTime(
+                                    getCurrentTimePosition.time
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                        {/* Red Line across all columns */}
+                        {shouldShowCurrentTime && getCurrentTimePosition && (
+                          <div
+                            className="absolute left-0 right-0 h-0.5 bg-red-600 z-50 pointer-events-none"
+                            style={{
+                              top: `${getCurrentTimePosition.top}px`,
+                            }}
+                          />
+                        )}
+
                         {/* Appointments */}
                         {appointments.map((appointment) => {
                           const isInteracting =
