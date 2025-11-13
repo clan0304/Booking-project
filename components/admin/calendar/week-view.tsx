@@ -21,6 +21,8 @@ import type {
 } from '@/types/calendar';
 import { EditAppointmentModal } from './appointment/edit-appointment-modal';
 import Image from 'next/image';
+import { getBookingByAppointmentId } from '@/app/actions/calendar-appointments';
+import type { BookingGroupWithAppointments } from '@/types/calendar';
 
 interface WeekViewProps {
   weekStart: string;
@@ -68,10 +70,12 @@ export function WeekView({
   } | null>(null);
   const [selectedBlockedTime, setSelectedBlockedTime] =
     useState<BlockedTime | null>(null);
-  // ✅ ADD THESE TWO LINES after the existing state declarations
-  const [selectedAppointment, setSelectedAppointment] =
-    useState<AppointmentWithBooking | null>(null);
+
+  // ✅ UPDATED: Changed from selectedAppointment to selectedBooking
+  const [selectedBooking, setSelectedBooking] =
+    useState<BookingGroupWithAppointments | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isLoadingBooking, setIsLoadingBooking] = useState(false);
 
   // Generate time slots (12 AM to 11:45 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
@@ -232,17 +236,39 @@ export function WeekView({
     return memberAppointments.get(date) || [];
   };
 
-  // ✅ ADD THESE TWO FUNCTIONS after handleBlockedTimeClick
-  const handleAppointmentClick = (appointment: AppointmentWithBooking) => {
-    setSelectedAppointment(appointment);
+  // ✅ UPDATED: Async function that fetches full booking
+  const handleAppointmentClick = async (
+    appointment: AppointmentWithBooking
+  ) => {
+    setIsLoadingBooking(true);
     setIsEditModalOpen(true);
+
+    try {
+      const result = await getBookingByAppointmentId(appointment.id);
+
+      if (result.success && result.data) {
+        setSelectedBooking(result.data);
+      } else {
+        console.error('Failed to load booking:', result.error);
+        setIsEditModalOpen(false);
+        alert('Failed to load booking details. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error loading booking:', error);
+      setIsEditModalOpen(false);
+      alert('An error occurred while loading booking details.');
+    } finally {
+      setIsLoadingBooking(false);
+    }
   };
 
+  // ✅ UPDATED: Clears selectedBooking
   const handleEditSuccess = () => {
     setIsEditModalOpen(false);
-    setSelectedAppointment(null);
+    setSelectedBooking(null);
     onRefresh();
   };
+
   return (
     <>
       <div className="space-y-4">
@@ -644,13 +670,29 @@ export function WeekView({
           onSuccess={onRefresh}
         />
       )}
-      {selectedAppointment && (
-        <EditAppointmentModal
-          isOpen={isEditModalOpen}
-          onClose={() => setIsEditModalOpen(false)}
-          appointment={selectedAppointment}
-          onSuccess={handleEditSuccess}
-        />
+
+      {/* ✅ UPDATED: Modal with loading state and booking prop */}
+      {isEditModalOpen && (
+        <>
+          {isLoadingBooking ? (
+            <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center">
+              <div className="bg-white rounded-lg p-8">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+                <p className="mt-4 text-gray-600">Loading booking...</p>
+              </div>
+            </div>
+          ) : selectedBooking ? (
+            <EditAppointmentModal
+              isOpen={isEditModalOpen}
+              onClose={() => {
+                setIsEditModalOpen(false);
+                setSelectedBooking(null);
+              }}
+              booking={selectedBooking}
+              onSuccess={handleEditSuccess}
+            />
+          ) : null}
+        </>
       )}
     </>
   );
