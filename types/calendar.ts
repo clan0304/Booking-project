@@ -180,3 +180,63 @@ export interface BlockedTimesByMemberAndDate {
     [date: string]: BlockedTime[];
   };
 }
+
+export interface BookingGroupWithAppointments {
+  id: string;
+  venue_id: string;
+  booking_date: string; // YYYY-MM-DD
+  booking_source: 'online' | 'admin' | 'walk_in' | 'phone';
+
+  // Client info
+  client_id: string | null;
+  guest_first_name: string | null;
+  guest_last_name: string | null;
+  guest_email: string | null;
+  guest_phone: string | null;
+
+  // Booking details
+  total_appointments: number;
+  total_price: number;
+  status: 'confirmed' | 'cancelled' | 'completed' | 'no_show';
+  notes: string | null;
+  internal_notes: string | null;
+
+  // Timestamps
+  created_at: string;
+  updated_at: string;
+
+  // Relations
+  client?: {
+    id: string;
+    first_name: string;
+    last_name: string | null;
+    email: string;
+    phone_number: string | null;
+    photo_url: string | null;
+  } | null;
+
+  appointments: AppointmentInBooking[];
+}
+
+export interface AppointmentInBooking {
+  id: string;
+  booking_group_id: string;
+  service_id: string;
+  service_name: string;
+  team_member_id: string;
+  start_time: string; // HH:MM:SS
+  end_time: string; // HH:MM:SS
+  duration_minutes: number;
+  price: number;
+  status: 'confirmed' | 'cancelled' | 'completed' | 'no_show';
+  notes: string | null;
+  created_at: string;
+
+  // Relations
+  team_member?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    photo_url: string | null;
+  } | null;
+}

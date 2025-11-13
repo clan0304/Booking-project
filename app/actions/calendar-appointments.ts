@@ -2,9 +2,11 @@
 'use server';
 
 import { requireAdmin } from '@/lib/auth';
+import { requireStaff } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { calculateAppointmentTimes } from '@/lib/booking-helpers';
+import { BookingGroupWithAppointments } from '@/types/calendar';
 
 interface CreateCalendarAppointmentData {
   venueId: string;
@@ -865,5 +867,230 @@ async function recalculateBookingTotals(bookingId: string): Promise<void> {
   } catch (error) {
     console.error('Error recalculating booking totals:', error);
     // Don't throw - this is a non-critical operation
+  }
+}
+
+/**
+ * Get full booking group by appointment ID
+ * Used for edit modal to load entire booking
+ */
+export async function getBookingByAppointmentId(
+  appointmentId: string
+): Promise<{
+  success: boolean;
+  data?: BookingGroupWithAppointments;
+  error?: string;
+}> {
+  try {
+    await requireStaff();
+
+    // First get the appointment to find the booking_group_id
+    const { data: appointment, error: appointmentError } = await supabaseAdmin
+      .from('appointments')
+      .select('booking_group_id')
+      .eq('id', appointmentId)
+      .single();
+
+    if (appointmentError || !appointment) {
+      return { success: false, error: 'Appointment not found' };
+    }
+
+    // Now fetch the full booking group with all appointments
+    const { data: booking, error: bookingError } = await supabaseAdmin
+      .from('booking_groups')
+      .select(
+        `
+        id,
+        venue_id,
+        booking_date,
+        booking_source,
+        client_id,
+        guest_first_name,
+        guest_last_name,
+        guest_email,
+        guest_phone,
+        total_appointments,
+        total_price,
+        status,
+        notes,
+        internal_notes,
+        created_at,
+        updated_at,
+        client:users!booking_groups_client_id_fkey (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone_number,
+          photo_url
+        ),
+        appointments (
+          id,
+          booking_group_id,
+          service_id,
+          service_name,
+          team_member_id,
+          start_time,
+          end_time,
+          duration_minutes,
+          price,
+          status,
+          notes,
+          created_at,
+          team_member:users!appointments_team_member_id_fkey (
+            id,
+            first_name,
+            last_name,
+            photo_url
+          )
+        )
+      `
+      )
+      .eq('id', appointment.booking_group_id)
+      .single();
+
+    if (bookingError || !booking) {
+      return { success: false, error: 'Booking not found' };
+    }
+
+    return {
+      success: true,
+      data: booking as unknown as BookingGroupWithAppointments,
+    };
+  } catch (error) {
+    console.error('Error in getBookingByAppointmentId:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Add a new appointment to an existing booking group
+ * Used in Edit Booking modal when clicking "Add service"
+ */
+export async function addAppointmentToBooking(data: {
+  bookingId: string;
+  serviceId: string;
+  serviceName: string;
+  teamMemberId: string;
+  startTime: string; // HH:MM
+  duration: number;
+  price: number;
+}): Promise<{
+  success: boolean;
+  appointmentId?: string;
+  error?: string;
+}> {
+  try {
+    await requireStaff();
+
+    // =====================================================
+    // 1. GET BOOKING GROUP INFO
+    // =====================================================
+
+    const { data: booking, error: bookingError } = await supabaseAdmin
+      .from('booking_groups')
+      .select('id, venue_id, booking_date')
+      .eq('id', data.bookingId)
+      .single();
+
+    if (bookingError || !booking) {
+      return { success: false, error: 'Booking not found' };
+    }
+
+    // =====================================================
+    // 2. CALCULATE END TIME
+    // =====================================================
+
+    const [startHours, startMinutes] = data.startTime.split(':').map(Number);
+    const totalMinutes = startHours * 60 + startMinutes + data.duration;
+    const endHours = Math.floor(totalMinutes / 60);
+    const endMinutes = totalMinutes % 60;
+    const endTime = `${String(endHours).padStart(2, '0')}:${String(
+      endMinutes
+    ).padStart(2, '0')}`;
+
+    // =====================================================
+    // 3. CREATE NEW APPOINTMENT
+    // =====================================================
+
+    const { data: newAppointment, error: appointmentError } =
+      await supabaseAdmin
+        .from('appointments')
+        .insert({
+          booking_group_id: data.bookingId,
+          service_id: data.serviceId,
+          service_name: data.serviceName,
+          team_member_id: data.teamMemberId,
+          start_time: data.startTime + ':00', // Add seconds
+          end_time: endTime + ':00',
+          duration_minutes: data.duration,
+          price: data.price,
+          status: 'confirmed',
+        })
+        .select('id')
+        .single();
+
+    if (appointmentError || !newAppointment) {
+      console.error('Error creating appointment:', appointmentError);
+      return { success: false, error: 'Failed to create appointment' };
+    }
+
+    // =====================================================
+    // 4. RECALCULATE BOOKING TOTALS
+    // =====================================================
+
+    const { data: allAppointments, error: appointmentsError } =
+      await supabaseAdmin
+        .from('appointments')
+        .select('price, duration_minutes')
+        .eq('booking_group_id', data.bookingId);
+
+    if (appointmentsError || !allAppointments) {
+      return {
+        success: false,
+        error: 'Failed to recalculate booking totals',
+      };
+    }
+
+    const totalPrice = allAppointments.reduce(
+      (sum, appt) => sum + (appt.price || 0),
+      0
+    );
+    const totalAppointments = allAppointments.length;
+
+    // =====================================================
+    // 5. UPDATE BOOKING GROUP TOTALS
+    // =====================================================
+
+    const { error: updateError } = await supabaseAdmin
+      .from('booking_groups')
+      .update({
+        total_price: totalPrice,
+        total_appointments: totalAppointments,
+      })
+      .eq('id', data.bookingId);
+
+    if (updateError) {
+      console.error('Error updating booking totals:', updateError);
+      return { success: false, error: 'Failed to update booking totals' };
+    }
+
+    // =====================================================
+    // 6. SUCCESS - REVALIDATE & RETURN
+    // =====================================================
+
+    revalidatePath('/admin/calendar');
+    revalidatePath('/admin/bookings');
+
+    return {
+      success: true,
+      appointmentId: newAppointment.id,
+    };
+  } catch (error) {
+    console.error('Error in addAppointmentToBooking:', error);
+    return {
+      success: false,
+      error: 'An unexpected error occurred',
+    };
   }
 }

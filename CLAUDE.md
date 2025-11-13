@@ -1887,533 +1887,495 @@ This will serve as an excellent reference for you and any future developers work
   - [x] Installation instructions
   - [x] Breaking changes documented
 
-### Phase 5: Booking System & Admin Calendar ✅ (IN PROGRESS)
-
-- [x] **Database Schema**
-
-  - [x] Booking groups table (venue, client, guest info, totals, status)
-  - [x] Appointments table (service, team member, time slots, pricing)
-  - [x] Foreign key relationships (booking_groups ← appointments)
-  - [x] Status enums (confirmed, cancelled, completed, no_show)
-  - [x] Booking source tracking (online, admin, walk_in, phone)
-
-- [x] **Public Booking Flow - Frontend**
-
-  - [x] Service selection step
-  - [x] Team member selection step
-  - [x] Date & time selection step (calendar + time slots)
-  - [x] Guest information step
-  - [x] Booking summary/review step
-  - [x] Booking confirmation step
-  - [x] Progress indicator (step tracker)
-  - [x] Back navigation between steps
-
-- [x] **Availability System** ✅
-
-  - [x] API endpoint: `/api/public/bookings/availability`
-  - [x] Venue closed days check
-  - [x] Team member shift check (from shifts table)
-  - [x] Existing appointments check (conflict detection)
-  - [x] Available time slot generation (30-min intervals)
-  - [x] Venue-specific filtering
-  - [x] Real-time availability updates
-  - [x] Booked slot exclusion
-
-- [x] **Calendar Component** ✅
-
-  - [x] Month view with navigation (prev/next)
-  - [x] Weekday headers (Sun-Mon-Sat)
-  - [x] Date selection with visual feedback
-  - [x] Past dates disabled
-  - [x] "Today" indicator
-  - [x] Selected date highlighting
-  - [x] Timezone-safe date handling (Melbourne UTC+10/+11)
-
-- [x] **Admin Calendar View** ✅
-
-  - [x] **Day View - Horizontal Layout:**
-    - [x] Fresha-style column layout (team members side-by-side)
-    - [x] Profile photos at top of each column
-    - [x] Dynamic column widths (1-5 optimized, 6+ scrollable)
-    - [x] Clickable unavailable slots (light gray areas)
-    - [x] Shift availability visualization (4 states)
-    - [x] Hover tooltips for appointment details
-    - [x] 20px time slot grid (15-min intervals)
-    - [x] Perfect appointment positioning alignment
-  - [x] **Week View - Grid Layout:**
-    - [x] Team members as rows, days as columns
-    - [x] Clickable unavailable slots
-    - [x] Same availability logic as day view
-    - [x] Hover tooltips for appointments
-  - [x] **Calendar Components:**
-    - [x] CalendarClient (main container with state management)
-    - [x] CalendarFilters (view/date navigation, venue filter)
-    - [x] DayView (horizontal timeline with columns)
-    - [x] WeekView (7-day grid layout)
-    - [x] AppointmentCard (hover tooltip with booking details)
-    - [x] BlockedTimeModal (mark unavailable time)
-    - [x] TimeSlotActionsModal (choose action for empty slot)
-
-- [x] **Appointment Creation (Admin)** ✅ **NEW**
-
-  - [x] **Fresha-Style Right-Side Modal:**
-    - [x] Slides in from right (calendar stays visible)
-    - [x] 3-step wizard flow (Service → Client → Details)
-    - [x] Progress indicator (visual step tracking)
-    - [x] Back navigation between steps
-    - [x] Full-height panel (max-w-2xl)
-    - [x] Smooth transitions and animations
-  - [x] **Step 1: Service Selection**
-    - [x] Search services by name
-    - [x] Services grouped by category
-    - [x] Category headers with service count badges
-    - [x] Color-coded category bars
-    - [x] Service cards with duration and price
-    - [x] No variant support (clean service selection)
-  - [x] **Step 2: Client Selection**
-    - [x] Search clients (debounced 300ms)
-    - [x] Recent clients list (last 10 bookings)
-    - [x] Add new client button (opens AddClientModal)
-    - [x] Walk-in quick selection
-    - [x] Client photos with gradient fallback
-    - [x] Alert note indicators
-    - [x] Email/phone display
-  - [x] **Step 3: Appointment Details**
-    - [x] Appointment summary card (all info preview)
-    - [x] Start time selector (dropdown, 15-min intervals)
-    - [x] Manual duration override (optional)
-    - [x] Manual price override (optional)
-    - [x] Booking notes (client-visible)
-    - [x] Internal notes (staff-only)
-    - [x] Total price and duration display
-  - [x] **Integration:**
-    - [x] Reuses AddClientModal (no code duplication)
-    - [x] Uses getAvailableServices (same as booking flow)
-    - [x] Integrates with TimeSlotActionsModal
-    - [x] Creates appointments via createCalendarAppointment
-    - [x] Refreshes calendar on success
-
-- [x] **Booking Creation** ✅
-
-  - [x] API endpoint: `/api/public/bookings/create`
-  - [x] Request validation (venue, guest info, appointments)
-  - [x] Availability check for all appointments
-  - [x] Double-booking prevention (RPC: is_time_slot_available)
-  - [x] Guest information handling
-  - [x] Client ID association for authenticated users
-  - [x] Transaction rollback on appointment creation failure
-  - [x] Booking group creation with totals calculation
-  - [x] Multiple appointments per booking
-  - [x] Status tracking (confirmed/cancelled/completed/no_show)
-  - [x] Booking confirmation response
+🚀 Development Roadmap
+Phase 5: Booking System & Admin Calendar ✅ (COMPLETED)
+
+Database Schema
+
+Booking groups table (venue, client, guest info, totals, status)
+Appointments table (service, team member, time slots, pricing)
+Foreign key relationships (booking_groups ← appointments)
+Status enums (confirmed, cancelled, completed, no_show)
+Booking source tracking (online, admin, walk_in, phone)
+
+Admin Calendar View ✅
+
+Day View - Horizontal Layout:
+
+Fresha-style column layout (team members side-by-side)
+Profile photos at top of each column
+Dynamic column widths (1-5 optimized, 6+ scrollable)
+Clickable unavailable slots (light gray areas)
+Shift availability visualization (4 states)
+Hover tooltips for appointment details
+20px time slot grid (15-min intervals)
+Perfect appointment positioning alignment
 
-- [ ] **Email Notifications** (TODO)
+Week View - Grid Layout:
+
+Team members as rows, days as columns
+Clickable unavailable slots
+Same availability logic as day view
+Hover tooltips for appointments
 
-  - [ ] Booking confirmation emails
-  - [ ] Reminder emails (24h before)
-  - [ ] Cancellation notifications
+Calendar Components:
 
-- [ ] **Admin Booking Management** (TODO)
+CalendarClient (main container with state management)
+CalendarFilters (view/date navigation, venue filter)
+DayView (horizontal timeline with columns)
+WeekView (7-day grid layout)
+AppointmentCard (hover tooltip with booking details)
+BlockedTimeModal (mark unavailable time)
+TimeSlotActionsModal (choose action for empty slot)
 
-  - [ ] Edit existing appointments
-  - [ ] Cancel/reschedule bookings
-  - [ ] Mark as completed/no-show
-  - [ ] Update pricing and duration
-  - [ ] Add services to existing booking
+Appointment Creation (Admin) ✅
 
-- [ ] **Payment Integration** (TODO)
-  - [ ] Stripe integration
-  - [ ] Payment processing
-  - [ ] Deposit handling
-  - [ ] Refund management
+Fresha-Style Right-Side Modal:
 
----
+Slides in from right (calendar stays visible)
+3-step wizard flow (Service → Client → Details)
+Progress indicator (visual step tracking)
+Back navigation between steps
+Full-height panel (max-w-2xl)
+Smooth transitions and animations
 
-## 📝 Recent Updates
+Step 1: Service Selection
 
-**November 2025:**
+Search services by name
+Services grouped by category
+Category headers with service count badges
+Color-coded category bars
+Service cards with duration and price
+
+Step 2: Client Selection
+
+Search clients (debounced 300ms)
+Recent clients list (last 10 bookings)
+Add new client button (opens AddClientModal)
+Walk-in quick selection
+Client photos with gradient fallback
+Alert note indicators
+Email/phone display
+
+Step 3: Appointment Details
 
-- ✅ **Completed Service Groups Migration** 🎉
+Appointment summary card (all info preview)
+Start time selector (dropdown, 15-min intervals)
+Manual duration override (optional)
+Manual price override (optional)
+Booking notes (client-visible)
+Internal notes (staff-only)
+Total price and duration display
 
-  - Removed parent-child service relationships
-  - Eliminated variant_id from appointments
-  - Created pure UI-layer Service Groups
-  - Services are now fully independent
-  - Migrated all frontend components
-  - Updated TypeScript types throughout
+Integration:
 
-- ✅ **Completed Calendar Appointment Creation** 🎉
+Reuses AddClientModal (no code duplication)
+Uses getAvailableServices (same as booking flow)
+Integrates with TimeSlotActionsModal
+Creates appointments via createCalendarAppointment
+Refreshes calendar on success
 
-  - Built Fresha-style right-side modal
-  - Implemented 3-step wizard flow (Service → Client → Details)
-  - Added service search and category filtering
-  - Client search with recent clients list
-  - Reused AddClientModal (zero code duplication)
-  - Walk-in quick selection
-  - Manual price/duration overrides
-  - Time slot adjustment in details step
-  - Full integration with calendar refresh
+Appointment Editing (Admin) ✅ NEW
 
-- ✅ **Admin Calendar Improvements**
-  - Hover tooltips for appointment details (replaced click modal)
-  - Fixed 20px positioning alignment
-  - Updated TypeScript interfaces for consistency
-  - Improved appointment card UX
-  - Seamless integration with new appointment modal
+Fresha-Style Edit Modal:
 
-**October 2025:**
+Slides in from right (same as create modal)
+Shows all appointment details
+Clean, modern design matching Fresha UI
+Loading states for service/team member data
+Error handling with retry functionality
 
-- [Previous updates remain the same]
+Service & Team Member Selection:
 
----
+Service picker with full-screen overlay
+Services grouped by category with colored borders
+Team member dropdown with photos
+Heart icon indicator for favorite/assigned members
+Smart service availability filtering
 
-## 🔮 Lessons Learned
+Price & Duration Management:
 
-### Service Groups vs Variants Architecture
+Service price display with AUD prefix
+Discount system (shows "Decrease A$ X.XX" when applicable)
+Manual price override capability
+Manual duration override capability
+Visual indicators for custom pricing
 
-**Old Architecture (Variants):**
+Time Controls:
 
-- Parent-child relationships between services
-- `parent_service_id` foreign key on services table
-- `variant_id` on appointments table
-- Complex querying and pricing calculations
-- Tight coupling between related services
+Start time dropdown (15-min intervals)
+Duration selector (15-240 min in 15-min steps)
+Time format display (12-hour with am/pm)
 
-**New Architecture (Service Groups):**
+Smart Value Preservation:
+
+Initial Load: Shows stored appointment values exactly
+Team Member Change: Updates to new team member's rates
+Manual Override: Allows custom price/duration anytime
+Price snapshots preserved from booking time
 
-- All services are independent entities
-- Service Groups are pure UI presentation
-- Groups don't affect database operations
-- Services can belong to multiple groups
-- Simple, flexible, maintainable
+Total Display:
 
-**Migration Benefits:**
-
-- 50% reduction in code complexity
-- Eliminated foreign key constraints
-- Simplified appointment creation
-- Better service reusability
-- Easier to understand and maintain
-
-**Key Principle:**
-
-> "Use parent-child relationships only when entities are truly dependent. For UI organization (like grouping), use junction tables that don't affect core operations."
-
-### Right-Side Modal Pattern (Fresha-Style)
-
-**Problem with Center Modals:**
-
-- Blocks entire screen view
-- Context loss (can't see calendar behind it)
-- Jarring full-screen transition
-- Harder to reference calendar while booking
-
-**Solution: Right-Side Slide-In:**
-
-```typescript
-// Position: Fixed to right side
-<div className="fixed inset-y-0 right-0 w-full max-w-2xl">
-  {/* Calendar visible on left */}
-  {/* Modal slides in from right */}
-</div>
-```
-
-**Benefits:**
-
-- Calendar stays visible (context preservation)
-- Smooth slide-in animation
-- Natural reading flow (left to right)
-- Professional, polished UX
-- Better space utilization
-
-**Key Principle:**
-
-> "For admin tools that reference other data (like calendars), use side panels instead of center modals. Preserving context improves UX and reduces cognitive load."
-
-### Multi-Step Modal Wizard Pattern
-
-**Implementation:**
-
-```typescript
-type Step = 'service' | 'client' | 'details';
-const [currentStep, setCurrentStep] = useState<Step>('service');
-
-// Visual progress indicator
-[1 Service] ━━━ [2 Client] ━━━ [3 Details]
-
-// Step-based rendering
-{currentStep === 'service' && <ServiceSelection />}
-{currentStep === 'client' && <ClientSelection />}
-{currentStep === 'details' && <DetailsForm />}
-```
-
-**Benefits:**
-
-- Logical flow (service → client → details)
-- Reduced cognitive load per step
-- Clear progress indication
-- Easy back navigation
-- Natural workflow progression
-
-**Key Principle:**
-
-> "Complex forms benefit from multi-step wizards. Each step should have a clear purpose and build on previous selections."
-
-### Component Reusability Pattern
-
-**Problem:**
-
-- AddClientModal needed in both:
-  - `/admin/clients` page (client management)
-  - Calendar appointment creation (booking flow)
-- Potential for code duplication
-
-**Solution:**
-
-```typescript
-// In appointment modal
-import { AddClientModal } from '@/components/admin/clients';
-
-<AddClientModal isOpen={showAddClientModal} onClose={handleAddClientSuccess} />;
-```
-
-**Benefits:**
-
-- Zero code duplication
-- Single source of truth
-- Consistent UX everywhere
-- Easier maintenance
-- Automatic bug fixes propagate
-
-**Key Principle:**
-
-> "Before creating similar components, check if existing components can be reused. Props make components flexible without duplication."
-
-### Service-First vs Client-First Flow
-
-**Old Approach (Client-First):**
-
-1. Select client
-2. Choose service
-3. Fill details
-
-- Problem: Don't know service details when picking client
-
-**New Approach (Service-First):**
-
-1. Choose service (see price, duration)
-2. Select client (know what they're booking)
-3. Review and adjust details
-
-- Benefit: Better context at each step
-
-**Key Principle:**
-
-> "Order workflow steps by dependency. Select items with fewer dependencies first (services), then items that depend on them (clients, time)."
-
-### Debounced Search Pattern
-
-**Implementation:**
-
-```typescript
-useEffect(() => {
-  if (!searchQuery.trim()) {
-    setResults([]);
-    return;
-  }
-
-  const searchClients = async () => {
-    // Actual search
-  };
-
-  const timer = setTimeout(searchClients, 300);
-  return () => clearTimeout(timer); // Cleanup
-}, [searchQuery]);
-```
-
-**Benefits:**
-
-- Reduces API calls (waits for user to stop typing)
-- Better performance (fewer queries)
-- Smoother UX (less jitter)
-- Server-friendly (rate limiting)
-
-**Key Principle:**
-
-> "Always debounce user input that triggers API calls. 300ms is a good default for search."
-
-### Calendar Appointment Positioning
-
-**Problem Discovered:**
-
-- Calendar grid uses 20px per 15-minute interval
-- Appointments calculated with 30px formula
-- Result: Misalignment between appointment cards and time grid
-
-**Solution Implemented:**
-
-```typescript
-// ❌ WRONG: 30px per 15min
-const top = startMinutes * 2; // 2px per minute = 30px per 15min
+Duration + strikethrough original price (if discounted)
+Large bold final price
+Clear comparison of old vs new pricing
+
+Action Buttons:
+
+Circular delete button with trash icon
+Full-width black "Apply" button
+Loading states during save/delete
+Confirmation dialog for deletion
+
+Technical Implementation:
+
+Service assignment requirement enforcement
+Team member must be assigned to service
+Loads current team member rates from database
+Handles custom pricing per team member
+Updates booking group totals automatically
+Revalidates calendar after changes
+
+Booking Creation ✅
+
+API endpoint: /api/public/bookings/create
+Request validation (venue, guest info, appointments)
+Availability check for all appointments
+Double-booking prevention (RPC: is_time_slot_available)
+Guest information handling
+Client ID association for authenticated users
+Transaction rollback on appointment creation failure
+Booking group creation with totals calculation
+Multiple appointments per booking
+Status tracking (confirmed/cancelled/completed/no_show)
+Booking confirmation response
+
+Email Notifications (TODO)
+
+Booking confirmation emails
+Reminder emails (24h before)
+Cancellation notifications
+
+Payment Integration (TODO)
+
+Stripe integration
+Payment processing
+Deposit handling
+Refund management
+
+📝 Recent Updates
+November 2025:
+
+✅ Completed Appointment Edit Modal 🎉
+
+Fresha-Style Design Implementation:
+
+Clean, modern UI matching Fresha's aesthetic
+Right-side slide-in modal preserving calendar context
+Service picker with full-screen overlay
+Team member dropdown with profile photos
+Heart icon for member assignment indication
+
+Smart Value Management:
+
+Initial load shows stored appointment values
+Team member change updates to new rates automatically
+Manual overrides supported for price/duration
+Price snapshots preserved from booking time
+Discount system with clear visual indicators
+
+Service Assignment Architecture:
+
+Enforces service-team member relationship
+Team members must be assigned to services in admin
+Custom pricing per team member supported
+Uses service_team_members junction table
+NULL = use default, value = custom override
+
+UX Improvements:
+
+Loading states for data fetching
+Error messages with retry functionality
+Dropdown menus for time/duration selection
+Total calculation with old/new price comparison
+Confirmation dialogs for destructive actions
+
+✅ Completed Service Groups Migration 🎉
+
+Removed parent-child service relationships
+Eliminated variant_id from appointments
+Created pure UI-layer Service Groups
+Services are now fully independent
+Migrated all frontend components
+Updated TypeScript types throughout
+
+✅ Completed Calendar Appointment Creation 🎉
+
+Built Fresha-style right-side modal
+Implemented 3-step wizard flow (Service → Client → Details)
+Added service search and category filtering
+Client search with recent clients list
+Reused AddClientModal (zero code duplication)
+Walk-in quick selection
+Manual price/duration overrides
+Time slot adjustment in details step
+Full integration with calendar refresh
+
+✅ Admin Calendar Improvements
+
+Hover tooltips for appointment details (replaced click modal)
+Fixed 20px positioning alignment
+Updated TypeScript interfaces for consistency
+Improved appointment card UX
+Seamless integration with new appointment modal
+
+🔮 Lessons Learned
+Appointment Price/Duration Snapshot Architecture
+Design Decision:
+When appointments are created, price and duration are snapshots stored in the database, not live calculations:
+typescript// At booking creation:
+appointments table stores:
+├── service_id: "service-uuid"
+├── price: 40.00 // ← SNAPSHOT at booking time
+├── duration_minutes: 30 // ← SNAPSHOT at booking time
+└── ...
+Why This Works:
+
+Price Stability - Client quoted $40, they pay $40 (no surprises)
+Historical Accuracy - Reports show actual charges
+No Retroactive Changes - Service price updates don't affect past bookings
+Audit Trail - Can see exactly what was charged at booking time
+
+Edit Modal Behavior:
+typescript// Initial load: Show stored values
+if (selectedTeamMemberId === appointment.team_member_id) {
+setManualPrice(appointment.price); // Use stored snapshot
+setManualDuration(appointment.duration_minutes); // Use stored snapshot
+}
+
+// Team member changed: Show new team member's rates
+if (selectedTeamMemberId !== appointment.team_member_id) {
+setManualPrice(null); // Use new team member's current rate
+setManualDuration(null);
+}
+Key Principle:
+
+"Snapshot pricing at booking time for stability. Only update when explicitly changed (service selection, team member change, or manual override)."
+
+Service-Team Member Assignment Architecture
+Design Decision:
+Services must be explicitly assigned to team members in service_team_members table:
+sqlservice_team_members
+├── service_id: "haircut-uuid"
+├── team_member_id: "dabin-uuid"
+├── custom_price: null -- NULL = use service default
+├── custom_duration_minutes: null -- NULL = use service default
+└── is_active: true
+Why This Matters:
+
+Custom Pricing - Each team member can charge different rates
+Service Availability - Not all team members offer all services
+Business Logic - Senior stylists vs junior stylists pricing
+Booking Validation - Only show services the team member can perform
+
+getAvailableServices Query:
+typescript// Only returns services where team member is assigned
+.eq('service_team_members.team_member_id', teamMemberId)
+.eq('service_team_members.is_active', true)
+Setup Required:
+
+Go to Admin → Services
+Edit service → "Locations & Team" tab
+Check team members who can perform service
+Optionally set custom pricing per team member
+Save changes
+
+Key Principle:
+
+"Explicitly define service-team member relationships. Custom pricing per team member provides flexibility while maintaining service integrity."
+
+Edit Modal Smart Value Preservation
+Problem:
+How to handle three different scenarios in edit modal?
+
+Opening modal (show stored values)
+Changing team member (show new rates)
+Manual overrides (custom values)
+
+Solution:
+typescript// Initial Load: Use stored appointment values
+if (selectedTeamMemberId === appointment.team_member_id) {
+setManualPrice(appointment.price);
+setManualDuration(appointment.duration_minutes);
+}
+
+// Team Member Changed: Clear overrides, use new team member rates
+if (selectedTeamMemberId !== appointment.team_member_id) {
+setManualPrice(null); // Falls back to service.base_price
+setManualDuration(null); // Falls back to service.base_duration
+}
+
+// Manual Override: User types new value
+<input onChange={(e) => setManualPrice(parseFloat(e.target.value))} />
+Benefits:
+
+Initial load preserves booking integrity
+Team member change shows accurate new rates
+Manual overrides always possible
+Clear state management
+
+Key Principle:
+
+"For edit modals, distinguish between stored values (initial load), calculated values (team member change), and manual overrides (user input). Each has different behavior."
+
+Fresha-Style UI Patterns
+Implementation Details:
+
+Service Picker:
+
+Full-screen overlay (z-index: 62)
+Back button at top (rounded pill)
+Services with colored left borders
+Category colors from database
+
+Team Member Dropdown:
+
+Profile photo + name
+Heart icon in separate box
+ChevronDown indicator
+Custom dropdown (not native select)
+
+Price/Duration Fields:
+
+AUD prefix for price input
+Discount display: "Decrease A$ X.XX"
+Gray backgrounds (bg-gray-50)
+Rounded borders (rounded-lg)
+
+Footer Layout:
+
+Sticky bottom positioning
+Total on left, price on right
+Circular delete button
+Full-width black Apply button
+
+Key Principle:
+
+"Match Fresha's design patterns for professional polish: rounded pills for navigation, colored service borders, heart icon for favorites, black CTAs."
+
+Calendar Appointment Positioning
+Problem Discovered:
+
+Calendar grid uses 20px per 15-minute interval
+Appointments calculated with different formula
+Result: Misalignment between appointment cards and time grid
+
+Solution Implemented:
+typescript// ❌ WRONG: 30px per 15min
+const top = startMinutes \* 2; // 2px per minute = 30px per 15min
 
 // ✅ CORRECT: 20px per 15min
-const top = (startMinutes / 15) * 20; // 20px per 15min slot
-```
+const top = (startMinutes / 15) \* 20; // 20px per 15min slot
+Key Principle:
 
-**Key Principle:**
+"Always match positioning calculations to grid cell height. Even small misalignments compound and become obvious."
 
-> "Always match positioning calculations to grid cell height. Even small misalignments compound and become obvious."
+Modal vs Hover Tooltip UX
+Problem with Click Modal:
 
-### Modal vs Hover Tooltip UX
+Requires click to see appointment details
+Modal covers calendar view
+Extra interaction step
+Breaks user flow
 
-**Problem with Click Modal:**
+Solution: Hover Tooltip:
+typescript// Hover group on card
 
-- Requires click to see appointment details
-- Modal covers calendar view
-- Extra interaction step
-- Breaks user flow
-
-**Solution: Hover Tooltip:**
-
-```typescript
-// Hover group on card
 <div className="group ...">
   {/* Compact card view */}
 </div>
 
 // Tooltip appears on hover
+
 <div className="opacity-0 group-hover:opacity-100 transition-opacity">
   {/* Full appointment details */}
 </div>
-```
+Benefits:
 
-**Benefits:**
+Instant information (no click needed)
+Non-intrusive (doesn't block view)
+Smooth animation (fade in/out)
+Better for quick scanning
+Professional feel
 
-- Instant information (no click needed)
-- Non-intrusive (doesn't block view)
-- Smooth animation (fade in/out)
-- Better for quick scanning
-- Professional feel
+Key Principle:
 
-**Key Principle:**
+"Use hover tooltips for quick previews, modals for actions. Information should be easily accessible without clicks."
 
-> "Use hover tooltips for quick previews, modals for actions. Information should be easily accessible without clicks."
+Right-Side Modal Pattern (Fresha-Style)
+Problem with Center Modals:
 
-### TypeScript Props Interface Consistency
+Blocks entire screen view
+Context loss (can't see calendar behind it)
+Jarring full-screen transition
+Harder to reference calendar while booking
 
-**Problem Discovered:**
+Solution: Right-Side Slide-In:
+typescript// Position: Fixed to right side
 
-- Modal component expected `timeSlot` prop
-- Parent passed `startTime` prop
-- TypeScript error caught the mismatch
+<div className="fixed inset-y-0 right-0 w-full max-w-xl">
+  {/* Calendar visible on left */}
+  {/* Modal slides in from right */}
+</div>
+Benefits:
 
-**Solution:**
+Calendar stays visible (context preservation)
+Smooth slide-in animation
+Natural reading flow (left to right)
+Professional, polished UX
+Better space utilization
 
-```typescript
-// ✅ Component interface
-interface Props {
-  startTime: string; // HH:MM format
-}
+Key Principle:
 
-// ✅ Parent usage
-<CreateAppointmentModal
-  startTime={timeSlot}
-  ...
-/>
-```
+"For admin tools that reference other data (like calendars), use side panels instead of center modals. Preserving context improves UX and reduces cognitive load."
 
-**Key Principle:**
-
-> "Always update both interface and parent when changing prop names. TypeScript catches these—trust the errors!"
-
-### Timezone Handling: Local vs UTC (Reminder)
-
-**User-Facing Calendar:**
-
-```typescript
-// Use local timezone methods
-const dateStr = formatLocalDate(date);
-// Result: User's selected date matches what they see
-```
-
-**Admin Scheduling System:**
-
-```typescript
-// Use UTC methods
-const dateStr = formatDate(date);
-// Result: Consistent across timezones
-```
-
-**Key Principle:**
-
-> "Match timezone handling to context: Local for user-facing calendar selection, UTC for backend scheduling and database operations."
-
----
-
-## 📚 Key Files Structure
-
-```
+📚 Key Files Structure
 project-root/
 ├── app/
-│   ├── actions/
-│   │   ├── services.ts              # ✅ Service CRUD (no variants)
-│   │   ├── service-groups.ts        # ✅ Service Groups CRUD
-│   │   ├── calendar-appointments.ts # ✅ Admin appointment creation
-│   │   └── bookings.ts              # ✅ Public booking creation
-│   └── admin/
-│       ├── calendar/
-│       │   └── page.tsx             # ✅ Admin calendar view
-│       └── services/
-│           └── page.tsx             # ✅ Services + Groups tabs
+│ ├── actions/
+│ │ ├── services.ts # ✅ Service CRUD + assignments
+│ │ ├── calendar-appointments.ts # ✅ CRUD for appointments
+│ │ └── bookings.ts # ✅ Public booking creation
+│ └── admin/
+│ └── calendar/
+│ └── page.tsx # ✅ Admin calendar view
 ├── components/
-│   └── admin/
-│       ├── calendar/
-│       │   ├── calendar-client.tsx           # ✅ Main container
-│       │   ├── calendar-filters.tsx          # ✅ Navigation
-│       │   ├── day-view.tsx                  # ✅ Timeline (20px positioning)
-│       │   ├── week-view.tsx                 # ✅ Week grid
-│       │   ├── appointment-card.tsx          # ✅ Hover tooltip
-│       │   ├── blocked-time-modal.tsx        # ✅ Block time
-│       │   ├── time-slot-actions-modal.tsx   # ✅ Action picker
-│       │   └── appointment/
-│       │       ├── create-appointment-modal.tsx # ✅ NEW: 3-step wizard
-│       │       ├── client-selection.tsx      # ❌ OLD: Replaced
-│       │       ├── service-selection.tsx     # ❌ OLD: Replaced
-│       │       └── types.ts                  # ✅ UPDATED: No variants
-│       ├── services/
-│       │   ├── service-group-list.tsx        # ✅ Groups management
-│       │   ├── add-service-group-modal.tsx   # ✅ Create group
-│       │   ├── edit-service-group-modal.tsx  # ✅ Edit group
-│       │   ├── service-card.tsx              # ✅ UPDATED: No variants
-│       │   ├── add-variant-modal.tsx         # ❌ REMOVED
-│       │   └── variant-list-modal.tsx        # ❌ REMOVED
-│       └── clients/
-│           └── add-client-modal.tsx          # ✅ Reused in calendar
+│ └── admin/
+│ ├── calendar/
+│ │ ├── calendar-client.tsx # ✅ Main container
+│ │ ├── calendar-filters.tsx # ✅ Navigation
+│ │ ├── day-view.tsx # ✅ Timeline (20px positioning)
+│ │ ├── week-view.tsx # ✅ Week grid
+│ │ ├── appointment-card.tsx # ✅ Hover tooltip
+│ │ ├── blocked-time-modal.tsx # ✅ Block time
+│ │ ├── time-slot-actions-modal.tsx # ✅ Action picker
+│ │ └── appointment/
+│ │ ├── create-appointment-modal.tsx # ✅ 3-step wizard
+│ │ ├── edit-appointment-modal.tsx # ✅ NEW: Fresha-style edit
+│ │ └── types.ts # ✅ Shared types
+│ ├── services/
+│ │ ├── edit-service-modal.tsx # ✅ Service + team assignment
+│ │ └── custom-pricing-modal.tsx # ✅ Custom pricing per member
+│ └── clients/
+│ └── add-client-modal.tsx # ✅ Reused in calendar
 └── types/
-    ├── bookings.ts                   # ✅ UPDATED: No variantId
-    └── calendar.ts                   # ✅ Calendar-specific types
-```
+├── bookings.ts # ✅ Booking types
+└── calendar.ts # ✅ Calendar-specific types
 
----
+🎯 Critical Decisions Summary
+DecisionChoiceRationaleData Access PatternService Role (server-side)Simpler, more secure, easier to maintainAppointment PricingSnapshot at booking timePrice stability, historical accuracy, audit trailService AssignmentExplicit team member assignmentsCustom pricing, service availability controlCustom PricingNULL = default, value = overrideFlexible per-team-member ratesEdit Modal ValuesStored → New rates on team changePreserves booking, updates on team changeAppointment ModalRight-side slide-inContext preservation (calendar visible)Service PickerFull-screen overlayFocus, clear selection, category groupingTeam Member DropdownCustom with photosBetter UX than native select, visual identificationAppointment Details ViewHover tooltipInstant info, non-intrusiveCalendar Positioning20px per 15-min slotPerfect grid alignmentDelete ConfirmationBrowser confirm dialogSimple, familiar, prevents accidents
 
-## 🎯 Critical Decisions Summary
-
-| Decision                     | Choice                           | Rationale                                       |
-| ---------------------------- | -------------------------------- | ----------------------------------------------- |
-| **Data Access Pattern**      | Service Role (server-side)       | Simpler, more secure, easier to maintain        |
-| **Service Architecture**     | Independent services + UI groups | No parent-child complexity, flexible grouping   |
-| **Variants Migration**       | Removed (use Service Groups)     | Simpler codebase, better separation of concerns |
-| **Appointment Modal**        | Right-side slide-in              | Context preservation (calendar visible)         |
-| **Creation Flow**            | Service → Client → Details       | Natural dependency order                        |
-| **Client Component Reuse**   | Import from /admin/clients       | Zero code duplication                           |
-| **Appointment Details View** | Hover tooltip                    | Instant info, non-intrusive                     |
-| **Calendar Positioning**     | 20px per 15-min slot             | Perfect grid alignment                          |
-| **Search Pattern**           | 300ms debounce                   | Performance + UX balance                        |
-| **Multi-Step Forms**         | Visual progress indicator        | Clear workflow guidance                         |
-
----
-
-**Document Status:** Living document - update as architecture evolves  
-**Next Review:** After Phase 5 completion (Booking Management + Payments)  
-**Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Completed Service Groups Migration + Calendar Appointment Creation (November 2025)
+Document Status: Living document - update as architecture evolves
+Next Review: After Phase 6 (Email Notifications + Payment Integration)
+Architecture: Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)
+Last Major Change: Completed Appointment Edit Modal (November 2025)
