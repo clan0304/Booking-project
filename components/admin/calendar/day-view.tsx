@@ -898,11 +898,9 @@ export function DayView({
 
                           if (!hasShift) {
                             // No shift = light gray, clickable
-                            bgColorClass = 'bg-gray-100 hover:bg-purple-50';
+                            bgColorClass = 'bg-gray-100 hover:bg-purple-100';
                             cursorClass = 'cursor-pointer';
-                            titleText = `Click to add appointment or block time at ${formatTime12Hour(
-                              time
-                            )} (no shift scheduled)`;
+                            titleText = formatTime12Hour(time);
                           } else if (isBlocked) {
                             // Has shift but blocked = dark gray, not clickable
                             bgColorClass = 'bg-gray-400';
@@ -915,24 +913,30 @@ export function DayView({
                             titleText = 'Time slot booked';
                           } else {
                             // Has shift, available = white, clickable
-                            bgColorClass = 'bg-white hover:bg-purple-50';
+                            bgColorClass = 'bg-white hover:bg-purple-100';
                             cursorClass = 'cursor-pointer';
-                            titleText = `Click to add appointment or block time at ${formatTime12Hour(
-                              time
-                            )}`;
+                            titleText = formatTime12Hour(time);
                           }
 
                           return (
                             <div
                               key={time}
-                              className={`h-5 border-t border-gray-100 transition-colors ${bgColorClass} ${cursorClass}`}
+                              className={`h-5 border-t border-gray-100 transition-colors ${bgColorClass} ${cursorClass} relative group`}
                               onClick={() => {
                                 if (isClickable) {
                                   handleSlotClick(time, member.id, memberName);
                                 }
                               }}
                               title={titleText}
-                            />
+                            >
+                              {isClickable && (
+                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                  <span className="text-xs font-medium text-purple-700">
+                                    {formatTime12Hour(time)}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -1009,7 +1013,7 @@ export function DayView({
                           return (
                             <div
                               key={appointment.id}
-                              className="absolute pointer-events-none px-1 group"
+                              className="absolute px-1 group pointer-events-none"
                               style={{
                                 top: `${top}px`,
                                 height: `${height * 0.99}px`,
@@ -1018,27 +1022,37 @@ export function DayView({
                                 zIndex: isInteracting ? 100 : layout.zIndex,
                               }}
                             >
-                              <div className="h-full w-full group-hover:w-[98%] pointer-events-auto transition-all duration-200 hover:z-[100]">
-                                <AppointmentCard
-                                  appointment={{
-                                    ...appointment,
-                                    start_time: displayStartTime,
-                                    end_time: displayEndTime,
-                                    duration_minutes: displayDuration,
-                                  }}
-                                  booking={appointment.booking}
-                                  interactionMode={
-                                    isInteracting ? interactionState.mode : null
-                                  }
-                                  onResizeTopStart={handleResizeTopStart}
-                                  onResizeBottomStart={handleResizeBottomStart}
-                                  onDragStart={handleDragStart}
-                                  onInteractionMove={handleInteractionMove}
-                                  onInteractionEnd={handleInteractionEnd}
-                                  onClick={() =>
-                                    handleAppointmentClick(appointment)
-                                  }
-                                />
+                              {/* Hover trigger area - covers full width including gap */}
+                              <div className="absolute inset-0 pointer-events-auto" />
+
+                              {/* Card that shrinks on hover */}
+                              <div className="relative h-full w-full group-hover:w-[95%] transition-all duration-200 pointer-events-none">
+                                <div className="h-full w-full pointer-events-auto relative hover:z-[100]">
+                                  <AppointmentCard
+                                    appointment={{
+                                      ...appointment,
+                                      start_time: displayStartTime,
+                                      end_time: displayEndTime,
+                                      duration_minutes: displayDuration,
+                                    }}
+                                    booking={appointment.booking}
+                                    interactionMode={
+                                      isInteracting
+                                        ? interactionState.mode
+                                        : null
+                                    }
+                                    onResizeTopStart={handleResizeTopStart}
+                                    onResizeBottomStart={
+                                      handleResizeBottomStart
+                                    }
+                                    onDragStart={handleDragStart}
+                                    onInteractionMove={handleInteractionMove}
+                                    onInteractionEnd={handleInteractionEnd}
+                                    onClick={() =>
+                                      handleAppointmentClick(appointment)
+                                    }
+                                  />
+                                </div>
                               </div>
                             </div>
                           );

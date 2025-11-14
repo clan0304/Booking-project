@@ -18,6 +18,11 @@ interface AppointmentCardProps {
   onDragStart?: (appointmentId: string, startY: number) => void;
   onInteractionMove?: (clientY: number) => void;
   onInteractionEnd?: () => void;
+
+  // NEW: Grouped hover props
+  isGroupHovered?: boolean;
+  onGroupHoverStart?: () => void;
+  onGroupHoverEnd?: () => void;
 }
 
 // Default color if no category color is available
@@ -34,6 +39,9 @@ export function AppointmentCard({
   onDragStart,
   onInteractionMove,
   onInteractionEnd,
+  isGroupHovered = false,
+  onGroupHoverStart,
+  onGroupHoverEnd,
 }: AppointmentCardProps) {
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const [arrowPosition, setArrowPosition] = useState(0);
@@ -305,8 +313,18 @@ export function AppointmentCard({
       <div
         ref={cardRef}
         className="relative group h-full"
-        onMouseEnter={() => !isInteracting && setIsHovered(true)}
-        onMouseLeave={() => !isInteracting && setIsHovered(false)}
+        onMouseEnter={() => {
+          if (!isInteracting) {
+            setIsHovered(true);
+            onGroupHoverStart?.();
+          }
+        }}
+        onMouseLeave={() => {
+          if (!isInteracting) {
+            setIsHovered(false);
+            onGroupHoverEnd?.();
+          }
+        }}
       >
         {/* TOP RESIZE HANDLE */}
         <div
@@ -340,13 +358,18 @@ export function AppointmentCard({
         {/* MAIN APPOINTMENT CARD BODY (DRAGGABLE) */}
         <div
           className={`
-            h-full rounded-md p-2 transition-all duration-200 overflow-hidden
-            ${
-              isInteracting
-                ? 'border-2 border-purple-600 shadow-lg cursor-grabbing'
-                : 'hover:shadow-md cursor-grab group-hover:w-[97%]'
-            }
-          `}
+    h-full rounded-md p-2 transition-all duration-200 overflow-hidden
+    ${
+      isInteracting
+        ? 'border-2 border-purple-600 shadow-lg cursor-grabbing'
+        : 'hover:shadow-md cursor-grab group-hover:w-[97%]'
+    }
+    ${
+      isGroupHovered && !isInteracting
+        ? 'ring-2 ring-purple-400 ring-offset-1'
+        : ''
+    }
+  `}
           style={{ backgroundColor }}
           onPointerDown={handleBodyPointerDown}
           onPointerMove={handlePointerMove}

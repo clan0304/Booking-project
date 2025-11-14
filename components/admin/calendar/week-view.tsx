@@ -76,6 +76,7 @@ export function WeekView({
     useState<BookingGroupWithAppointments | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isLoadingBooking, setIsLoadingBooking] = useState(false);
+  const [hoveredBookingId, setHoveredBookingId] = useState<string | null>(null);
 
   // Generate time slots (12 AM to 11:45 PM, 15-min intervals)
   const timeSlots = useMemo((): string[] => {
@@ -183,6 +184,15 @@ export function WeekView({
     });
     return grouped;
   }, [blockedTimes]);
+
+  const formatTime12Hour = (time: string): string => {
+    const [hour, min] = time.split(':');
+    const hourNum = parseInt(hour);
+    const period = hourNum >= 12 ? 'pm' : 'am';
+    const displayHour =
+      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+    return `${displayHour}:${min}${period}`;
+  };
 
   // Calculate position and height
   const getStyle = (
@@ -494,9 +504,10 @@ export function WeekView({
 
                               if (!hasShift) {
                                 // No shift = light gray, clickable
-                                bgColorClass = 'bg-gray-100 hover:bg-purple-50';
+                                bgColorClass =
+                                  'bg-gray-100 hover:bg-purple-100';
                                 cursorClass = 'cursor-pointer';
-                                titleText = 'Click to add (no shift scheduled)';
+                                titleText = formatTime12Hour(time);
                               } else if (isBlocked) {
                                 // Has shift but blocked = dark gray, not clickable
                                 bgColorClass = 'bg-gray-400';
@@ -509,9 +520,9 @@ export function WeekView({
                                 titleText = 'Booked';
                               } else {
                                 // Has shift, available = white, clickable
-                                bgColorClass = 'bg-white hover:bg-purple-50';
+                                bgColorClass = 'bg-white hover:bg-purple-100';
                                 cursorClass = 'cursor-pointer';
-                                titleText = 'Click to add';
+                                titleText = formatTime12Hour(time);
                               }
 
                               return (
@@ -533,7 +544,16 @@ export function WeekView({
                                     }
                                   }}
                                   title={titleText}
-                                />
+                                >
+                                  {/* Show time text on hover */}
+                                  {isClickable && (
+                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                      <span className="text-xs font-medium text-purple-700">
+                                        {formatTime12Hour(time)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
                               );
                             })}
                           </div>
@@ -577,7 +597,21 @@ export function WeekView({
                                       <AppointmentCard
                                         appointment={appointment}
                                         booking={appointment.booking}
-                                        compact
+                                        compact={true}
+                                        // NEW: Grouped hover props
+                                        isGroupHovered={
+                                          hoveredBookingId ===
+                                          appointment.booking.id
+                                        }
+                                        onGroupHoverStart={() =>
+                                          setHoveredBookingId(
+                                            appointment.booking.id
+                                          )
+                                        }
+                                        onGroupHoverEnd={() =>
+                                          setHoveredBookingId(null)
+                                        }
+                                        // Click handler
                                         onClick={() =>
                                           handleAppointmentClick(appointment)
                                         }
