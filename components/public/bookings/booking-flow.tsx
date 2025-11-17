@@ -6,7 +6,7 @@ import { ServiceSelection } from './service-selection';
 import { TeamMemberSelection } from './team-member-selection';
 import { DateTimeSelection } from './date-time-selection';
 import { BookingSummary } from './booking-summary';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, ChevronRight, ArrowLeft } from 'lucide-react';
 import type {
   Venue,
   Service,
@@ -58,21 +58,17 @@ export function BookingFlow({
     }),
   });
 
-  // Only show info step if not authenticated
-  const steps = authenticatedUser
-    ? [
-        { id: 'service', label: 'Select Service' },
-        { id: 'team-member', label: 'Choose Team Member' },
-        { id: 'date-time', label: 'Pick Date & Time' },
-        { id: 'review', label: 'Review' },
-      ]
-    : [
-        { id: 'service', label: 'Select Service' },
-        { id: 'team-member', label: 'Choose Team Member' },
-        { id: 'date-time', label: 'Pick Date & Time' },
-        { id: 'info', label: 'Your Information' },
-        { id: 'review', label: 'Review' },
-      ];
+  // Define step configuration
+  const steps = [
+    { id: 'service' as const, label: 'Services', shortLabel: 'Services' },
+    {
+      id: 'team-member' as const,
+      label: 'Professional',
+      shortLabel: 'Professional',
+    },
+    { id: 'date-time' as const, label: 'Time', shortLabel: 'Time' },
+    { id: 'review' as const, label: 'Confirm', shortLabel: 'Confirm' },
+  ];
 
   const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
 
@@ -81,41 +77,41 @@ export function BookingFlow({
   };
 
   const goToNextStep = () => {
-    const nextStepMap: Record<BookingStep, BookingStep> = authenticatedUser
-      ? {
-          service: 'team-member',
-          'team-member': 'date-time',
-          'date-time': 'review',
-          review: 'confirmed',
-          confirmed: 'confirmed',
-        }
-      : {
-          service: 'team-member',
-          'team-member': 'date-time',
-          'date-time': 'review', // Skip info step for authenticated users
-          review: 'confirmed',
-          confirmed: 'confirmed',
-        };
+    const nextStepMap: Record<BookingStep, BookingStep> = {
+      service: 'team-member',
+      'team-member': 'date-time',
+      'date-time': 'review',
+      review: 'confirmed',
+      confirmed: 'confirmed',
+    };
     setCurrentStep(nextStepMap[currentStep]);
   };
 
   const goToPreviousStep = () => {
-    const prevStepMap: Record<BookingStep, BookingStep> = authenticatedUser
-      ? {
-          service: 'service',
-          'team-member': 'service',
-          'date-time': 'team-member',
-          review: 'date-time',
-          confirmed: 'review',
-        }
-      : {
-          service: 'service',
-          'team-member': 'service',
-          'date-time': 'team-member',
-          review: 'date-time', // Skip info step when going back too
-          confirmed: 'review',
-        };
+    const prevStepMap: Record<BookingStep, BookingStep> = {
+      service: 'service',
+      'team-member': 'service',
+      'date-time': 'team-member',
+      review: 'date-time',
+      confirmed: 'review',
+    };
     setCurrentStep(prevStepMap[currentStep]);
+  };
+
+  // ✅ NEW: Jump to specific step (only allowed for completed steps)
+  const goToStep = (stepId: BookingStep) => {
+    const targetIndex = steps.findIndex((s) => s.id === stepId);
+
+    // Only allow jumping to current or previous steps
+    if (targetIndex <= currentStepIndex) {
+      setCurrentStep(stepId);
+    }
+  };
+
+  // Check if a step can be clicked (completed or current)
+  const canNavigateToStep = (stepId: BookingStep) => {
+    const targetIndex = steps.findIndex((s) => s.id === stepId);
+    return targetIndex <= currentStepIndex;
   };
 
   if (currentStep === 'confirmed') {
@@ -174,48 +170,64 @@ export function BookingFlow({
         </div>
       )}
 
-      {/* Progress Steps */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
-          {steps.map((step, index) => (
-            <div
-              key={step.id}
-              className={`flex-1 ${index !== steps.length - 1 ? 'pr-4' : ''}`}
+      {/* ✅ NEW: Fresha-Style Header with Back Arrow + Breadcrumb */}
+      <div className="mb-6">
+        <div className="flex items-center gap-4 mb-6">
+          {/* Back Arrow Button */}
+          {currentStep !== 'service' && (
+            <button
+              onClick={goToPreviousStep}
+              className="flex-shrink-0 w-12 h-12 rounded-full border-2 border-gray-300 flex items-center justify-center hover:bg-gray-50 transition-colors"
+              aria-label="Go back"
             >
-              <div className="flex items-center">
-                <div
-                  className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
-                    index < currentStepIndex
-                      ? 'bg-green-500 text-white'
-                      : index === currentStepIndex
-                      ? 'bg-[#6C5CE7] text-white'
-                      : 'bg-gray-200 text-gray-500'
+              <ArrowLeft className="h-5 w-5 text-gray-700" />
+            </button>
+          )}
+        </div>
+
+        {/* Breadcrumb Navigation */}
+        <div className="flex items-center gap-2 text-sm mb-8">
+          {steps.map((step, index) => {
+            const isCompleted = index < currentStepIndex;
+            const isCurrent = index === currentStepIndex;
+            const isClickable = canNavigateToStep(step.id);
+
+            return (
+              <div key={step.id} className="flex items-center gap-2">
+                {/* Step Button/Label */}
+                <button
+                  onClick={() => isClickable && goToStep(step.id)}
+                  disabled={!isClickable}
+                  className={`font-medium transition-colors ${
+                    isCurrent
+                      ? 'text-gray-900 text-lg'
+                      : isCompleted
+                      ? 'text-gray-900 hover:text-gray-700 cursor-pointer'
+                      : 'text-gray-400 cursor-not-allowed'
                   }`}
                 >
-                  {index < currentStepIndex ? '✓' : index + 1}
-                </div>
-                <div className="ml-3 flex-1">
-                  <p
-                    className={`text-sm font-medium ${
-                      index <= currentStepIndex
-                        ? 'text-gray-900'
-                        : 'text-gray-500'
-                    }`}
-                  >
-                    {step.label}
-                  </p>
-                </div>
-                {index !== steps.length - 1 && (
-                  <div
-                    className={`flex-1 h-0.5 mx-4 ${
-                      index < currentStepIndex ? 'bg-green-500' : 'bg-gray-200'
+                  {step.shortLabel}
+                </button>
+
+                {/* Chevron Separator */}
+                {index < steps.length - 1 && (
+                  <ChevronRight
+                    className={`h-4 w-4 ${
+                      isCompleted || isCurrent
+                        ? 'text-gray-400'
+                        : 'text-gray-300'
                     }`}
                   />
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+
+        {/* Step Title */}
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          {steps[currentStepIndex].label}
+        </h1>
       </div>
 
       {/* Step Content */}
