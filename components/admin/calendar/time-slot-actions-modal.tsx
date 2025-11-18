@@ -1,7 +1,7 @@
 // components/admin/calendar/time-slot-actions-modal.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Calendar, XCircle } from 'lucide-react';
 import { BlockedTimeModal } from './blocked-time-modal';
 import { CreateAppointmentModal } from './appointment/create-appointment-modal';
@@ -31,6 +31,46 @@ export function TimeSlotActionsModal({
 }: TimeSlotActionsModalProps) {
   const [showBlockTime, setShowBlockTime] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Close modal when clicking outside
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        modalRef.current &&
+        !modalRef.current.contains(event.target as Node)
+      ) {
+        onClose();
+      }
+    };
+
+    // Small delay to prevent immediate close on open
+    setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 100);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen, onClose]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen, onClose]);
 
   // Format time for display (12-hour format)
   const formatTime = (time: string): string => {
@@ -105,75 +145,85 @@ export function TimeSlotActionsModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Backdrop */}
+    <>
+      {/* Transparent backdrop (no dark overlay) */}
+      <div className="fixed inset-0 z-50" onClick={onClose} />
+
+      {/* Modal - positioned at clicked location (COMPACT SIZE) */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
-        onClick={onClose}
-      />
+        ref={modalRef}
+        className="fixed z-50 bg-white rounded-lg shadow-2xl border border-gray-200 max-w-xs w-full animate-in fade-in zoom-in-95 duration-200"
+        style={{
+          // Center on screen by default
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+        }}
+      >
+        {/* Header - Compact */}
+        <div className="flex items-start justify-between p-3 pb-2 border-b border-gray-200 bg-gray-50 rounded-t-lg">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">
+              {formatTime(timeSlot)}
+            </h2>
+            <p className="text-xs text-gray-600 mt-0.5">
+              {teamMemberName} · {formatDate(date)}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors rounded-full p-0.5 hover:bg-gray-200"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
 
-      {/* Modal */}
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full">
-          {/* Header */}
-          <div className="flex items-start justify-between p-6 pb-4 border-b border-gray-200">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">
-                {formatTime(timeSlot)}
-              </h2>
-              <p className="text-sm text-gray-600 mt-1">
-                {teamMemberName} · {formatDate(date)}
-              </p>
-              <p className="text-xs text-gray-500 mt-0.5">{venueName}</p>
+        {/* Action Buttons - Compact */}
+        <div className="p-3 space-y-2">
+          {/* Add Appointment */}
+          <button
+            onClick={() => setShowAddAppointment(true)}
+            className="w-full flex items-center gap-2.5 p-3 rounded-lg border-2 border-gray-200 hover:border-purple-600 hover:bg-purple-50 transition-all group"
+          >
+            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-purple-100 group-hover:bg-purple-200 flex items-center justify-center transition-colors">
+              <Calendar className="h-4 w-4 text-purple-600" />
             </div>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
+            <div className="text-left flex-1">
+              <div className="font-semibold text-sm text-gray-900">
+                Add appointment
+              </div>
+            </div>
+          </button>
 
-          {/* Action Buttons */}
-          <div className="p-6 space-y-3">
-            {/* Add Appointment */}
-            <button
-              onClick={() => setShowAddAppointment(true)}
-              className="w-full flex items-center gap-3 p-4 rounded-lg border-2 border-gray-200 hover:border-purple-600 hover:bg-purple-50 transition-all group"
-            >
-              <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-purple-100 group-hover:bg-purple-200 flex items-center justify-center transition-colors">
-                <Calendar className="h-5 w-5 text-purple-600" />
+          {/* Add Blocked Time */}
+          <button
+            onClick={() => setShowBlockTime(true)}
+            className="w-full flex items-center gap-2.5 p-3 rounded-lg border-2 border-gray-200 hover:border-red-500 hover:bg-red-50 transition-all group"
+          >
+            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-red-100 group-hover:bg-red-200 flex items-center justify-center transition-colors">
+              <XCircle className="h-4 w-4 text-red-600" />
+            </div>
+            <div className="text-left flex-1">
+              <div className="font-semibold text-sm text-gray-900">
+                Add blocked time
               </div>
-              <div className="text-left">
-                <div className="font-semibold text-gray-900">
-                  Add appointment
-                </div>
-                <div className="text-xs text-gray-500">
-                  Create a new booking for this time
-                </div>
-              </div>
-            </button>
+            </div>
+          </button>
+        </div>
 
-            {/* Add Blocked Time */}
-            <button
-              onClick={() => setShowBlockTime(true)}
-              className="w-full flex items-center gap-3 p-4 rounded-lg border-2 border-gray-200 hover:border-red-500 hover:bg-red-50 transition-all group"
-            >
-              <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-red-100 group-hover:bg-red-200 flex items-center justify-center transition-colors">
-                <XCircle className="h-5 w-5 text-red-600" />
-              </div>
-              <div className="text-left">
-                <div className="font-semibold text-gray-900">
-                  Add blocked time
-                </div>
-                <div className="text-xs text-gray-500">
-                  Mark this time as unavailable
-                </div>
-              </div>
-            </button>
-          </div>
+        {/* Footer - Compact */}
+        <div className="px-3 pb-3">
+          <button
+            className="w-full text-center text-xs text-purple-600 hover:text-purple-700 font-medium py-1.5 hover:bg-purple-50 rounded-lg transition-colors"
+            onClick={() => {
+              // TODO: Open quick actions settings
+              console.log('Open quick actions settings');
+            }}
+          >
+            Quick actions settings
+          </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

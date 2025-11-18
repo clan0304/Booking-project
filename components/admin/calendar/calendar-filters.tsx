@@ -21,6 +21,13 @@ import type {
   AssignedTeamMember,
 } from './calendar-client';
 import { TeamFilterDropdown } from './team-filter-dropdown';
+import { Calendar } from '@/components/ui/calendar';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 
 interface CalendarFiltersProps {
   viewType: CalendarViewType;
@@ -56,6 +63,7 @@ export function CalendarFilters({
   onTeamMemberIdsChange,
 }: CalendarFiltersProps) {
   const [venues, setVenues] = useState<Array<{ id: string; name: string }>>([]);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   // Fetch venues
   useEffect(() => {
@@ -104,6 +112,26 @@ export function CalendarFilters({
     }
   };
 
+  // Handle date selection from calendar picker
+  const handleDateSelect = (date: Date | undefined) => {
+    if (!date) return;
+
+    // Convert to YYYY-MM-DD format (UTC-safe)
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const selectedDate = `${year}-${month}-${day}`;
+
+    if (viewType === 'day') {
+      onDateChange(selectedDate);
+    } else {
+      // For week view, navigate to the week containing the selected date
+      onWeekChange(getStartOfWeek(selectedDate));
+    }
+
+    setCalendarOpen(false);
+  };
+
   // Get display text
   const getDisplayText = () => {
     if (viewType === 'day') {
@@ -111,6 +139,15 @@ export function CalendarFilters({
     } else {
       const weekEnd = addDays(currentWeekStart, 6);
       return formatDateRange(currentWeekStart, weekEnd);
+    }
+  };
+
+  // Convert currentDate string to Date object for Calendar component
+  const getCurrentDateObject = (): Date => {
+    if (viewType === 'day') {
+      return new Date(currentDate + 'T00:00:00');
+    } else {
+      return new Date(currentWeekStart + 'T00:00:00');
     }
   };
 
@@ -150,22 +187,42 @@ export function CalendarFilters({
         <div className="flex items-center gap-3">
           <button
             onClick={handlePrevious}
-            className="flex items-center justify-center h-9 w-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
+            className="flex items-center justify-center h-9 w-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
             title={`Previous ${viewType}`}
           >
             <ChevronLeft className="h-5 w-5 text-gray-600" />
           </button>
 
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white min-w-[200px] justify-center">
-            <CalendarIcon className="h-4 w-4 text-gray-500" />
-            <span className="font-medium text-gray-900">
-              {getDisplayText()}
-            </span>
-          </div>
+          {/* Date Display with Calendar Picker */}
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
+              <button
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white min-w-[200px] justify-center transition-colors',
+                  'hover:bg-gray-50 hover:border-gray-300 cursor-pointer'
+                )}
+              >
+                <CalendarIcon className="h-4 w-4 text-gray-500" />
+                <span className="font-medium text-gray-900">
+                  {getDisplayText()}
+                </span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="center">
+              <Calendar
+                mode="single"
+                selected={getCurrentDateObject()}
+                onSelect={handleDateSelect}
+                numberOfMonths={2}
+                initialFocus
+                className="rounded-md border"
+              />
+            </PopoverContent>
+          </Popover>
 
           <button
             onClick={handleNext}
-            className="flex items-center justify-center h-9 w-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
+            className="flex items-center justify-center h-9 w-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
             title={`Next ${viewType}`}
           >
             <ChevronRight className="h-5 w-5 text-gray-600" />
@@ -174,7 +231,7 @@ export function CalendarFilters({
           {!isToday && (
             <button
               onClick={handleToday}
-              className="px-4 py-2 text-sm font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg"
+              className="px-4 py-2 text-sm font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors"
             >
               Today
             </button>
