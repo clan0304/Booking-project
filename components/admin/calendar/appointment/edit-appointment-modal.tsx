@@ -392,27 +392,30 @@ export function EditAppointmentModal({
     return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
   };
 
-  // Delete appointment
+  // Delete appointment - ALLOW deleting last appointment (will delete booking)
   const handleDeleteAppointment = async (
     appointmentId: string
   ): Promise<void> => {
-    // Prevent deleting last appointment
-    if (editingAppointments.size <= 1) {
-      setError(
-        'Cannot delete the last service. Delete the entire booking instead.'
-      );
-      return;
-    }
+    const isLastAppointment = editingAppointments.size === 1;
 
-    const confirmed = confirm(
-      'Are you sure you want to remove this service from the booking?'
-    );
+    const confirmMessage = isLastAppointment
+      ? 'This is the last service in this booking. Removing it will delete the entire booking. Are you sure?'
+      : 'Are you sure you want to remove this service from the booking?';
+
+    const confirmed = confirm(confirmMessage);
     if (!confirmed) return;
 
     try {
       const result = await deleteCalendarAppointment(appointmentId, booking.id);
 
       if (result.success) {
+        // If it was the last appointment, close the modal
+        if (isLastAppointment) {
+          onSuccess();
+          onClose();
+          return;
+        }
+
         // Remove from editing state
         setEditingAppointments((prev) => {
           const newMap = new Map(prev);
@@ -942,8 +945,7 @@ export function EditAppointmentModal({
                             onClick={() =>
                               handleDeleteAppointment(appointment.id)
                             }
-                            disabled={editingAppointments.size <= 1}
-                            className="w-full px-4 py-3 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                            className="w-full px-4 py-3 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 flex items-center justify-center gap-2 transition-colors"
                           >
                             <Trash2 className="h-4 w-4" />
                             Remove service

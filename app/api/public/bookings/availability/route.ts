@@ -6,7 +6,7 @@ interface BookingGroupData {
   booking_date: string;
   guest_first_name: string;
   guest_last_name: string | null;
-  venue_id: string; // ✅ ADDED
+  venue_id: string;
 }
 
 interface RawAppointmentFromDB {
@@ -48,6 +48,13 @@ interface VenueClosedDay {
   reason: string | null;
 }
 
+interface BlockedTime {
+  id: string;
+  start_time: string;
+  end_time: string;
+  reason: string | null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -76,7 +83,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for overlaps
+    // Check for overlaps with appointments
     const hasConflict = (appointments || []).some(
       (appt: { start_time: string; end_time: string }) => {
         const apptStart = timeToMinutes(appt.start_time);
@@ -92,8 +99,44 @@ export async function POST(request: NextRequest) {
       }
     );
 
+    if (hasConflict) {
+      return NextResponse.json({
+        available: false,
+      });
+    }
+
+    // ✅ NEW: Check for overlaps with blocked times
+    const { data: blockedTimes, error: blockedError } = await supabaseAdmin
+      .from('blocked_times')
+      .select('id, start_time, end_time, reason')
+      .eq('team_member_id', team_member_id)
+      .eq('blocked_date', date);
+
+    if (blockedError) {
+      console.error('Error checking blocked times:', blockedError);
+      return NextResponse.json(
+        { error: 'Failed to check blocked times' },
+        { status: 500 }
+      );
+    }
+
+    const hasBlockedConflict = (blockedTimes || []).some(
+      (blocked: { start_time: string; end_time: string }) => {
+        const blockedStart = timeToMinutes(blocked.start_time);
+        const blockedEnd = timeToMinutes(blocked.end_time);
+        const requestStart = timeToMinutes(start_time);
+        const requestEnd = timeToMinutes(end_time);
+
+        return (
+          (requestStart >= blockedStart && requestStart < blockedEnd) ||
+          (requestEnd > blockedStart && requestEnd <= blockedEnd) ||
+          (requestStart <= blockedStart && requestEnd >= blockedEnd)
+        );
+      }
+    );
+
     return NextResponse.json({
-      available: !hasConflict,
+      available: !hasBlockedConflict,
     });
   } catch (error) {
     console.error('Error in availability API:', error);
@@ -103,9 +146,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-// app/api/public/bookings/availability/route.ts
-// FIXED: Added venue_id filtering to shift query
 
 export async function GET(request: NextRequest) {
   try {
@@ -121,7 +161,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 1. Check if venue is closed on this date (if venueId provided)
+    // 1. Check if venue is closed on this date
     if (venueId) {
       const { data: closedDay } = await supabaseAdmin
         .from('venue_closed_days')
@@ -142,15 +182,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 2. Get team member's shift for this date from shifts table
-    // ✅ FIXED: Added venue_id filter to ensure only this venue's shifts are checked
+    // 2. Get team member's shift
     let shiftQuery = supabaseAdmin
       .from('shifts')
       .select('id, start_time, end_time, notes')
       .eq('team_member_id', teamMemberId)
       .eq('shift_date', date);
 
-    // Only filter by venue if venueId is provided
     if (venueId) {
       shiftQuery = shiftQuery.eq('venue_id', venueId);
     }
@@ -165,7 +203,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // If no shift, team member is not working that day AT THIS VENUE
     if (!shift) {
       return NextResponse.json({
         available: false,
@@ -180,7 +217,7 @@ export async function GET(request: NextRequest) {
 
     const typedShift = shift as Shift;
 
-    // 3. Get team member's existing appointments for this date
+    // 3. Get existing appointments
     const { data: appointments, error: appointmentsError } = await supabaseAdmin
       .from('appointments')
       .select(
@@ -205,10 +242,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Format appointments for response
     const rawAppointments = (appointments || []) as RawAppointmentFromDB[];
 
-    // ✅ ADDED: Filter appointments by venue if venueId provided
+    // Filter by venue if provided
     let filteredAppointments = rawAppointments;
     if (venueId) {
       filteredAppointments = rawAppointments.filter((appt) => {
@@ -219,7 +255,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Transform to ensure booking_groups is a single object
     const typedAppointments: AppointmentWithBookingGroup[] =
       filteredAppointments.map((appt) => ({
         id: appt.id,
@@ -243,12 +278,36 @@ export async function GET(request: NextRequest) {
       status: appt.status,
     }));
 
-    // 4. Generate available time slots based on shift hours and existing appointments
+    // 4. ✅ NEW: Get blocked times
+    let blockedQuery = supabaseAdmin
+      .from('blocked_times')
+      .select('id, start_time, end_time, reason')
+      .eq('team_member_id', teamMemberId)
+      .eq('blocked_date', date);
+
+    if (venueId) {
+      blockedQuery = blockedQuery.eq('venue_id', venueId);
+    }
+
+    const { data: blockedTimes, error: blockedError } = await blockedQuery;
+
+    if (blockedError) {
+      console.error('Error fetching blocked times:', blockedError);
+      return NextResponse.json(
+        { error: 'Failed to fetch blocked times' },
+        { status: 500 }
+      );
+    }
+
+    const typedBlockedTimes = (blockedTimes || []) as BlockedTime[];
+
+    // 5. Generate available slots (excluding both appointments AND blocked times)
     const slots = generateAvailableSlots(
       typedShift.start_time,
       typedShift.end_time,
       bookedSlots,
-      30 // 30-minute intervals
+      typedBlockedTimes, // ✅ NEW: Pass blocked times
+      30
     );
 
     return NextResponse.json({
@@ -265,6 +324,7 @@ export async function GET(request: NextRequest) {
         notes: typedShift.notes,
       },
       booked: bookedSlots,
+      blocked: typedBlockedTimes, // ✅ NEW: Include blocked times in response
     });
   } catch (error) {
     console.error('Error in availability GET API:', error);
@@ -276,12 +336,13 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Generate available time slots within shift hours, excluding booked appointments
+ * ✅ UPDATED: Generate available time slots excluding BOTH appointments AND blocked times
  */
 function generateAvailableSlots(
   shiftStartTime: string,
   shiftEndTime: string,
   bookedAppointments: BookedSlot[],
+  blockedTimes: BlockedTime[], // ✅ NEW parameter
   intervalMinutes: number
 ): string[] {
   const slots: string[] = [];
@@ -294,15 +355,22 @@ function generateAvailableSlots(
   while (current < shiftEnd) {
     const timeStr = minutesToTime(current);
 
-    // Check if this slot conflicts with any booked appointments
+    // Check if slot conflicts with booked appointments
     const isBooked = bookedAppointments.some((appointment) => {
       const apptStart = timeToMinutes(appointment.start_time);
       const apptEnd = timeToMinutes(appointment.end_time);
-      // Check if slot overlaps with appointment
       return current >= apptStart && current < apptEnd;
     });
 
-    if (!isBooked) {
+    // ✅ NEW: Check if slot conflicts with blocked times
+    const isBlocked = blockedTimes.some((blocked) => {
+      const blockedStart = timeToMinutes(blocked.start_time);
+      const blockedEnd = timeToMinutes(blocked.end_time);
+      return current >= blockedStart && current < blockedEnd;
+    });
+
+    // Only add slot if it's neither booked nor blocked
+    if (!isBooked && !isBlocked) {
       slots.push(timeStr);
     }
 

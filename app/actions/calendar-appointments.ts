@@ -597,6 +597,8 @@ export async function updateCalendarAppointment(
 
 /**
  * Delete calendar appointment
+ * ✅ IMPROVED: Handles deleting appointments that result in zero remaining
+ * Checks AFTER deletion to see if booking_group should be deleted
  */
 export async function deleteCalendarAppointment(
   appointmentId: string,
@@ -606,31 +608,7 @@ export async function deleteCalendarAppointment(
     await requireAdmin();
 
     // =====================================================
-    // 1. VALIDATE INPUTS
-    // =====================================================
-
-    if (!appointmentId || !bookingId) {
-      return { success: false, error: 'Missing required IDs' };
-    }
-
-    // =====================================================
-    // 2. CHECK IF THIS IS THE ONLY APPOINTMENT
-    // =====================================================
-
-    const { data: appointments, error: fetchError } = await supabaseAdmin
-      .from('appointments')
-      .select('id')
-      .eq('booking_group_id', bookingId);
-
-    if (fetchError) {
-      console.error('Error fetching appointments:', fetchError);
-      return { success: false, error: 'Failed to check booking' };
-    }
-
-    const isOnlyAppointment = appointments && appointments.length === 1;
-
-    // =====================================================
-    // 3. DELETE APPOINTMENT
+    // 1. DELETE THE APPOINTMENT FIRST
     // =====================================================
 
     const { error: deleteError } = await supabaseAdmin
@@ -644,10 +622,28 @@ export async function deleteCalendarAppointment(
     }
 
     // =====================================================
-    // 4. IF ONLY APPOINTMENT, DELETE BOOKING GROUP TOO
+    // 2. CHECK HOW MANY APPOINTMENTS REMAIN
     // =====================================================
 
-    if (isOnlyAppointment) {
+    const { data: remainingAppointments, error: remainingError } =
+      await supabaseAdmin
+        .from('appointments')
+        .select('id, price, duration_minutes')
+        .eq('booking_group_id', bookingId);
+
+    if (remainingError) {
+      console.error('Error fetching remaining appointments:', remainingError);
+      return {
+        success: false,
+        error: 'Failed to check remaining appointments',
+      };
+    }
+
+    // =====================================================
+    // 3. IF NO APPOINTMENTS LEFT, DELETE BOOKING GROUP
+    // =====================================================
+
+    if (!remainingAppointments || remainingAppointments.length === 0) {
       const { error: deleteBookingError } = await supabaseAdmin
         .from('booking_groups')
         .delete()
@@ -657,47 +653,47 @@ export async function deleteCalendarAppointment(
         console.error('Error deleting booking group:', deleteBookingError);
         return { success: false, error: 'Failed to delete booking' };
       }
-    } else {
-      // =====================================================
-      // 5. RECALCULATE BOOKING TOTALS
-      // =====================================================
 
-      const { data: remainingAppointments, error: remainingError } =
-        await supabaseAdmin
-          .from('appointments')
-          .select('price, duration_minutes')
-          .eq('booking_group_id', bookingId);
+      revalidatePath('/admin/calendar');
+      revalidatePath('/admin/bookings');
 
-      if (remainingError || !remainingAppointments) {
-        return {
-          success: false,
-          error: 'Failed to recalculate booking totals',
-        };
-      }
-
-      const appointments = remainingAppointments as AppointmentPriceData[];
-      const totalPrice = appointments.reduce(
-        (sum, appt) => sum + (appt.price || 0),
-        0
-      );
-      const totalAppointments = appointments.length;
-
-      const { error: updateBookingError } = await supabaseAdmin
-        .from('booking_groups')
-        .update({
-          total_price: totalPrice,
-          total_appointments: totalAppointments,
-        })
-        .eq('id', bookingId);
-
-      if (updateBookingError) {
-        console.error('Error updating booking totals:', updateBookingError);
-        return { success: false, error: 'Failed to update booking totals' };
-      }
+      return {
+        success: true,
+        message: 'Last appointment deleted - booking removed',
+      };
     }
 
     // =====================================================
-    // 6. SUCCESS - REVALIDATE & RETURN
+    // 4. RECALCULATE BOOKING TOTALS (appointments still exist)
+    // =====================================================
+
+    const typedAppointments = remainingAppointments as Array<{
+      id: string;
+      price: number;
+      duration_minutes: number;
+    }>;
+
+    const totalPrice = typedAppointments.reduce(
+      (sum, appt) => sum + (appt.price || 0),
+      0
+    );
+    const totalAppointments = typedAppointments.length;
+
+    const { error: updateBookingError } = await supabaseAdmin
+      .from('booking_groups')
+      .update({
+        total_price: totalPrice,
+        total_appointments: totalAppointments,
+      })
+      .eq('id', bookingId);
+
+    if (updateBookingError) {
+      console.error('Error updating booking totals:', updateBookingError);
+      return { success: false, error: 'Failed to update booking totals' };
+    }
+
+    // =====================================================
+    // 5. SUCCESS - REVALIDATE & RETURN
     // =====================================================
 
     revalidatePath('/admin/calendar');
@@ -705,9 +701,7 @@ export async function deleteCalendarAppointment(
 
     return {
       success: true,
-      message: isOnlyAppointment
-        ? 'Appointment and booking deleted successfully'
-        : 'Appointment deleted successfully',
+      message: 'Appointment deleted successfully',
     };
   } catch (error) {
     console.error('Error in deleteCalendarAppointment:', error);

@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar as CalendarIcon,
+  MapPin,
 } from 'lucide-react';
 import {
   getStartOfWeek,
@@ -151,40 +152,21 @@ export function CalendarFilters({
     }
   };
 
-  const isToday =
-    viewType === 'day'
-      ? currentDate === getToday()
-      : currentWeekStart === getStartOfWeek(getToday());
-
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        {/* Left: View Type Selector */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onViewTypeChange('day')}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              viewType === 'day'
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Day
-          </button>
-          <button
-            onClick={() => onViewTypeChange('week')}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              viewType === 'week'
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Week
-          </button>
-        </div>
-
-        {/* Center: Date Navigation */}
+      {/* ✅ CHANGED: Single row layout with space-between */}
+      <div className="flex items-center justify-between gap-4">
+        {/* ✅ CHANGED: Left Section - Today + Date Navigation + Venue + Team */}
         <div className="flex items-center gap-3">
+          {/* Today Button - Always visible on left */}
+          <button
+            onClick={handleToday}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Today
+          </button>
+
+          {/* Date Navigation */}
           <button
             onClick={handlePrevious}
             className="flex items-center justify-center h-9 w-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
@@ -228,30 +210,21 @@ export function CalendarFilters({
             <ChevronRight className="h-5 w-5 text-gray-600" />
           </button>
 
-          {!isToday && (
-            <button
-              onClick={handleToday}
-              className="px-4 py-2 text-sm font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors"
+          {/* Venue Filter - Added icon */}
+          <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg bg-white">
+            <MapPin className="h-4 w-4 text-gray-500" />
+            <select
+              value={selectedVenue}
+              onChange={(e) => onVenueChange(e.target.value)}
+              className="text-sm bg-transparent border-none focus:outline-none focus:ring-0 cursor-pointer"
             >
-              Today
-            </button>
-          )}
-        </div>
-
-        {/* Right: Filters */}
-        <div className="flex items-center gap-2">
-          {/* Venue Filter */}
-          <select
-            value={selectedVenue}
-            onChange={(e) => onVenueChange(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-          >
-            {venues.map((venue) => (
-              <option key={venue.id} value={venue.id}>
-                {venue.name}
-              </option>
-            ))}
-          </select>
+              {venues.map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Team Filter Dropdown */}
           <TeamFilterDropdown
@@ -261,6 +234,30 @@ export function CalendarFilters({
             selectedTeamMemberIds={selectedTeamMemberIds}
             onTeamMemberIdsChange={onTeamMemberIdsChange}
           />
+        </div>
+
+        {/* ✅ CHANGED: Right Section - View Type Selector */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onViewTypeChange('day')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              viewType === 'day'
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Day
+          </button>
+          <button
+            onClick={() => onViewTypeChange('week')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              viewType === 'week'
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Week
+          </button>
         </div>
       </div>
     </div>

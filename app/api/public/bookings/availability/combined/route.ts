@@ -11,7 +11,7 @@ interface BookingGroupData {
 
 interface RawAppointmentFromDB {
   id: string;
-  team_member_id: string; // ✅ ADDED: Team member ID is part of appointment
+  team_member_id: string;
   start_time: string;
   end_time: string;
   service_name: string;
@@ -21,7 +21,7 @@ interface RawAppointmentFromDB {
 
 interface AppointmentWithBookingGroup {
   id: string;
-  team_member_id: string; // ✅ ADDED: Team member ID is part of appointment
+  team_member_id: string;
   start_time: string;
   end_time: string;
   service_name: string;
@@ -51,10 +51,19 @@ interface VenueClosedDay {
   reason: string | null;
 }
 
+interface BlockedTime {
+  id: string;
+  team_member_id: string;
+  start_time: string;
+  end_time: string;
+  reason: string | null;
+}
+
 /**
  * GET /api/public/bookings/availability/combined
  * Returns combined availability across ALL team members at a venue
  * Used when customer selects "Any professional"
+ * ✅ UPDATED: Now excludes blocked times from availability
  */
 export async function GET(request: NextRequest) {
   try {
@@ -90,7 +99,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 2. Get all team members' shifts for this venue and date
+    // 2. Get all shifts for this venue on this date
     const { data: shifts, error: shiftsError } = await supabaseAdmin
       .from('shifts')
       .select('id, team_member_id, start_time, end_time, notes')
@@ -117,7 +126,7 @@ export async function GET(request: NextRequest) {
 
     const typedShifts = shifts as Shift[];
 
-    // 3. Get all appointments for this venue and date
+    // 3. Get all appointments for this venue on this date
     const { data: appointments, error: appointmentsError } = await supabaseAdmin
       .from('appointments')
       .select(
@@ -145,11 +154,10 @@ export async function GET(request: NextRequest) {
 
     const rawAppointments = (appointments || []) as RawAppointmentFromDB[];
 
-    // Transform appointments to ensure booking_groups is a single object
     const typedAppointments: AppointmentWithBookingGroup[] =
       rawAppointments.map((appt) => ({
         id: appt.id,
-        team_member_id: appt.team_member_id, // ✅ ADDED: Include team_member_id
+        team_member_id: appt.team_member_id,
         start_time: appt.start_time,
         end_time: appt.end_time,
         service_name: appt.service_name,
@@ -159,14 +167,31 @@ export async function GET(request: NextRequest) {
           : appt.booking_groups,
       }));
 
-    // 4. Generate available slots for each team member
+    // 4. ✅ NEW: Get all blocked times for this venue on this date
+    const { data: blockedTimes, error: blockedError } = await supabaseAdmin
+      .from('blocked_times')
+      .select('id, team_member_id, start_time, end_time, reason')
+      .eq('venue_id', venueId)
+      .eq('blocked_date', date);
+
+    if (blockedError) {
+      console.error('Error fetching blocked times:', blockedError);
+      return NextResponse.json(
+        { error: 'Failed to fetch blocked times' },
+        { status: 500 }
+      );
+    }
+
+    const typedBlockedTimes = (blockedTimes || []) as BlockedTime[];
+
+    // 5. Generate available slots for each team member
     const teamMemberSlots: Record<string, string[]> = {};
     const allPossibleSlots = new Set<string>();
 
     for (const shift of typedShifts) {
       // Get this team member's appointments
       const memberAppointments = typedAppointments.filter(
-        (appt) => appt.team_member_id === shift.team_member_id // ✅ FIXED: Now properly typed
+        (appt) => appt.team_member_id === shift.team_member_id
       );
 
       const bookedSlots: BookedSlot[] = memberAppointments.map((appt) => ({
@@ -180,11 +205,17 @@ export async function GET(request: NextRequest) {
         status: appt.status,
       }));
 
-      // Generate available slots for this team member
+      // ✅ NEW: Get this team member's blocked times
+      const memberBlockedTimes = typedBlockedTimes.filter(
+        (blocked) => blocked.team_member_id === shift.team_member_id
+      );
+
+      // Generate available slots for this team member (excluding appointments AND blocked times)
       const slots = generateAvailableSlots(
         shift.start_time,
         shift.end_time,
         bookedSlots,
+        memberBlockedTimes, // ✅ NEW: Pass blocked times
         30 // 30-minute intervals
       );
 
@@ -194,7 +225,7 @@ export async function GET(request: NextRequest) {
       slots.forEach((slot) => allPossibleSlots.add(slot));
     }
 
-    // 5. Convert set to sorted array
+    // 6. Convert set to sorted array
     const combinedSlots = Array.from(allPossibleSlots).sort();
 
     return NextResponse.json({
@@ -203,7 +234,7 @@ export async function GET(request: NextRequest) {
       message:
         combinedSlots.length > 0
           ? `${combinedSlots.length} time slots available across ${typedShifts.length} team members`
-          : 'All team members are fully booked for this date',
+          : 'All team members are fully booked or blocked for this date',
       slots: combinedSlots,
       teamMemberSlots, // Which team members are available for each slot
     });
@@ -216,11 +247,14 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Helper function to generate available time slots
+/**
+ * ✅ UPDATED: Generate available time slots excluding BOTH appointments AND blocked times
+ */
 function generateAvailableSlots(
   shiftStart: string,
   shiftEnd: string,
   bookedSlots: BookedSlot[],
+  blockedTimes: BlockedTime[], // ✅ NEW parameter
   intervalMinutes: number
 ): string[] {
   const slots: string[] = [];
@@ -248,7 +282,15 @@ function generateAvailableSlots(
       return minutes >= bookedStart && minutes < bookedEnd;
     });
 
-    if (!isBooked) {
+    // ✅ NEW: Check if this slot overlaps with any blocked time
+    const isBlocked = blockedTimes.some((blocked) => {
+      const blockedStart = timeToMinutes(blocked.start_time);
+      const blockedEnd = timeToMinutes(blocked.end_time);
+      return minutes >= blockedStart && minutes < blockedEnd;
+    });
+
+    // Only add slot if it's neither booked nor blocked
+    if (!isBooked && !isBlocked) {
       slots.push(timeSlot);
     }
   }
