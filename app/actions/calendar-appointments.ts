@@ -718,7 +718,7 @@ export async function deleteCalendarAppointment(
  */
 export async function resizeAppointment({
   appointmentId,
-  bookingId,
+
   newStartTime,
   newEndTime,
   newDuration,
@@ -743,13 +743,6 @@ export async function resizeAppointment({
       return { success: false, error: 'Appointment not found' };
     }
 
-    // ✅ REMOVED: Conflict checking (lines 2-11 deleted)
-    // Overlapping appointments are now allowed!
-
-    // 2. Adjust price based on duration change
-    const pricePerMinute = appointment.price / appointment.duration_minutes;
-    const newPrice = Math.round(pricePerMinute * newDuration * 100) / 100;
-
     // 3. Update appointment
     const { error: updateError } = await supabaseAdmin
       .from('appointments')
@@ -757,7 +750,7 @@ export async function resizeAppointment({
         start_time: newStartTime,
         end_time: newEndTime,
         duration_minutes: newDuration,
-        price: newPrice,
+
         updated_at: new Date().toISOString(),
       })
       .eq('id', appointmentId);
@@ -766,9 +759,6 @@ export async function resizeAppointment({
       console.error('Error updating appointment:', updateError);
       return { success: false, error: 'Failed to update appointment' };
     }
-
-    // 4. Recalculate booking group totals
-    await recalculateBookingTotals(bookingId);
 
     revalidatePath('/admin/calendar');
     return { success: true };
@@ -780,23 +770,28 @@ export async function resizeAppointment({
 
 /**
  * Move appointment (drag and drop)
- * Duration and price remain the same, only start/end times change
+ * Supports both vertical (time change) and horizontal (team member change) drag
+ * Duration stays the same, price recalculates if team member changes
  */
 export async function moveAppointment({
   appointmentId,
-
+  bookingId,
   newStartTime,
   newEndTime,
+  newTeamMemberId,
 }: {
   appointmentId: string;
   bookingId: string;
   newStartTime: string; // HH:MM format
   newEndTime: string; // HH:MM format
+  newTeamMemberId?: string; // Optional: for horizontal drag to reassign team member
 }): Promise<{ success: boolean; error?: string }> {
   try {
     await requireAdmin();
 
-    // 1. Get current appointment
+    // =====================================================
+    // 1. GET CURRENT APPOINTMENT
+    // =====================================================
     const { data: appointment, error: fetchError } = await supabaseAdmin
       .from('appointments')
       .select('*, booking_groups!inner(booking_date, venue_id)')
@@ -807,17 +802,89 @@ export async function moveAppointment({
       return { success: false, error: 'Appointment not found' };
     }
 
-    // ✅ REMOVED: Conflict checking (lines 2-11 deleted)
+    // ✅ REMOVED: Conflict checking
     // Overlapping appointments are now allowed!
 
-    // 2. Update appointment (duration and price stay the same!)
+    // =====================================================
+    // 2. CHECK IF TEAM MEMBER IS CHANGING
+    // =====================================================
+    const isTeamMemberChanging =
+      newTeamMemberId && newTeamMemberId !== appointment.team_member_id;
+
+    let newPrice = appointment.price; // Default: keep existing price
+
+    if (isTeamMemberChanging) {
+      // =====================================================
+      // 3. VALIDATE SERVICE ASSIGNMENT
+      // =====================================================
+      const { data: serviceAssignment, error: assignmentError } =
+        await supabaseAdmin
+          .from('service_team_members')
+          .select('custom_price')
+          .eq('service_id', appointment.service_id)
+          .eq('team_member_id', newTeamMemberId)
+          .single();
+
+      if (assignmentError || !serviceAssignment) {
+        // Get team member name for better error message
+        const { data: teamMember } = await supabaseAdmin
+          .from('users')
+          .select('first_name, last_name')
+          .eq('id', newTeamMemberId)
+          .single();
+
+        const teamMemberName = teamMember
+          ? `${teamMember.first_name} ${teamMember.last_name || ''}`.trim()
+          : 'This team member';
+
+        return {
+          success: false,
+          error: `${teamMemberName} is not assigned to perform "${appointment.service_name}". Please assign this service to them first in the Services page.`,
+        };
+      }
+
+      // =====================================================
+      // 4. CALCULATE NEW PRICE
+      // =====================================================
+      // Use custom price if set, otherwise get service base price
+      if (serviceAssignment.custom_price !== null) {
+        newPrice = serviceAssignment.custom_price;
+      } else {
+        // Fetch service base price
+        const { data: service } = await supabaseAdmin
+          .from('services')
+          .select('price')
+          .eq('id', appointment.service_id)
+          .single();
+
+        newPrice = service?.price || appointment.price;
+      }
+    }
+
+    // =====================================================
+    // 5. UPDATE APPOINTMENT
+    // =====================================================
+    const updateData: {
+      start_time: string;
+      end_time: string;
+      updated_at: string;
+      team_member_id?: string;
+      price?: number;
+    } = {
+      start_time: newStartTime,
+      end_time: newEndTime,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Add team member and price if changing
+    if (isTeamMemberChanging) {
+      updateData.team_member_id = newTeamMemberId;
+      updateData.price = newPrice;
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from('appointments')
-      .update({
-        start_time: newStartTime,
-        end_time: newEndTime,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq('id', appointmentId);
 
     if (updateError) {
@@ -825,6 +892,16 @@ export async function moveAppointment({
       return { success: false, error: 'Failed to move appointment' };
     }
 
+    // =====================================================
+    // 6. RECALCULATE BOOKING TOTALS (if price changed)
+    // =====================================================
+    if (isTeamMemberChanging) {
+      await recalculateBookingTotals(bookingId);
+    }
+
+    // =====================================================
+    // 7. SUCCESS - REVALIDATE & RETURN
+    // =====================================================
     revalidatePath('/admin/calendar');
     return { success: true };
   } catch (error) {
@@ -832,6 +909,7 @@ export async function moveAppointment({
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
+
 /**
  * Helper function: Recalculate booking group totals
  * Called after resizing appointments that may change price

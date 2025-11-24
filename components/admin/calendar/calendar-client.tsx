@@ -1,7 +1,7 @@
 // components/admin/calendar/calendar-client.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { PageHeader } from '@/components/admin';
 import { CalendarFilters } from './calendar-filters';
 import { DayView } from './day-view';
@@ -10,6 +10,7 @@ import { getStartOfWeek, getToday, addDays } from '@/lib/shift-helpers';
 import { getCalendarBookings } from '@/app/actions/bookings';
 import { getBlockedTimes } from '@/app/actions/blocked-times';
 import type { CalendarBooking, BlockedTime } from '@/types/calendar';
+import { Loader2 } from 'lucide-react';
 
 export type CalendarViewType = 'day' | 'week';
 export type TeamFilterMode = 'scheduled' | 'all';
@@ -34,9 +35,20 @@ export interface AssignedTeamMember {
   photo_url: string | null;
 }
 
-export function CalendarClient() {
+// ✅ Props interface for server-provided venues
+interface CalendarClientProps {
+  initialVenues: Array<{ id: string; name: string }>;
+}
+
+// ✅ Receive initialVenues as prop
+export function CalendarClient({ initialVenues }: CalendarClientProps) {
   const [viewType, setViewType] = useState<CalendarViewType>('day');
-  const [selectedVenue, setSelectedVenue] = useState<string>('');
+
+  // ✅ Initialize with first venue from props
+  const [selectedVenue, setSelectedVenue] = useState<string>(
+    initialVenues[0]?.id || ''
+  );
+
   const [currentDate, setCurrentDate] = useState<string>(getToday());
   const [currentWeekStart, setCurrentWeekStart] = useState<string>(
     getStartOfWeek(getToday())
@@ -49,7 +61,10 @@ export function CalendarClient() {
   >([]);
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([]);
 
-  // NEW: Team filtering state
+  // ✅ FIXED: Use useRef instead of useState to avoid dependency warning
+  const previousBookingsRef = useRef<CalendarBooking[]>([]);
+
+  // Team filtering state
   const [teamFilterMode, setTeamFilterMode] =
     useState<TeamFilterMode>('scheduled');
   const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState<string[]>(
@@ -94,6 +109,9 @@ export function CalendarClient() {
     const fetchData = async () => {
       if (!selectedVenue) return;
 
+      // ✅ FIXED: Store in ref (doesn't cause re-render or need dependency)
+      previousBookingsRef.current = bookings;
+
       setLoading(true);
       try {
         let startDate: string;
@@ -107,14 +125,17 @@ export function CalendarClient() {
           endDate = addDays(currentWeekStart, 6);
         }
 
-        // Fetch bookings (no team member filter - get all for venue)
-        const bookingsResult = await getCalendarBookings({
-          venueId: selectedVenue,
-          teamMemberId: undefined,
-          startDate,
-          endDate,
-          viewType,
-        });
+        // ✅ OPTIMIZED: Fetch bookings and blocked times in parallel
+        const [bookingsResult, blockedTimesResult] = await Promise.all([
+          getCalendarBookings({
+            venueId: selectedVenue,
+            teamMemberId: undefined,
+            startDate,
+            endDate,
+            viewType,
+          }),
+          getBlockedTimes(selectedVenue, startDate, endDate),
+        ]);
 
         if (bookingsResult.success && bookingsResult.data) {
           setBookings(bookingsResult.data);
@@ -125,12 +146,6 @@ export function CalendarClient() {
           setShifts([]);
           setAssignedTeamMembers([]);
         }
-
-        const blockedTimesResult = await getBlockedTimes(
-          selectedVenue,
-          startDate,
-          endDate
-        );
 
         if (blockedTimesResult.success && blockedTimesResult.data) {
           setBlockedTimes(blockedTimesResult.data);
@@ -149,6 +164,8 @@ export function CalendarClient() {
     };
 
     fetchData();
+    // ✅ FIXED: No need to include 'bookings' in dependencies
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewType, selectedVenue, currentDate, currentWeekStart]);
 
   // Refresh calendar data
@@ -168,25 +185,23 @@ export function CalendarClient() {
         endDate = addDays(currentWeekStart, 6);
       }
 
-      const bookingsResult = await getCalendarBookings({
-        venueId: selectedVenue,
-        teamMemberId: undefined,
-        startDate,
-        endDate,
-        viewType,
-      });
+      // ✅ OPTIMIZED: Parallel fetching
+      const [bookingsResult, blockedTimesResult] = await Promise.all([
+        getCalendarBookings({
+          venueId: selectedVenue,
+          teamMemberId: undefined,
+          startDate,
+          endDate,
+          viewType,
+        }),
+        getBlockedTimes(selectedVenue, startDate, endDate),
+      ]);
 
       if (bookingsResult.success && bookingsResult.data) {
         setBookings(bookingsResult.data);
         setShifts(bookingsResult.shifts || []);
         setAssignedTeamMembers(bookingsResult.assignedTeamMembers || []);
       }
-
-      const blockedTimesResult = await getBlockedTimes(
-        selectedVenue,
-        startDate,
-        endDate
-      );
 
       if (blockedTimesResult.success && blockedTimesResult.data) {
         setBlockedTimes(blockedTimesResult.data);
@@ -198,15 +213,21 @@ export function CalendarClient() {
     }
   };
 
-  // Filter data by selected team members
+  // ✅ FIXED: Use ref for optimistic UI
+  const displayBookings =
+    loading && previousBookingsRef.current.length > 0
+      ? previousBookingsRef.current
+      : bookings;
+
+  // Filter data by selected team members (use displayBookings for optimistic UI)
   const filteredBookings = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
-    return bookings.filter((booking) =>
+    return displayBookings.filter((booking) =>
       booking.appointments.some((appt) =>
         selectedTeamMemberIds.includes(appt.team_member_id)
       )
     );
-  }, [bookings, selectedTeamMemberIds]);
+  }, [displayBookings, selectedTeamMemberIds]);
 
   const filteredShifts = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
@@ -215,14 +236,6 @@ export function CalendarClient() {
     );
   }, [shifts, selectedTeamMemberIds]);
 
-  const filteredBlockedTimes = useMemo(() => {
-    if (selectedTeamMemberIds.length === 0) return [];
-    return blockedTimes.filter((blocked) =>
-      selectedTeamMemberIds.includes(blocked.team_member_id)
-    );
-  }, [blockedTimes, selectedTeamMemberIds]);
-
-  // Get filtered assigned team members for views
   const filteredAssignedTeamMembers = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
     return assignedTeamMembers.filter((member) =>
@@ -230,44 +243,53 @@ export function CalendarClient() {
     );
   }, [assignedTeamMembers, selectedTeamMemberIds]);
 
+  const filteredBlockedTimes = useMemo(() => {
+    if (selectedTeamMemberIds.length === 0) return [];
+    return blockedTimes.filter((blocked) =>
+      selectedTeamMemberIds.includes(blocked.team_member_id)
+    );
+  }, [blockedTimes, selectedTeamMemberIds]);
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
+    <div className="space-y-6">
       <PageHeader
         title="Calendar"
-        description="View and manage bookings across your team"
+        description="Manage appointments and schedules"
       />
 
-      {/* Filters */}
-      <div className="px-4 sm:px-6 py-4 border-b border-gray-200 bg-white">
-        <CalendarFilters
-          viewType={viewType}
-          onViewTypeChange={setViewType}
-          selectedVenue={selectedVenue}
-          onVenueChange={setSelectedVenue}
-          currentDate={currentDate}
-          onDateChange={setCurrentDate}
-          currentWeekStart={currentWeekStart}
-          onWeekChange={setCurrentWeekStart}
-          teamFilterMode={teamFilterMode}
-          onTeamFilterModeChange={setTeamFilterMode}
-          assignedTeamMembers={assignedTeamMembers}
-          scheduledTeamMemberIds={scheduledTeamMemberIds}
-          selectedTeamMemberIds={selectedTeamMemberIds}
-          onTeamMemberIdsChange={setSelectedTeamMemberIds}
-        />
-      </div>
+      <CalendarFilters
+        venues={initialVenues}
+        viewType={viewType}
+        onViewTypeChange={setViewType}
+        selectedVenue={selectedVenue}
+        onVenueChange={setSelectedVenue}
+        currentDate={currentDate}
+        onDateChange={setCurrentDate}
+        currentWeekStart={currentWeekStart}
+        onWeekChange={setCurrentWeekStart}
+        teamFilterMode={teamFilterMode}
+        onTeamFilterModeChange={setTeamFilterMode}
+        assignedTeamMembers={filteredAssignedTeamMembers}
+        scheduledTeamMemberIds={scheduledTeamMemberIds}
+        selectedTeamMemberIds={selectedTeamMemberIds}
+        onTeamMemberIdsChange={setSelectedTeamMemberIds}
+      />
 
-      {/* Calendar View */}
-      <div className="flex-1 overflow-auto p-4 sm:p-6">
-        {loading ? (
-          <div className="flex items-center justify-center h-96">
-            <div className="text-gray-600">Loading calendar...</div>
+      {/* ✅ Subtle loading indicator (doesn't block view) */}
+      {loading && (
+        <div className="fixed top-20 right-4 z-50">
+          <div className="flex items-center gap-2 bg-white rounded-lg shadow-lg px-4 py-2 border border-gray-200">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+            <span className="text-sm text-gray-600">Updating...</span>
           </div>
-        ) : !selectedVenue ? (
+        </div>
+      )}
+
+      <div>
+        {!selectedVenue ? (
           <div className="flex items-center justify-center h-96 border-2 border-dashed border-gray-200 rounded-lg">
             <p className="text-gray-600">
-              Please select a venue to view calendar
+              Please select a venue to view the calendar
             </p>
           </div>
         ) : selectedTeamMemberIds.length === 0 ? (

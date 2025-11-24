@@ -1,7 +1,7 @@
 // components/admin/calendar/calendar-filters.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -31,6 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 
 interface CalendarFiltersProps {
+  venues: Array<{ id: string; name: string }>; // ✅ Receive venues as prop
   viewType: CalendarViewType;
   onViewTypeChange: (type: CalendarViewType) => void;
   selectedVenue: string;
@@ -48,6 +49,7 @@ interface CalendarFiltersProps {
 }
 
 export function CalendarFilters({
+  venues, // ✅ Use prop instead of state
   viewType,
   onViewTypeChange,
   selectedVenue,
@@ -63,30 +65,7 @@ export function CalendarFilters({
   selectedTeamMemberIds,
   onTeamMemberIdsChange,
 }: CalendarFiltersProps) {
-  const [venues, setVenues] = useState<Array<{ id: string; name: string }>>([]);
   const [calendarOpen, setCalendarOpen] = useState(false);
-
-  // Fetch venues
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const venuesRes = await fetch('/api/admin/venues');
-        if (venuesRes.ok) {
-          const venuesData = await venuesRes.json();
-          setVenues(venuesData);
-
-          // Set first venue as default if none selected
-          if (venuesData.length > 0 && !selectedVenue) {
-            onVenueChange(venuesData[0].id);
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching venues:', error);
-      }
-    };
-
-    fetchData();
-  }, [selectedVenue, onVenueChange]);
 
   // Navigation handlers
   const handlePrevious = () => {
@@ -154,11 +133,10 @@ export function CalendarFilters({
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
-      {/* ✅ CHANGED: Single row layout with space-between */}
       <div className="flex items-center justify-between gap-4">
-        {/* ✅ CHANGED: Left Section - Today + Date Navigation + Venue + Team */}
+        {/* Left Section - Today + Date Navigation + Venue + Team */}
         <div className="flex items-center gap-3">
-          {/* Today Button - Always visible on left */}
+          {/* Today Button */}
           <button
             onClick={handleToday}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
@@ -195,9 +173,7 @@ export function CalendarFilters({
                 mode="single"
                 selected={getCurrentDateObject()}
                 onSelect={handleDateSelect}
-                numberOfMonths={2}
                 initialFocus
-                className="rounded-md border"
               />
             </PopoverContent>
           </Popover>
@@ -210,14 +186,17 @@ export function CalendarFilters({
             <ChevronRight className="h-5 w-5 text-gray-600" />
           </button>
 
-          {/* Venue Filter - Added icon */}
-          <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg bg-white">
-            <MapPin className="h-4 w-4 text-gray-500" />
+          {/* Venue Filter */}
+          <div className="relative">
+            <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
             <select
               value={selectedVenue}
               onChange={(e) => onVenueChange(e.target.value)}
-              className="text-sm bg-transparent border-none focus:outline-none focus:ring-0 cursor-pointer"
+              className="h-9 pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors appearance-none cursor-pointer min-w-[180px]"
             >
+              {venues.length === 0 && (
+                <option value="">No venues available</option>
+              )}
               {venues.map((venue) => (
                 <option key={venue.id} value={venue.id}>
                   {venue.name}
@@ -226,7 +205,7 @@ export function CalendarFilters({
             </select>
           </div>
 
-          {/* Team Filter Dropdown */}
+          {/* Team Filter Dropdown - ✅ FIXED: Correct prop names */}
           <TeamFilterDropdown
             teamFilterMode={teamFilterMode}
             onTeamFilterModeChange={onTeamFilterModeChange}
@@ -236,25 +215,27 @@ export function CalendarFilters({
           />
         </div>
 
-        {/* ✅ CHANGED: Right Section - View Type Selector */}
-        <div className="flex items-center gap-2">
+        {/* Right Section - View Toggle */}
+        <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
           <button
             onClick={() => onViewTypeChange('day')}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
               viewType === 'day'
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            )}
           >
             Day
           </button>
           <button
             onClick={() => onViewTypeChange('week')}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
               viewType === 'week'
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            )}
           >
             Week
           </button>
