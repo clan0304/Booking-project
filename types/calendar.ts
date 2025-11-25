@@ -231,6 +231,7 @@ export interface AppointmentInBooking {
   status: 'confirmed' | 'cancelled' | 'completed' | 'no_show';
   notes: string | null;
   created_at: string;
+  category_color?: string | null;
 
   // Relations
   team_member?: {
