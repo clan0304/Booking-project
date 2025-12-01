@@ -57,6 +57,37 @@ export function getToday(): string {
 }
 
 /**
+ * Format date as YYYY-MM-DD using LOCAL timezone
+ * Use for user-facing calendar selection
+ */
+export function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Get today's date as YYYY-MM-DD using LOCAL timezone
+ * Use for user-facing calendar operations (Today button, etc.)
+ */
+export function getLocalToday(): string {
+  return formatLocalDate(new Date());
+}
+
+/**
+ * Get start of week using LOCAL timezone
+ * Use for user-facing week navigation
+ */
+export function getLocalStartOfWeek(dateStr?: string): string {
+  const date = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
+  const day = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const daysToMonday = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - daysToMonday);
+  return formatLocalDate(date);
+}
+
+/**
  * Get tomorrow's date as YYYY-MM-DD
  */
 export function getTomorrow(): string {
@@ -528,7 +559,7 @@ export function getShiftsForMemberAndDate(
 /**
  * Check if a time slot has a blocked time
  * @param timeSlot - Time in "HH:MM" format
- * @param blockedTimes - Array of blocked times
+ * @param blockexdTimes - Array of blocked times
  * @returns true if the time slot is blocked
  */
 export function isTimeBlocked(

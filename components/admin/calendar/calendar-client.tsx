@@ -6,7 +6,11 @@ import { PageHeader } from '@/components/admin';
 import { CalendarFilters } from './calendar-filters';
 import { DayView } from './day-view';
 import { WeekView } from './week-view';
-import { getStartOfWeek, getToday, addDays } from '@/lib/shift-helpers';
+import {
+  getLocalStartOfWeek,
+  getLocalToday,
+  addDays,
+} from '@/lib/shift-helpers';
 import { getCalendarBookings } from '@/app/actions/bookings';
 import { getBlockedTimes } from '@/app/actions/blocked-times';
 import type { CalendarBooking, BlockedTime } from '@/types/calendar';
@@ -49,9 +53,9 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
     initialVenues[0]?.id || ''
   );
 
-  const [currentDate, setCurrentDate] = useState<string>(getToday());
+  const [currentDate, setCurrentDate] = useState<string>(getLocalToday());
   const [currentWeekStart, setCurrentWeekStart] = useState<string>(
-    getStartOfWeek(getToday())
+    getLocalStartOfWeek()
   );
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState<CalendarBooking[]>([]);

@@ -9,11 +9,11 @@ import {
   MapPin,
 } from 'lucide-react';
 import {
-  getStartOfWeek,
+  getLocalStartOfWeek,
   addDays,
   addWeeks,
   formatDateRange,
-  getToday,
+  getLocalToday,
   formatDateDisplay,
 } from '@/lib/shift-helpers';
 import type {
@@ -84,11 +84,13 @@ export function CalendarFilters({
     }
   };
 
+  // In handleToday function (or wherever the Today button click is handled)
   const handleToday = () => {
+    const today = getLocalToday(); // Use local time!
     if (viewType === 'day') {
-      onDateChange(getToday());
+      onDateChange(today);
     } else {
-      onWeekChange(getStartOfWeek(getToday()));
+      onWeekChange(getLocalStartOfWeek(today));
     }
   };
 
@@ -106,7 +108,7 @@ export function CalendarFilters({
       onDateChange(selectedDate);
     } else {
       // For week view, navigate to the week containing the selected date
-      onWeekChange(getStartOfWeek(selectedDate));
+      onWeekChange(getLocalStartOfWeek(selectedDate));
     }
 
     setCalendarOpen(false);

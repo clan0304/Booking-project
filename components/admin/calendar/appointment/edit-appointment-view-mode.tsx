@@ -5,33 +5,40 @@ import { useState } from 'react';
 import {
   ChevronDown,
   Plus,
-  Edit2,
   Trash2,
   MoreVertical,
   Check,
-  Pencil,
   Phone,
   Mail,
   MessageSquare,
   X,
+  ChevronRight,
 } from 'lucide-react';
 import Image from 'next/image';
-import type { ViewModeProps } from './edit-appointment-types';
+import type {
+  ViewModeProps,
+  EditingAppointment,
+} from './edit-appointment-types';
 
 export function ViewMode({
   booking,
   editingAppointments,
-
+  availableTeamMembers,
+  availableServices,
   bookingStatus,
   showStatusDropdown,
   showMoreMenu,
   bookingNotes,
   allowEdit,
+  hasUnsavedChanges,
+  isSaving,
   onStatusChange,
   onToggleStatusDropdown,
   onToggleMoreMenu,
   onCheckout,
+  onSave,
   onToggleEdit,
+  onEditAppointment,
   onDeleteBooking,
   onDeleteAppointment,
   onClose,
@@ -103,258 +110,77 @@ export function ViewMode({
     return colors[index];
   };
 
-  // Client Section Component (reusable for both layouts)
-  const ClientSection = () => (
-    <div className="p-4 lg:p-6">
-      {/* Client Display */}
-      <div className="text-center">
-        {/* Client Avatar */}
-        <div className="flex justify-center mb-3">
-          {getClientPhoto() ? (
-            <div className="relative w-16 h-16 lg:w-20 lg:h-20 rounded-full overflow-hidden">
-              <Image
-                src={getClientPhoto()!}
-                alt={getClientName()}
-                fill
-                className="object-cover"
-              />
-            </div>
-          ) : (
-            <div
-              className="w-16 h-16 lg:w-20 lg:h-20 rounded-full flex items-center justify-center text-white text-xl lg:text-2xl font-semibold"
-              style={{
-                background: `linear-gradient(135deg, ${getGradientColors(
-                  getClientName()
-                )})`,
-              }}
-            >
-              {getClientInitials()}
-            </div>
-          )}
-        </div>
+  // Get team member name by ID
+  const getTeamMemberName = (teamMemberId: string): string => {
+    const member = availableTeamMembers.find((m) => m.id === teamMemberId);
+    return member ? `${member.first_name} ${member.last_name}` : '';
+  };
 
-        {/* Client Name */}
-        <div className="font-semibold text-gray-900 text-base lg:text-lg mb-1">
-          {getClientName()}
-        </div>
+  // Get category color - first check appointment, then look up from services
+  const getCategoryColor = (appointment: EditingAppointment): string => {
+    // If appointment already has a color, use it
+    if (appointment.categoryColor) {
+      return appointment.categoryColor;
+    }
 
-        {/* Client Email */}
-        {getClientEmail() && (
-          <div className="text-sm text-gray-500 mb-3">{getClientEmail()}</div>
-        )}
+    // Look up from loaded services
+    const services = availableServices.get(appointment.teamMemberId);
+    if (services) {
+      const service = services.find((s) => s.id === appointment.serviceId);
+      if (service?.service_categories?.color) {
+        return service.service_categories.color;
+      }
+    }
 
-        {/* Contact Actions */}
-        <div className="flex items-center justify-center gap-2 mt-3">
-          {getClientPhone() && (
-            <button
-              className="p-2.5 lg:p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-              title="Call"
-            >
-              <Phone className="w-4 h-4 lg:w-5 lg:h-5 text-gray-600" />
-            </button>
-          )}
-          {getClientEmail() && (
-            <button
-              className="p-2.5 lg:p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-              title="Email"
-            >
-              <Mail className="w-4 h-4 lg:w-5 lg:h-5 text-gray-600" />
-            </button>
-          )}
-          <button
-            className="p-2.5 lg:p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-            title="Message"
-          >
-            <MessageSquare className="w-4 h-4 lg:w-5 lg:h-5 text-gray-600" />
-          </button>
-        </div>
-      </div>
+    // Fallback to purple
+    return '#8B5CF6';
+  };
 
-      {/* Client Details */}
-      {getClientPhone() && (
-        <div className="mt-4 lg:mt-6 pt-4 lg:pt-6 border-t border-gray-200">
-          <div className="text-xs font-medium text-gray-500 uppercase mb-2">
-            Phone
-          </div>
-          <div className="text-sm text-gray-900">{getClientPhone()}</div>
-        </div>
-      )}
-
-      {/* Notes Display */}
-      {bookingNotes && (
-        <div className="mt-4 lg:mt-6 pt-4 lg:pt-6 border-t border-gray-200">
-          <div className="text-xs font-medium text-gray-500 uppercase mb-2">
-            Notes
-          </div>
-          <div className="text-sm text-gray-700">{bookingNotes}</div>
-        </div>
-      )}
-    </div>
-  );
-
-  // Services Section Component (reusable for both layouts)
-  const ServicesSection = () => (
-    <div className="flex-1 overflow-y-auto p-4 lg:p-6">
-      {/* Services Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg lg:text-xl font-bold text-gray-900">Services</h3>
-        <span className="px-2 py-0.5 bg-gray-100 rounded-full text-xs font-medium text-gray-600">
-          {editingAppointments.size}
-        </span>
-      </div>
-      {/* Service Cards */}
-      <div className="space-y-3">
-        {Array.from(editingAppointments.values()).map((appointment) => {
-          const originalAppointment = booking.appointments.find(
-            (a) => a.id === appointment.id
-          );
-          const teamMember = originalAppointment?.team_member;
-          const categoryColor =
-            originalAppointment?.category_color || '#EC4899';
-
-          return (
-            <div
-              key={appointment.id}
-              className="group relative bg-white rounded-lg p-3 lg:p-4 border border-gray-200 border-l-4 hover:bg-gray-50 transition-colors"
-              style={{ borderLeftColor: categoryColor }} // CHANGE THIS - use categoryColor variable
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-gray-900 truncate">
-                    {appointment.serviceName}
-                  </h4>
-                  <div className="flex items-center gap-2 text-sm text-gray-500 mt-1 flex-wrap">
-                    <span>{formatTime(appointment.startTime)}</span>
-                    <span>•</span>
-                    <span>{appointment.duration}min</span>
-                    <span>•</span>
-                    <span className="truncate">
-                      {teamMember?.first_name || 'Unknown'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Right side - Price and Hover Icons */}
-                <div className="relative flex items-center justify-end w-24 lg:w-28 flex-shrink-0">
-                  {/* Price - visible by default, hidden on hover */}
-                  <div className="absolute right-0 group-hover:opacity-0 group-hover:invisible transition-all duration-200">
-                    <p className="font-medium text-gray-900 text-right whitespace-nowrap">
-                      {getPriceDisplay(appointment.price)}
-                    </p>
-                  </div>
-
-                  {/* Hover Icons - hidden by default, visible on hover */}
-                  {allowEdit && (
-                    <div className="absolute right-0 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 flex items-center gap-1">
-                      <button
-                        onClick={onToggleEdit}
-                        className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
-                        title="Edit service"
-                      >
-                        <Pencil className="w-4 h-4 lg:w-5 lg:h-5 text-gray-500" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClick(appointment.id)}
-                        className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
-                        title="Delete service"
-                      >
-                        <Trash2 className="w-4 h-4 lg:w-5 lg:h-5 text-gray-500" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Delete Confirmation Tooltip */}
-              {deleteConfirmId === appointment.id && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={handleCancelDelete}
-                  />
-                  <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-lg shadow-xl border border-gray-200 p-4 w-64">
-                    <div className="absolute -top-2 right-6 w-4 h-4 bg-white border-l border-t border-gray-200 transform rotate-45" />
-                    <p className="text-sm text-gray-700 mb-3">
-                      Remove this service from the booking?
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleCancelDelete}
-                        disabled={isDeleting}
-                        className="flex-1 px-3 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => handleConfirmDelete(appointment.id)}
-                        disabled={isDeleting}
-                        className="flex-1 px-3 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                      >
-                        {isDeleting ? (
-                          <>
-                            <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent" />
-                            <span>Deleting...</span>
-                          </>
-                        ) : (
-                          <span>Remove</span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Add Service Button */}
-      {allowEdit && (
-        <button
-          onClick={onToggleEdit}
-          className="mt-4 flex items-center gap-2 px-4 py-2 text-sm lg:text-base text-gray-700 border border-gray-300 rounded-full hover:bg-gray-50 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add service</span>
-        </button>
-      )}
-    </div>
+  // Sort appointments by start time
+  const sortedAppointments = Array.from(editingAppointments.entries()).sort(
+    ([, a], [, b]) => {
+      const timeToMinutes = (time: string) => {
+        const [hours, minutes] = time.split(':').map(Number);
+        return hours * 60 + minutes;
+      };
+      return timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+    }
   );
 
   return (
     <div className="flex flex-col h-full">
-      {/* Purple Header - Full Width */}
+      {/* Header */}
       <div className="flex-shrink-0 bg-gradient-to-r from-purple-600 to-purple-700 text-white px-4 lg:px-6 py-3 lg:py-4">
         <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-xl lg:text-2xl font-bold truncate">
+              <span className="text-lg lg:text-xl font-bold truncate">
                 {formatDate(booking.booking_date)}
               </span>
-              <ChevronDown className="w-4 h-4 lg:w-5 lg:h-5 mt-0.5 lg:mt-1 opacity-70 flex-shrink-0" />
             </div>
-            <div className="flex items-center gap-2 text-white/80 text-xs lg:text-sm mt-1">
+            <div className="flex items-center gap-2 text-white/80 text-xs lg:text-sm mt-0.5">
               <span>
                 {formatTime(booking.appointments[0]?.start_time || '00:00')}
               </span>
               <span>•</span>
-              <span>Doesn&apos;t repeat</span>
+              <span>
+                {editingAppointments.size} service
+                {editingAppointments.size > 1 ? 's' : ''}
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 lg:gap-3 ml-2 flex-shrink-0">
+          <div className="flex items-center gap-2 ml-2 flex-shrink-0">
             {/* Status Dropdown */}
             <div className="relative">
               <button
                 onClick={onToggleStatusDropdown}
-                className={`flex items-center gap-1.5 lg:gap-2 px-3 lg:px-4 py-1.5 lg:py-2 rounded-full border-2 border-white/30 hover:bg-white/10 transition-colors text-sm lg:text-base ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-white/30 hover:bg-white/10 transition-colors text-sm ${
                   showStatusDropdown ? 'bg-white/10' : ''
                 }`}
               >
-                <span className="font-medium">
-                  {getStatusLabel(bookingStatus)}
-                </span>
-                <ChevronDown className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
+                <span>{getStatusLabel(bookingStatus)}</span>
+                <ChevronDown className="w-3 h-3" />
               </button>
 
               {showStatusDropdown && (
@@ -363,35 +189,30 @@ export function ViewMode({
                     className="fixed inset-0 z-40"
                     onClick={onToggleStatusDropdown}
                   />
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                  <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 py-1 min-w-[160px]">
                     {(
                       [
                         'confirmed',
-                        'pending',
-                        'cancelled',
                         'completed',
+                        'cancelled',
                         'no_show',
                       ] as const
                     ).map((status) => (
                       <button
                         key={status}
                         onClick={() => onStatusChange(status)}
-                        className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between ${
-                          status === bookingStatus ? 'font-medium' : ''
-                        }`}
+                        className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2 text-sm"
                       >
+                        {bookingStatus === status && (
+                          <Check className="w-4 h-4 text-purple-600" />
+                        )}
                         <span
                           className={
-                            status === bookingStatus
-                              ? 'text-purple-600'
-                              : 'text-gray-700'
+                            bookingStatus === status ? 'text-purple-600' : ''
                           }
                         >
                           {getStatusLabel(status)}
                         </span>
-                        {status === bookingStatus && (
-                          <Check className="w-4 h-4 text-purple-600" />
-                        )}
                       </button>
                     ))}
                   </div>
@@ -399,55 +220,13 @@ export function ViewMode({
               )}
             </div>
 
-            {/* Close Button */}
-            <button
-              onClick={onClose}
-              className="p-1.5 lg:p-2 hover:bg-white/10 rounded-lg transition-colors"
-            >
-              <X className="w-4 h-4 lg:w-5 lg:h-5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content - Responsive Layout */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* LEFT SIDEBAR - Client Section (Desktop: side, Mobile: top) */}
-        <div className="lg:w-64 border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50 flex-shrink-0">
-          <ClientSection />
-        </div>
-
-        {/* RIGHT MAIN AREA - Services Section */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <ServicesSection />
-        </div>
-      </div>
-
-      {/* Footer - Full Width */}
-      <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 lg:px-6 py-3 lg:py-4">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          {/* Total */}
-          <div className="text-sm text-gray-600">
-            <span className="text-base lg:text-lg font-semibold text-gray-900">
-              {getPriceDisplay(getTotalPrice())}
-            </span>
-            {' • '}
-            {Array.from(editingAppointments.values()).reduce(
-              (sum, a) => sum + a.duration,
-              0
-            )}{' '}
-            min
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2 lg:gap-3">
-            {/* More Options */}
+            {/* More Menu */}
             <div className="relative">
               <button
                 onClick={onToggleMoreMenu}
-                className="p-2.5 lg:p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                className="p-2 rounded-full hover:bg-white/10 transition-colors"
               >
-                <MoreVertical className="w-4 h-4 lg:w-5 lg:h-5 text-gray-700" />
+                <MoreVertical className="w-4 h-4" />
               </button>
 
               {showMoreMenu && (
@@ -456,44 +235,313 @@ export function ViewMode({
                     className="fixed inset-0 z-40"
                     onClick={onToggleMoreMenu}
                   />
-                  <div className="absolute bottom-full right-0 mb-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                    {allowEdit && (
-                      <button
-                        onClick={() => {
-                          onToggleMoreMenu();
-                          onToggleEdit();
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                        <span>Edit booking</span>
-                      </button>
-                    )}
+                  <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 py-1 min-w-[180px]">
+                    <button
+                      onClick={() => {
+                        onToggleMoreMenu();
+                        onToggleEdit();
+                      }}
+                      className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm"
+                    >
+                      Edit all services
+                    </button>
                     <button
                       onClick={() => {
                         onToggleMoreMenu();
                         onDeleteBooking();
                       }}
-                      className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                      className="w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 text-sm"
                     >
-                      <Trash2 className="w-4 h-4" />
-                      <span>Delete booking</span>
+                      Delete booking
                     </button>
                   </div>
                 </>
               )}
             </div>
 
-            {/* Pay Now */}
-            <button className="flex-1 sm:flex-initial px-4 lg:px-6 py-2.5 lg:py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm lg:text-base">
-              <span className="font-medium text-gray-900">Pay now</span>
-              <span className="text-xs text-gray-500 uppercase">VISA</span>
+            {/* Close Button */}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+            >
+              <X className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+      </div>
 
-            {/* Checkout */}
+      {/* Main Content - Responsive Layout */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        {/* LEFT SIDEBAR - Client Section */}
+        <div className="lg:w-56 xl:w-64 border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50 flex-shrink-0">
+          <div className="p-4 lg:p-5">
+            {/* Client Display - Horizontal on mobile, vertical on desktop */}
+            <div className="flex lg:flex-col items-center lg:items-center gap-4 lg:gap-0 lg:text-center">
+              {/* Client Avatar */}
+              <div className="flex-shrink-0">
+                {getClientPhoto() ? (
+                  <div className="relative w-14 h-14 lg:w-16 lg:h-16 rounded-full overflow-hidden">
+                    <Image
+                      src={getClientPhoto()!}
+                      alt={getClientName()}
+                      fill
+                      className="object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="w-14 h-14 lg:w-16 lg:h-16 rounded-full flex items-center justify-center text-white text-xl lg:text-2xl font-semibold"
+                    style={{
+                      background: `linear-gradient(135deg, ${getGradientColors(
+                        getClientName()
+                      )})`,
+                    }}
+                  >
+                    {getClientInitials()}
+                  </div>
+                )}
+              </div>
+
+              {/* Client Info */}
+              <div className="flex-1 lg:flex-none lg:mt-3">
+                <div className="font-semibold text-gray-900 lg:text-lg">
+                  {getClientName()}
+                </div>
+                {getClientEmail() && (
+                  <div className="text-xs lg:text-sm text-gray-500 truncate max-w-[180px]">
+                    {getClientEmail()}
+                  </div>
+                )}
+              </div>
+
+              {/* Contact Actions */}
+              <div className="flex items-center gap-1 lg:gap-2 lg:mt-3">
+                {getClientPhone() && (
+                  <a
+                    href={`tel:${getClientPhone()}`}
+                    className="p-2 lg:p-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    title="Call"
+                  >
+                    <Phone className="w-4 h-4 text-gray-600" />
+                  </a>
+                )}
+                {getClientEmail() && (
+                  <a
+                    href={`mailto:${getClientEmail()}`}
+                    className="p-2 lg:p-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    title="Email"
+                  >
+                    <Mail className="w-4 h-4 text-gray-600" />
+                  </a>
+                )}
+                <button
+                  className="p-2 lg:p-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                  title="Message"
+                >
+                  <MessageSquare className="w-4 h-4 text-gray-600" />
+                </button>
+              </div>
+            </div>
+
+            {/* Notes Section - Hidden on mobile, visible on lg+ */}
+            {bookingNotes && (
+              <div className="hidden lg:block mt-5 pt-5 border-t border-gray-200">
+                <label className="block text-xs font-medium text-gray-500 uppercase mb-1.5">
+                  Booking notes
+                </label>
+                <p className="text-sm text-gray-700">{bookingNotes}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT MAIN AREA - Services Section */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <div className="flex-1 overflow-y-auto p-4 lg:p-6">
+            {/* Services Header */}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg lg:text-xl font-bold text-gray-900">
+                Services
+              </h3>
+              <span className="px-2 py-0.5 bg-gray-100 rounded-full text-xs font-medium text-gray-600">
+                {editingAppointments.size}
+              </span>
+            </div>
+
+            {/* Appointments List */}
+            <div className="space-y-3">
+              {sortedAppointments.map(([appointmentId, appointment]) => {
+                const isPendingAddition = appointmentId.startsWith('pending-');
+
+                return (
+                  <div key={appointmentId} className="relative group">
+                    {/* Service Card - Clickable */}
+                    <div
+                      onClick={() =>
+                        allowEdit && onEditAppointment(appointmentId)
+                      }
+                      className={`flex items-center gap-3 p-3 lg:p-4 bg-gray-50 rounded-xl transition-colors ${
+                        isPendingAddition
+                          ? 'ring-2 ring-green-200 bg-green-50'
+                          : ''
+                      } ${allowEdit ? 'cursor-pointer hover:bg-gray-100' : ''}`}
+                    >
+                      {/* Color Bar */}
+                      <div
+                        className="w-1 self-stretch rounded flex-shrink-0"
+                        style={{
+                          backgroundColor: getCategoryColor(appointment),
+                        }}
+                      />
+
+                      {/* Service Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-gray-900 text-sm lg:text-base truncate">
+                            {appointment.serviceName}
+                          </p>
+                          {isPendingAddition && (
+                            <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                              NEW
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
+                          <span className="flex-shrink-0">
+                            {formatTime(appointment.startTime)}
+                          </span>
+                          <span className="text-gray-300">•</span>
+                          <span className="flex-shrink-0">
+                            {appointment.duration}min
+                          </span>
+                          <span className="text-gray-300">•</span>
+                          <span className="truncate">
+                            {getTeamMemberName(appointment.teamMemberId)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Price */}
+                      <div className="flex-shrink-0 text-right">
+                        <p className="font-semibold text-gray-900 text-sm lg:text-base">
+                          {getPriceDisplay(appointment.price)}
+                        </p>
+                      </div>
+
+                      {/* Edit Arrow */}
+                      {allowEdit && (
+                        <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                      )}
+                    </div>
+
+                    {/* Delete Button - On hover */}
+                    {allowEdit && editingAppointments.size > 1 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClick(appointmentId);
+                        }}
+                        className="absolute -right-2 -top-2 p-1.5 bg-white border border-gray-200 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:border-red-200"
+                        title="Remove service"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-500" />
+                      </button>
+                    )}
+
+                    {/* Delete Confirmation Tooltip */}
+                    {deleteConfirmId === appointmentId && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={handleCancelDelete}
+                        />
+                        <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 min-w-[220px]">
+                          <p className="text-sm text-gray-700 mb-3">
+                            Remove this service?
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleCancelDelete}
+                              className="flex-1 px-3 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => handleConfirmDelete(appointmentId)}
+                              disabled={isDeleting}
+                              className="flex-1 px-3 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
+                            >
+                              {isDeleting ? 'Removing...' : 'Remove'}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add Service Button */}
+            {allowEdit && (
+              <button
+                onClick={onToggleEdit}
+                className="mt-4 w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-colors flex items-center justify-center gap-2 text-gray-600 hover:text-purple-600"
+              >
+                <Plus className="h-5 w-5" />
+                Add service
+              </button>
+            )}
+
+            {/* Mobile Notes Section */}
+            {bookingNotes && (
+              <div className="lg:hidden mt-6 pt-6 border-t border-gray-200">
+                <label className="block text-xs font-medium text-gray-500 uppercase mb-1.5">
+                  Booking notes
+                </label>
+                <p className="text-sm text-gray-700">{bookingNotes}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 lg:px-6 py-3 lg:py-4">
+        <div className="flex items-center justify-between">
+          {/* Total */}
+          <div>
+            <p className="text-xs lg:text-sm text-gray-500">Total</p>
+            <p className="text-xl lg:text-2xl font-bold text-gray-900">
+              {getPriceDisplay(getTotalPrice())}
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-3">
+            {/* Save changes button */}
+            {hasUnsavedChanges && (
+              <button
+                onClick={onSave}
+                disabled={isSaving}
+                className="px-4 lg:px-5 py-2.5 lg:py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isSaving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-gray-400 border-t-gray-700 rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <span>Save</span>
+                )}
+              </button>
+            )}
+
+            {/* Checkout button */}
             <button
               onClick={onCheckout}
-              className="flex-1 sm:flex-initial px-4 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-lg hover:bg-gray-900 transition-colors font-medium text-sm lg:text-base"
+              disabled={isSaving}
+              className="px-5 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-xl hover:bg-gray-900 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Checkout
             </button>

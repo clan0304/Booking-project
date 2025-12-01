@@ -107,7 +107,7 @@ export function EditMode({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+      <div className="flex-shrink-0 flex items-center justify-between px-4 lg:px-6 py-3 lg:py-4 border-b border-gray-200 bg-white">
         <button
           onClick={onBack}
           className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
@@ -124,17 +124,17 @@ export function EditMode({
         </button>
       </div>
 
-      {/* Main Content - Two Columns */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* LEFT SIDEBAR - Client Section */}
-        <div className="w-64 border-r border-gray-200 bg-gray-50 flex flex-col">
-          <div className="p-6 flex-1">
-            {/* Client Display */}
-            <div className="text-center">
+      {/* Main Content - Responsive Layout */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        {/* LEFT SIDEBAR - Client Section (collapsible on mobile) */}
+        <div className="lg:w-56 xl:w-64 border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50 flex-shrink-0">
+          <div className="p-4 lg:p-5">
+            {/* Client Display - Horizontal on mobile, vertical on desktop */}
+            <div className="flex lg:flex-col items-center lg:items-center gap-4 lg:gap-0 lg:text-center">
               {/* Client Avatar */}
-              <div className="flex justify-center mb-3">
+              <div className="flex-shrink-0">
                 {getClientPhoto() ? (
-                  <div className="relative w-20 h-20 rounded-full overflow-hidden">
+                  <div className="relative w-14 h-14 lg:w-16 lg:h-16 rounded-full overflow-hidden">
                     <Image
                       src={getClientPhoto()!}
                       alt={getClientName()}
@@ -144,7 +144,7 @@ export function EditMode({
                   </div>
                 ) : (
                   <div
-                    className="w-20 h-20 rounded-full flex items-center justify-center text-white text-2xl font-semibold"
+                    className="w-14 h-14 lg:w-16 lg:h-16 rounded-full flex items-center justify-center text-white text-xl lg:text-2xl font-semibold"
                     style={{
                       background: `linear-gradient(135deg, ${getGradientColors(
                         getClientName()
@@ -156,78 +156,68 @@ export function EditMode({
                 )}
               </div>
 
-              {/* Client Name */}
-              <div className="font-semibold text-gray-900 text-lg mb-1">
-                {getClientName()}
+              {/* Client Info */}
+              <div className="flex-1 lg:flex-none lg:mt-3">
+                <div className="font-semibold text-gray-900 lg:text-lg">
+                  {getClientName()}
+                </div>
+                {getClientEmail() && (
+                  <div className="text-xs lg:text-sm text-gray-500 truncate max-w-[180px]">
+                    {getClientEmail()}
+                  </div>
+                )}
               </div>
 
-              {/* Client Email */}
-              {getClientEmail() && (
-                <div className="text-sm text-gray-500 mb-4">
-                  {getClientEmail()}
-                </div>
-              )}
-
-              {/* Contact Actions */}
-              <div className="flex items-center justify-center gap-2 mt-4">
+              {/* Contact Actions - Always visible */}
+              <div className="flex items-center gap-1 lg:gap-2 lg:mt-3">
                 {getClientPhone() && (
                   <button
-                    className="p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="p-2 lg:p-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                     title="Call"
                   >
-                    <Phone className="w-5 h-5 text-gray-600" />
+                    <Phone className="w-4 h-4 text-gray-600" />
                   </button>
                 )}
                 {getClientEmail() && (
                   <button
-                    className="p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="p-2 lg:p-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                     title="Email"
                   >
-                    <Mail className="w-5 h-5 text-gray-600" />
+                    <Mail className="w-4 h-4 text-gray-600" />
                   </button>
                 )}
                 <button
-                  className="p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="p-2 lg:p-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                   title="Message"
                 >
-                  <MessageSquare className="w-5 h-5 text-gray-600" />
+                  <MessageSquare className="w-4 h-4 text-gray-600" />
                 </button>
               </div>
             </div>
 
-            {/* Client Details */}
-            {getClientPhone() && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <div className="text-xs font-medium text-gray-500 uppercase mb-2">
-                  Phone
-                </div>
-                <div className="text-sm text-gray-900">{getClientPhone()}</div>
-              </div>
-            )}
-
-            {/* Notes Section in Sidebar */}
-            <div className="mt-6 pt-6 border-t border-gray-200 space-y-4">
+            {/* Notes Section - Hidden on mobile, visible on lg+ */}
+            <div className="hidden lg:block mt-5 pt-5 border-t border-gray-200 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase mb-2">
+                <label className="block text-xs font-medium text-gray-500 uppercase mb-1.5">
                   Booking notes
                 </label>
                 <textarea
                   value={bookingNotes}
                   onChange={(e) => setBookingNotes(e.target.value)}
                   placeholder="Client visible..."
-                  rows={3}
+                  rows={2}
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase mb-2">
+                <label className="block text-xs font-medium text-gray-500 uppercase mb-1.5">
                   Internal notes
                 </label>
                 <textarea
                   value={internalNotes}
                   onChange={(e) => setInternalNotes(e.target.value)}
                   placeholder="Staff only..."
-                  rows={3}
+                  rows={2}
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                 />
               </div>
@@ -236,11 +226,13 @@ export function EditMode({
         </div>
 
         {/* RIGHT MAIN AREA - Services Section */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <div className="flex-1 overflow-y-auto p-4 lg:p-6">
             {/* Services Header */}
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-900">Services</h3>
+              <h3 className="text-lg lg:text-xl font-bold text-gray-900">
+                Services
+              </h3>
               <span className="px-2 py-0.5 bg-gray-100 rounded-full text-xs font-medium text-gray-600">
                 {editingAppointments.size}
               </span>
@@ -248,62 +240,97 @@ export function EditMode({
 
             {/* Appointments List */}
             <div className="space-y-3">
-              {Array.from(editingAppointments.entries()).map(
-                ([appointmentId, appointment]) => {
+              {Array.from(editingAppointments.entries())
+                .sort(([, a], [, b]) => {
+                  // Sort by start time (earlier first)
+                  const timeToMinutes = (time: string) => {
+                    const [hours, minutes] = time.split(':').map(Number);
+                    return hours * 60 + minutes;
+                  };
+                  return (
+                    timeToMinutes(a.startTime) - timeToMinutes(b.startTime)
+                  );
+                })
+                .map(([appointmentId, appointment]) => {
                   const isExpanded = expandedAppointmentId === appointmentId;
                   const teamMember = getTeamMember(appointment.teamMemberId);
                   const service = getService(
                     appointment.teamMemberId,
                     appointment.serviceId
                   );
-                  // Use appointment's stored category color, fallback to service color, then purple
                   const categoryColor =
                     appointment.categoryColor ||
                     service?.service_categories?.color ||
                     '#A855F7';
 
+                  const isPendingAddition =
+                    appointmentId.startsWith('pending-');
+
                   return (
                     <div
                       key={appointmentId}
-                      className="bg-white rounded-lg border border-gray-200 overflow-hidden"
+                      className={`bg-white rounded-lg border overflow-hidden ${
+                        isPendingAddition
+                          ? 'border-green-300 ring-2 ring-green-100'
+                          : 'border-gray-200'
+                      }`}
                     >
-                      {/* Collapsed View */}
+                      {/* Collapsed View - Improved single-line layout */}
                       <button
                         onClick={() => onToggleAppointment(appointmentId)}
-                        className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                        className={`w-full p-3 lg:p-4 flex items-center gap-3 transition-colors ${
+                          isPendingAddition
+                            ? 'bg-green-50 hover:bg-green-100'
+                            : 'hover:bg-gray-50'
+                        }`}
                       >
-                        <div className="flex items-center gap-3 flex-1">
-                          <div
-                            className="w-1 h-12 rounded"
-                            style={{ backgroundColor: categoryColor }}
-                          />
-                          <div className="flex-1 text-left">
-                            <h4 className="font-semibold text-gray-900">
+                        {/* Color Bar */}
+                        <div
+                          className="w-1 self-stretch rounded flex-shrink-0"
+                          style={{ backgroundColor: categoryColor }}
+                        />
+
+                        {/* Service Info - Flexible */}
+                        <div className="flex-1 min-w-0 text-left">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold text-gray-900 truncate">
                               {appointment.serviceName}
                             </h4>
-                            <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
-                              <span>{formatTime(appointment.startTime)}</span>
-                              <span>•</span>
-                              <span>
-                                {getDurationDisplay(appointment.duration)}
+                            {isPendingAddition && (
+                              <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                                NEW
                               </span>
-                              <span>•</span>
-                              <span>
-                                {teamMember?.first_name} {teamMember?.last_name}
-                              </span>
-                            </div>
+                            )}
                           </div>
-                          <div className="text-right mr-2">
-                            <p className="font-medium text-gray-900">
-                              A$ {appointment.price.toFixed(0)}
-                            </p>
+                          {/* Details on single line */}
+                          <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
+                            <span className="flex-shrink-0">
+                              {formatTime(appointment.startTime)}
+                            </span>
+                            <span className="text-gray-300">•</span>
+                            <span className="flex-shrink-0">
+                              {getDurationDisplay(appointment.duration)}
+                            </span>
+                            <span className="text-gray-300">•</span>
+                            <span className="truncate">
+                              {teamMember?.first_name} {teamMember?.last_name}
+                            </span>
                           </div>
-                          <ChevronRight
-                            className={`w-5 h-5 text-gray-400 transition-transform ${
-                              isExpanded ? 'rotate-90' : ''
-                            }`}
-                          />
                         </div>
+
+                        {/* Price - Fixed width */}
+                        <div className="flex-shrink-0 text-right">
+                          <p className="font-semibold text-gray-900">
+                            A$ {appointment.price.toFixed(0)}
+                          </p>
+                        </div>
+
+                        {/* Chevron */}
+                        <ChevronRight
+                          className={`w-5 h-5 text-gray-400 flex-shrink-0 transition-transform ${
+                            isExpanded ? 'rotate-90' : ''
+                          }`}
+                        />
                       </button>
 
                       {/* Expanded View */}
@@ -424,7 +451,7 @@ export function EditMode({
                             </div>
                           </div>
 
-                          {/* Start Time & Duration */}
+                          {/* Start Time & Duration - Side by side */}
                           <div className="grid grid-cols-2 gap-4">
                             {/* Start Time */}
                             <div>
@@ -540,8 +567,7 @@ export function EditMode({
                       )}
                     </div>
                   );
-                }
-              )}
+                })}
             </div>
 
             {/* Add Service Button */}
@@ -560,18 +586,46 @@ export function EditMode({
               <Plus className="h-5 w-5" />
               Add service
             </button>
+
+            {/* Mobile Notes Section - Only visible on mobile */}
+            <div className="lg:hidden mt-6 pt-6 border-t border-gray-200 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase mb-1.5">
+                  Booking notes
+                </label>
+                <textarea
+                  value={bookingNotes}
+                  onChange={(e) => setBookingNotes(e.target.value)}
+                  placeholder="Client visible..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase mb-1.5">
+                  Internal notes
+                </label>
+                <textarea
+                  value={internalNotes}
+                  onChange={(e) => setInternalNotes(e.target.value)}
+                  placeholder="Staff only..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="flex-shrink-0 border-t border-gray-200 bg-white px-6 py-4">
+      <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 lg:px-6 py-3 lg:py-4">
         <div className="flex items-center justify-between">
           {/* Delete Booking */}
           <button
             onClick={onDeleteBooking}
             disabled={isDeleting}
-            className="px-4 py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+            className="px-3 lg:px-4 py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors text-sm lg:text-base"
           >
             {isDeleting ? (
               <>
@@ -590,7 +644,7 @@ export function EditMode({
           <button
             onClick={onSaveAll}
             disabled={isSubmitting}
-            className="px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+            className="px-5 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-lg hover:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium text-sm lg:text-base"
           >
             {isSubmitting ? 'Saving...' : 'Save changes'}
           </button>

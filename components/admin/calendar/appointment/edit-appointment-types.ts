@@ -6,7 +6,7 @@ import type { BookingGroupWithAppointments } from '@/types/calendar';
 // MODAL STEP TYPES
 // =====================================================
 
-export type ModalStep = 'view' | 'edit' | 'payment';
+export type ModalStep = 'view' | 'edit' | 'edit-single' | 'payment';
 
 export type BookingStatus =
   | 'confirmed'
@@ -89,18 +89,25 @@ export interface ViewModeProps {
   booking: BookingGroupWithAppointments;
   editingAppointments: Map<string, EditingAppointment>;
   availableTeamMembers: TeamMember[];
+  availableServices: Map<string, Service[]>; // For looking up category colors
   bookingStatus: BookingStatus;
   showStatusDropdown: boolean;
   showMoreMenu: boolean;
   bookingNotes: string;
   allowEdit: boolean;
 
+  // ✅ NEW: Track unsaved changes
+  hasUnsavedChanges: boolean;
+  isSaving: boolean;
+
   // Handlers
   onStatusChange: (status: BookingStatus) => void;
   onToggleStatusDropdown: () => void;
   onToggleMoreMenu: () => void;
-  onCheckout: () => void;
+  onCheckout: () => Promise<void>; // Async - saves then goes to payment
+  onSave: () => Promise<void>;
   onToggleEdit: () => void;
+  onEditAppointment: (appointmentId: string) => void; // ✅ NEW: Edit specific appointment
   onDeleteBooking: () => void;
   onDeleteAppointment: (appointmentId: string) => Promise<void>;
   onClose: () => void;
@@ -170,6 +177,51 @@ export interface EditModeProps {
 }
 
 // =====================================================
+// SINGLE EDIT MODE PROPS (Focused single appointment edit)
+// =====================================================
+
+export interface SingleEditModeProps {
+  appointment: EditingAppointment;
+  appointmentId: string;
+  teamMember: TeamMember | undefined;
+  availableTeamMembers: TeamMember[];
+  availableServices: Map<string, Service[]>; // For looking up category colors
+  teamMembersLoading: boolean;
+  showTeamMemberDropdown: string | null;
+  showTimeDropdown: string | null;
+  showDurationDropdown: string | null;
+  isSaving: boolean;
+  canDelete: boolean; // Can only delete if more than 1 appointment in booking
+
+  // Handlers
+  onUpdateAppointmentField: <K extends keyof EditingAppointment>(
+    id: string,
+    field: K,
+    value: EditingAppointment[K]
+  ) => void;
+  onTeamMemberChange: (
+    appointmentId: string,
+    teamMemberId: string
+  ) => Promise<void>;
+  onDeleteAppointment: (id: string) => Promise<void>;
+  onShowServicePicker: (appointmentId: string) => void;
+  onSave: () => void; // Sync - just goes back to view mode
+  onBack: () => void;
+  onClose: () => void;
+
+  // State setters
+  setShowTeamMemberDropdown: (id: string | null) => void;
+  setShowTimeDropdown: (id: string | null) => void;
+  setShowDurationDropdown: (id: string | null) => void;
+
+  // Helpers
+  formatTime: (time: string) => string;
+  getDurationDisplay: (minutes: number) => string;
+  generateTimeSlots: () => string[];
+  generateDurationOptions: () => number[];
+}
+
+// =====================================================
 // PAYMENT MODE PROPS
 // =====================================================
 
@@ -184,4 +236,46 @@ export interface PaymentModeProps {
 
   // Helpers
   getPriceDisplay: (price: number) => string;
+}
+
+// =====================================================
+// FOCUSED EDIT MODE PROPS (Single Appointment Edit)
+// =====================================================
+
+export interface FocusedEditModeProps {
+  booking: BookingGroupWithAppointments;
+  appointment: EditingAppointment;
+  appointmentId: string;
+  availableTeamMembers: TeamMember[];
+  availableServices: Service[];
+  teamMembersLoading: boolean;
+  servicesLoading: boolean;
+  showTeamMemberDropdown: boolean;
+  showTimeDropdown: boolean;
+  showDurationDropdown: boolean;
+  isSubmitting: boolean;
+  canDelete: boolean; // false if this is the only appointment
+
+  // Handlers
+  onUpdateField: <K extends keyof EditingAppointment>(
+    field: K,
+    value: EditingAppointment[K]
+  ) => void;
+  onTeamMemberChange: (teamMemberId: string) => Promise<void>;
+  onShowServicePicker: () => void;
+  onDeleteAppointment: () => Promise<void>;
+  onSave: () => Promise<void>;
+  onBack: () => void;
+  onClose: () => void;
+
+  // State setters
+  setShowTeamMemberDropdown: (show: boolean) => void;
+  setShowTimeDropdown: (show: boolean) => void;
+  setShowDurationDropdown: (show: boolean) => void;
+
+  // Helpers
+  formatTime: (time: string) => string;
+  getDurationDisplay: (minutes: number) => string;
+  generateTimeSlots: () => string[];
+  generateDurationOptions: () => number[];
 }
