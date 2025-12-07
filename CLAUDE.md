@@ -2339,6 +2339,195 @@ Key Principle:
 
 "For admin tools that reference other data (like calendars), use side panels instead of center modals. Preserving context improves UX and reduces cognitive load."
 
+💳 Phase 6: Stripe Payment Integration ✅ (COMPLETED)
+Overview
+Integrated Stripe for payment processing following Fresha's model:
+
+Card capture at booking (for cancellation/no-show fees)
+Checkout payments (online card, EFTPOS terminal, cash)
+Split payments support
+Item-level refunds
+Auto-charge for late cancellation/no-show
+
+Key Decisions
+DecisionChoiceRationaleCard StorageStripe only (PCI compliant)We only store last4, brand, expiryPayment RecordingTransaction + line itemsSupports split payments & item refundsRefund TrackingPer-item with amountsEnables partial/product-only refundsMulti-venueSingle Stripe accountDifferent EFTPOS terminals per venueCancellation Policy48hr notice, 50% feeConfigurable per venue
+Database Tables Added
+TablePurposestripe_customersLinks clients to Stripe customer IDspayment_methodsSaved cards (references only, not actual card data)stripe_terminalsEFTPOS machines per venuecancellation_policiesPer-venue fee rulestransactionsPayment records (supports split payments)transaction_itemsLine items per transactionrefundsRefund recordsrefund_itemsWhich items were refundedstripe_webhook_eventsIdempotency log
+Columns Added to Existing Tables
+sql-- booking_groups
+total_paid DECIMAL(10,2) DEFAULT 0
+payment_status TEXT DEFAULT 'unpaid'
+-- Values: unpaid, partial, paid, refunded, partially_refunded
+Key Files Structure
+app/
+├── actions/
+│ └── stripe/
+│ ├── customers.ts # Create/get Stripe customers
+│ ├── setup-intents.ts # Save cards without charging
+│ ├── payment-intents.ts # Charge cards, record payments
+│ ├── refunds.ts # Process refunds
+│ └── index.ts # Re-exports
+│
+├── api/
+│ └── webhooks/
+│ └── stripe/
+│ └── route.ts # Stripe webhook handler
+
+lib/
+└── stripe/
+└── server.ts # Stripe client + helpers
+
+types/
+└── payments.ts # Payment type definitions
+
+components/
+├── admin/
+│ ├── checkout/ # ✅ NEW - Checkout UI Components
+│ │ ├── checkout-types.ts # TypeScript interfaces
+│ │ ├── payment-method-picker.tsx # Grid of payment options
+│ │ ├── order-summary.tsx # Right side summary panel
+│ │ ├── index.ts # Exports
+│ │ └── payment-forms/
+│ │ ├── saved-card-form.tsx # Pay with saved card
+│ │ ├── terminal-form.tsx # EFTPOS terminal (simulated)
+│ │ ├── manual-card-form.tsx # Stripe Elements (type card)
+│ │ ├── cash-form.tsx # Cash with change calculation
+│ │ └── test-payment-form.tsx # Dev testing only
+│ │
+│ └── calendar/
+│ └── appointment/
+│ ├── edit-appointment-modal.tsx # Updated with payment flow
+│ ├── edit-appointment-payment-mode.tsx # ✅ NEW - Checkout integration
+│ └── sale-details-modal.tsx # ✅ NEW - View completed sale
+Payment Flows
+
+1. Card Collection at Booking (No Charge)
+   Client books → Create Stripe Customer → Create SetupIntent →
+   Stripe Elements collects card → Card saved → Booking confirmed
+2. Checkout (Split Payment Support) ✅ IMPLEMENTED
+   Admin clicks "Check out" → Saves pending changes → Payment mode opens →
+   Select payment method(s) → Process each payment (card/terminal/cash) →
+   Create transaction + items → Update booking status to 'completed'
+3. Late Cancel / No-Show Auto-Charge
+   Booking cancelled within 48hr OR marked no-show →
+   Calculate 50% fee → Charge saved card → Record transaction
+4. Refund (Item-Level)
+   Admin selects items to refund → Calculate amount →
+   Stripe refund API → Create refund + refund_items →
+   Trigger updates booking payment_status
+   Checkout UI Components ✅ NEW
+   Payment Method Picker
+
+2-column grid of payment method buttons
+Icons: CreditCard, Smartphone, Keyboard, Banknote, FlaskConical
+Selected state with border highlight
+Terminal status indicator (online/offline)
+Dev-only badge for test payment option
+
+Payment Forms
+FormDescriptionStripe APISaved CardSelect from saved cards, auto-select defaultUses saved PaymentMethodManual EntryStripe Elements CardElementCreates PaymentIntentTerminalEFTPOS reader selectionSimulated in dev, real in prodCashAmount input, change calculationNo Stripe - local recordTest PaymentDev-only, simulates success/failureNo Stripe - local record
+Order Summary
+
+Item list with category color bars
+Subtotal, tax, total calculations
+Payment list with method icons
+Delete button for pending payments
+Processing spinner for active payments
+
+Completed Booking Flow ✅ NEW
+Visual Indicators:
+
+Appointment cards turn gray when status = 'completed'
+70% opacity + checkmark badge
+Edit appointment modal shows "View Sale" instead of "Checkout"
+
+View Sale Modal:
+
+Displays all services with prices
+Lists all transactions (method, amount, tips)
+Shows totals (subtotal, tips, total paid)
+Client information
+Print receipt option
+
+Dual-Mode Payment Handling ✅ NEW
+Supports both development (simulated) and production (real Stripe):
+typescriptif (payment.paymentIntentId) {
+// ✅ REAL payment - has Stripe PaymentIntent
+await recordCardPayment(...);
+} else if (process.env.NODE*ENV === 'development') {
+// 🧪 SIMULATED - dev only, record locally
+await recordCashPayment(...);
+} else {
+// Production without paymentIntentId = error
+throw new Error('Card payment failed - no payment ID received');
+}
+EnvironmentSimulated TerminalTest PaymentReal CardDevelopment✅ Records locally✅ Records locally✅ Records + StripeProduction❌ Throws error⚠️ UI only✅ Records + Stripe
+Database Triggers
+TriggerPurposeupdate_booking_payment_statusAuto-updates booking_groups.total_paid and payment_status when transactions/refunds changevalidate_transaction_venueEnsures transaction venue matches booking venueset_updated_at*\*Auto-updates updated_at timestamps
+Webhook Events Handled
+
+payment_intent.succeeded - Update transaction status
+payment_intent.payment_failed - Record failure reason
+setup_intent.succeeded - Save payment method
+charge.refunded - Sync refund status
+terminal.reader.action_succeeded/failed - Terminal status
+
+Environment Variables Required
+envSTRIPE_SECRET_KEY=sk_test_xxxxx
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
+STRIPE_WEBHOOK_SECRET=whsec_xxxxx
+Security Notes
+
+Card data never touches our servers (Stripe Elements → Stripe directly)
+Only store Stripe references (customer_id, payment_method_id)
+Webhook signature verification required
+requireAdmin() on refunds and auto-charge
+Unique indexes prevent duplicate Stripe records
+Environment check prevents simulated payments in production
+
+Multi-Venue Terminal Architecture
+Your System Stripe
+─────────────────────────────────────────────────────
+
+Venue A ─────────────────────────► Stripe Location A
+└── stripe_terminals table └── Reader(s)
+• venue_id: "venue-a"
+• stripe_location_id: "tml_A"
+
+Venue B ─────────────────────────► Stripe Location B
+└── stripe_terminals table └── Reader(s)
+• venue_id: "venue-b"
+• stripe_location_id: "tml_B"
+
+Each venue = one Stripe Location
+Readers assigned to specific locations
+Staff only sees terminals for current venue
+Payment sent to correct physical device
+
+Completed ✅
+
+Database schema (10 tables + triggers)
+Stripe action files (customers, setup-intents, payment-intents, refunds)
+Webhook handler with idempotency
+Checkout UI components (shadcn/ui design system)
+Payment method forms (5 types)
+Order summary with split payment support
+Integration with edit-appointment-modal
+Completed booking visual indicators (gray cards)
+View Sale modal for transaction history
+Dual-mode handling (dev simulated / prod real)
+TypeScript types for all payment entities
+
+Next Steps (Phase 7+)
+
+Real EFTPOS terminal integration (currently simulated)
+Card collection during public booking flow
+Cancellation policy settings UI
+Transaction history & reports page
+Product sales integration
+Tip entry UI in checkout
+Receipt printing / email
+
 📚 Key Files Structure
 project-root/
 ├── app/

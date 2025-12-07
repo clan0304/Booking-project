@@ -50,7 +50,11 @@ export function AppointmentCard({
   const cardRef = useRef<HTMLDivElement>(null);
 
   const isInteracting = interactionMode !== null;
-  const backgroundColor = appointment.category_color || DEFAULT_COLOR;
+  const isCompleted = booking.status === 'completed';
+  const COMPLETED_COLOR = '#9CA3AF'; // gray-400
+  const backgroundColor = isCompleted
+    ? COMPLETED_COLOR
+    : appointment.category_color || DEFAULT_COLOR;
 
   // Ensure component is mounted (for portal)
   useEffect(() => {
@@ -312,7 +316,9 @@ export function AppointmentCard({
       {/* Main Appointment Card */}
       <div
         ref={cardRef}
-        className="relative group h-full"
+        className={`absolute left-1 right-1 rounded-lg overflow-hidden cursor-pointer select-none ${
+          isCompleted ? 'opacity-70' : ''
+        }`}
         onMouseEnter={() => {
           if (!isInteracting) {
             setIsHovered(true);

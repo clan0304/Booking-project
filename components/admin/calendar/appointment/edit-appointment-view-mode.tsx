@@ -13,6 +13,7 @@ import {
   MessageSquare,
   X,
   ChevronRight,
+  Receipt,
 } from 'lucide-react';
 import Image from 'next/image';
 import type {
@@ -36,6 +37,7 @@ export function ViewMode({
   onToggleStatusDropdown,
   onToggleMoreMenu,
   onCheckout,
+  onViewSale,
   onSave,
   onToggleEdit,
   onEditAppointment,
@@ -53,6 +55,7 @@ export function ViewMode({
   // State for delete confirmation tooltip
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const isCompleted = booking.status === 'completed';
 
   // Handle delete with confirmation
   const handleDeleteClick = (appointmentId: string) => {
@@ -519,8 +522,8 @@ export function ViewMode({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-3">
-            {/* Save changes button */}
-            {hasUnsavedChanges && (
+            {/* Save button - hide when completed */}
+            {hasUnsavedChanges && !isCompleted && (
               <button
                 onClick={onSave}
                 disabled={isSaving}
@@ -537,14 +540,24 @@ export function ViewMode({
               </button>
             )}
 
-            {/* Checkout button */}
-            <button
-              onClick={onCheckout}
-              disabled={isSaving}
-              className="px-5 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-xl hover:bg-gray-900 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Checkout
-            </button>
+            {/* Checkout OR View Sale */}
+            {isCompleted ? (
+              <button
+                onClick={onViewSale}
+                className="px-5 lg:px-6 py-2.5 lg:py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors font-medium text-sm lg:text-base flex items-center gap-2"
+              >
+                <Receipt className="w-4 h-4" />
+                View Sale
+              </button>
+            ) : (
+              <button
+                onClick={onCheckout}
+                disabled={isSaving}
+                className="px-5 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-xl hover:bg-gray-900 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Checkout
+              </button>
+            )}
           </div>
         </div>
       </div>

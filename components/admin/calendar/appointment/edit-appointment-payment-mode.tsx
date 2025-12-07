@@ -1,56 +1,438 @@
 // components/admin/calendar/appointment/edit-appointment-payment-mode.tsx
 'use client';
 
-import { ChevronLeft, X } from 'lucide-react';
-import type { PaymentModeProps } from './edit-appointment-types';
+import { useState, useEffect } from 'react';
+import { X, ChevronLeft, MoreVertical } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { PaymentMethodPicker } from '@/components/admin/checkout/payment-method-picker';
+import { OrderSummary } from '@/components/admin/checkout/order-summary';
+import { SavedCardForm } from '@/components/admin/checkout/payment-forms/saved-card-form';
+import { TerminalFormReal as TerminalForm } from '@/components/admin/checkout/payment-forms/terminal-form-real';
+import { ManualCardForm } from '@/components/admin/checkout/payment-forms/manual-card-form';
+import { CashForm } from '@/components/admin/checkout/payment-forms/cash-form';
+import { TestPaymentForm } from '@/components/admin/checkout/payment-forms/test-payment-form';
+import { recordCardPayment, recordCashPayment } from '@/app/actions/stripe';
+import { getClientPaymentMethods } from '@/app/actions/stripe/setup-intents';
+import { updateBooking } from '@/app/actions/bookings';
+import type {
+  CheckoutItem,
+  PaymentEntry,
+  CheckoutState,
+} from '@/components/admin/checkout/checkout-types';
+import type { PaymentMethodType } from '@/types/payments';
+import type { BookingGroupWithAppointments } from '@/types/calendar';
+import type { EditingAppointment } from './edit-appointment-types';
+
+interface PaymentModeProps {
+  booking: BookingGroupWithAppointments;
+  editingAppointments: Map<string, EditingAppointment>;
+  totalPrice: number;
+  onBack: () => void;
+  onClose: () => void;
+  onSuccess: () => void;
+}
 
 export function PaymentMode({
+  booking,
   editingAppointments,
   totalPrice,
   onBack,
   onClose,
-  getPriceDisplay,
+  onSuccess,
 }: PaymentModeProps) {
+  // Build checkout items from appointments
+  const items: CheckoutItem[] = Array.from(editingAppointments.values()).map(
+    (appt) => ({
+      id: appt.id,
+      type: 'appointment' as const,
+      name: appt.serviceName,
+      description: `${appt.duration}min`,
+      quantity: 1,
+      unitPrice: appt.price,
+      categoryColor: appt.categoryColor,
+    })
+  );
+
+  // State
+  const [state, setState] = useState<CheckoutState>(() => ({
+    items,
+    payments: [],
+    subtotal: totalPrice,
+    tax: 0,
+    total: totalPrice,
+    totalPaid: 0,
+    remaining: totalPrice,
+    selectedMethod: null,
+    isProcessing: false,
+    error: null,
+  }));
+
+  const [hasSavedCards, setHasSavedCards] = useState(false);
+  const [terminalStatus, setTerminalStatus] = useState<'online' | 'offline'>(
+    'offline'
+  );
+  const [isPayingNow, setIsPayingNow] = useState(false);
+
+  // Load data
+  useEffect(() => {
+    const loadData = async () => {
+      if (booking.client_id) {
+        const { paymentMethods } = await getClientPaymentMethods(
+          booking.client_id
+        );
+        setHasSavedCards(paymentMethods.length > 0);
+      }
+      // TODO: Check terminal status for venue
+      setTerminalStatus('online');
+    };
+
+    loadData();
+  }, [booking.client_id, booking.venue_id]);
+
+  // Recalculate totals
+  useEffect(() => {
+    const totalPaid = state.payments
+      .filter((p) => p.status === 'succeeded' || p.status === 'pending')
+      .reduce((sum, p) => sum + p.amount + (p.tipAmount || 0), 0);
+
+    setState((prev) => ({
+      ...prev,
+      totalPaid,
+      remaining: Math.max(0, prev.total - totalPaid),
+    }));
+  }, [state.payments, state.total]);
+
+  // Handlers
+  const handleSelectMethod = (method: PaymentMethodType) => {
+    setState((prev) => ({
+      ...prev,
+      selectedMethod: method,
+      error: null,
+    }));
+  };
+
+  const handlePaymentComplete = (paymentEntry: PaymentEntry) => {
+    setState((prev) => ({
+      ...prev,
+      payments: [...prev.payments, paymentEntry],
+      selectedMethod: null,
+      error: null,
+    }));
+  };
+
+  const handleRemovePayment = (paymentId: string) => {
+    setState((prev) => ({
+      ...prev,
+      payments: prev.payments.filter((p) => p.id !== paymentId),
+    }));
+  };
+
+  const handleCancelForm = () => {
+    setState((prev) => ({
+      ...prev,
+      selectedMethod: null,
+      error: null,
+    }));
+  };
+
+  const handlePayNow = async () => {
+    if (state.remaining > 0.01) {
+      setState((prev) => ({
+        ...prev,
+        error: 'Please add payments to cover the full amount',
+      }));
+      return;
+    }
+
+    setIsPayingNow(true);
+    setState((prev) => ({ ...prev, isProcessing: true, error: null }));
+
+    try {
+      for (const payment of state.payments) {
+        if (payment.status !== 'pending') continue;
+
+        const checkoutItems = items.map((item) => ({
+          type: item.type,
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        }));
+
+        if (payment.method === 'cash') {
+          // Cash payment - record directly
+          const { error } = await recordCashPayment(
+            booking.id,
+            booking.venue_id,
+            payment.amount,
+            booking.client_id,
+            checkoutItems,
+            payment.tipAmount || 0
+          );
+
+          if (error) throw new Error(error);
+
+          setState((prev) => ({
+            ...prev,
+            payments: prev.payments.map((p) =>
+              p.id === payment.id ? { ...p, status: 'succeeded' as const } : p
+            ),
+          }));
+        } else if (
+          payment.method === 'card_online' ||
+          payment.method === 'card_terminal' ||
+          payment.method === 'card_saved'
+        ) {
+          if (payment.paymentIntentId) {
+            // ✅ REAL card payment - has Stripe PaymentIntent
+            const { error } = await recordCardPayment(
+              booking.id,
+              booking.venue_id,
+              payment.paymentIntentId,
+              payment.amount,
+              booking.client_id,
+              checkoutItems,
+              payment.method,
+              payment.tipAmount || 0,
+              payment.paymentMethodId,
+              payment.terminalId
+            );
+
+            if (error) throw new Error(error);
+
+            setState((prev) => ({
+              ...prev,
+              payments: prev.payments.map((p) =>
+                p.id === payment.id ? { ...p, status: 'succeeded' as const } : p
+              ),
+            }));
+          } else if (process.env.NODE_ENV === 'development') {
+            // 🧪 SIMULATED terminal/card - dev only, no Stripe involved
+            // Record as cash payment for local testing
+            console.warn('⚠️ Simulated card payment - dev only');
+            const { error } = await recordCashPayment(
+              booking.id,
+              booking.venue_id,
+              payment.amount,
+              booking.client_id,
+              checkoutItems,
+              payment.tipAmount || 0
+            );
+
+            if (error) throw new Error(error);
+
+            setState((prev) => ({
+              ...prev,
+              payments: prev.payments.map((p) =>
+                p.id === payment.id ? { ...p, status: 'succeeded' as const } : p
+              ),
+            }));
+          } else {
+            // Production without paymentIntentId = something went wrong
+            throw new Error('Card payment failed - no payment ID received');
+          }
+        } else if (payment.method === 'other') {
+          // Test payment (dev only)
+          if (process.env.NODE_ENV === 'development') {
+            // Record test payment locally for testing View Sale modal
+            console.warn('⚠️ Test payment - dev only');
+            const { error } = await recordCashPayment(
+              booking.id,
+              booking.venue_id,
+              payment.amount,
+              booking.client_id,
+              checkoutItems,
+              payment.tipAmount || 0
+            );
+
+            if (error) throw new Error(error);
+          }
+
+          setState((prev) => ({
+            ...prev,
+            payments: prev.payments.map((p) =>
+              p.id === payment.id ? { ...p, status: 'succeeded' as const } : p
+            ),
+          }));
+        }
+      }
+
+      // Update booking status to completed
+      await updateBooking(booking.id, { status: 'completed' });
+
+      onSuccess();
+      onClose();
+    } catch (error) {
+      console.error('Payment error:', error);
+      setState((prev) => ({
+        ...prev,
+        error: error instanceof Error ? error.message : 'Payment failed',
+        isProcessing: false,
+      }));
+    } finally {
+      setIsPayingNow(false);
+    }
+  };
+
+  // Render payment form
+  const renderPaymentForm = () => {
+    if (!state.selectedMethod) return null;
+
+    const formProps = {
+      amount: state.remaining,
+      onPaymentComplete: handlePaymentComplete,
+      onCancel: handleCancelForm,
+      disabled: state.isProcessing,
+    };
+
+    switch (state.selectedMethod) {
+      case 'card_saved':
+        return booking.client_id ? (
+          <SavedCardForm {...formProps} clientId={booking.client_id} />
+        ) : null;
+
+      case 'card_terminal':
+        return (
+          <TerminalForm
+            {...formProps}
+            venueId={booking.venue_id}
+            bookingGroupId={booking.id}
+          />
+        );
+
+      case 'card_online':
+        return (
+          <ManualCardForm
+            {...formProps}
+            clientId={booking.client_id}
+            bookingGroupId={booking.id}
+            venueId={booking.venue_id}
+          />
+        );
+
+      case 'cash':
+        return <CashForm {...formProps} remaining={state.remaining} />;
+
+      case 'other':
+        return <TestPaymentForm {...formProps} />;
+
+      default:
+        return null;
+    }
+  };
+
+  const isFullyPaid = state.remaining <= 0.01;
+  const hasPayments = state.payments.length > 0;
+
   return (
-    <>
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <button
-          onClick={onBack}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <h2 className="text-lg font-semibold">Payment</h2>
-        <button
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onBack}
+            disabled={state.isProcessing}
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </Button>
+          <h2 className="text-xl font-semibold">Checkout</h2>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={onClose}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          disabled={state.isProcessing}
         >
-          <X className="w-5 h-5" />
-        </button>
+          <X className="h-5 w-5" />
+        </Button>
       </div>
 
-      {/* Body - Placeholder */}
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-3xl">💳</span>
-          </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            Payment Integration
+      {/* Content */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* Left Side - Payment Methods */}
+        <div className="flex-1 p-6 overflow-y-auto border-r border-border">
+          <h3 className="text-sm font-medium text-muted-foreground mb-4">
+            Payment methods
           </h3>
-          <p className="text-gray-600 text-sm">
-            Payment processing will be implemented here.
-          </p>
-          <p className="text-gray-500 text-xs mt-2">
-            Total: {getPriceDisplay(totalPrice)}
-          </p>
-          <p className="text-gray-400 text-xs mt-1">
-            {editingAppointments.size} service
-            {editingAppointments.size !== 1 ? 's' : ''}
-          </p>
+
+          {!state.selectedMethod && (
+            <PaymentMethodPicker
+              selectedMethod={state.selectedMethod}
+              onSelectMethod={handleSelectMethod}
+              terminalStatus={terminalStatus}
+              hasSavedCards={hasSavedCards}
+              disabled={state.isProcessing || isFullyPaid}
+            />
+          )}
+
+          {state.selectedMethod && (
+            <div className="mt-4">{renderPaymentForm()}</div>
+          )}
+
+          {state.error && (
+            <div className="mt-4 text-sm text-destructive bg-destructive/10 p-3 rounded-lg border border-destructive/20">
+              {state.error}
+            </div>
+          )}
+        </div>
+
+        {/* Right Side - Order Summary */}
+        <div className="w-80 lg:w-96 flex flex-col bg-muted/30">
+          <OrderSummary
+            items={state.items}
+            payments={state.payments}
+            subtotal={state.subtotal}
+            tax={state.tax}
+            total={state.total}
+            remaining={state.remaining}
+            onRemovePayment={handleRemovePayment}
+            isProcessing={state.isProcessing}
+          />
+
+          {/* Footer */}
+          <div className="p-4 border-t border-border bg-background">
+            {/* Payment Status */}
+            <div className="mb-4 text-sm">
+              {isFullyPaid ? (
+                <span className="text-green-600 font-medium">
+                  ✓ Full payment added
+                </span>
+              ) : hasPayments ? (
+                <span className="text-amber-600 font-medium">
+                  Remaining: A${state.remaining.toFixed(2)}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">
+                  Select a payment method
+                </span>
+              )}
+            </div>
+
+            {/* Pay Now Button */}
+            <div className="flex gap-3">
+              <Button variant="outline" size="icon" title="More options">
+                <MoreVertical className="h-5 w-5" />
+              </Button>
+              <Button
+                onClick={handlePayNow}
+                disabled={!isFullyPaid || isPayingNow}
+                className="flex-1"
+              >
+                {isPayingNow ? (
+                  <>
+                    <div className="h-4 w-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  'Pay now'
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

@@ -105,6 +105,7 @@ export interface ViewModeProps {
   onToggleStatusDropdown: () => void;
   onToggleMoreMenu: () => void;
   onCheckout: () => Promise<void>; // Async - saves then goes to payment
+  onViewSale: () => void;
   onSave: () => Promise<void>;
   onToggleEdit: () => void;
   onEditAppointment: (appointmentId: string) => void; // ✅ NEW: Edit specific appointment

@@ -8,6 +8,7 @@ import {
   deleteCalendarAppointment,
   addAppointmentToBooking,
 } from '@/app/actions/calendar-appointments';
+import { SaleDetailsModal } from './sale-details-modal';
 import { getAvailableServices } from '@/app/actions/services';
 import { getTeamMembersByVenue } from '@/app/actions/team-venue-assignments';
 import { ViewMode } from './edit-appointment-view-mode';
@@ -57,6 +58,7 @@ export function EditAppointmentModal({
   );
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showSaleModal, setShowSaleModal] = useState(false);
 
   // Team members data
   const [availableTeamMembers, setAvailableTeamMembers] = useState<
@@ -267,6 +269,11 @@ export function EditAppointmentModal({
       (id) => !pendingDeletions.has(id)
     ).length;
     return existingNotDeleted + pendingAdditions.size;
+  };
+
+  const handleViewSale = () => {
+    console.log('handleViewSale called'); // ← Add this
+    setShowSaleModal(true);
   };
 
   // ✅ Check if booking would be empty after save
@@ -1158,6 +1165,7 @@ export function EditAppointmentModal({
             getClientInitials={getClientInitials}
             getTotalPrice={getTotalPrice}
             getStatusLabel={getStatusLabel}
+            onViewSale={handleViewSale}
           />
         );
 
@@ -1263,7 +1271,7 @@ export function EditAppointmentModal({
             totalPrice={getTotalPrice()}
             onBack={() => setCurrentStep('view')}
             onClose={onClose}
-            getPriceDisplay={getPriceDisplay}
+            onSuccess={onSuccess} // ← Add this line
           />
         );
 
@@ -1326,6 +1334,12 @@ export function EditAppointmentModal({
                 ) : (
                   'Delete'
                 )}
+
+                <SaleDetailsModal
+                  isOpen={showSaleModal}
+                  onClose={() => setShowSaleModal(false)}
+                  booking={booking}
+                />
               </button>
             </div>
           </div>
