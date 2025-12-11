@@ -93,3 +93,36 @@ export interface BookingData {
   guestPhone: string;
   notes?: string;
 }
+
+// Add to BookingData interface:
+export interface BookingData {
+  venueId: string;
+  appointments: SelectedAppointment[];
+  bookingDate: string;
+  guestFirstName: string;
+  guestLastName: string;
+  guestEmail: string;
+  guestPhone: string;
+  notes?: string;
+  // NEW: Payment method ID (saved card for cancellation protection)
+  paymentMethodId?: string;
+}
+
+// Add these new interfaces at the end of the file:
+export interface SavedCard {
+  id: string;
+  brand: string;
+  last4: string;
+  exp_month: number;
+  exp_year: number;
+  is_default: boolean;
+}
+
+export interface CancellationPolicy {
+  id: string;
+  venue_id: string;
+  notice_hours: number;
+  fee_percentage: number;
+  fee_fixed_amount: number | null;
+  is_active: boolean;
+}

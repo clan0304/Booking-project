@@ -11,9 +11,10 @@ interface CreateBookingRequest {
   guest_phone: string;
   booking_date: string;
   notes?: string;
+  payment_method_id?: string | null;
   appointments: Array<{
     service_id: string;
-    team_member_id: string; // Can be 'any' or specific ID
+    team_member_id: string | null;
     start_time: string;
     end_time: string;
     duration_minutes: number;
@@ -26,6 +27,8 @@ interface CreateBookingRequest {
 export async function POST(request: NextRequest) {
   try {
     const body: CreateBookingRequest = await request.json();
+
+    console.log('Creating booking with data:', JSON.stringify(body, null, 2));
 
     // Validate required fields
     if (
@@ -47,19 +50,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ✅ NEW: Process appointments and assign team members for "any" selections
+    // Process appointments and assign team members for "any" selections
     const processedAppointments = [];
 
     for (const appt of body.appointments) {
       let finalTeamMemberId = appt.team_member_id;
 
-      // If "any" professional was selected, find available team members
-      if (appt.team_member_id === 'any') {
+      // Handle null, undefined, empty string, AND 'any'
+      if (!appt.team_member_id || appt.team_member_id === 'any') {
+        console.log(
+          `Finding available team member for slot ${appt.start_time} - ${appt.end_time}`
+        );
+
         const availableTeamMembers = await getAvailableTeamMembers(
           body.venue_id,
           body.booking_date,
           appt.start_time,
           appt.end_time
+        );
+
+        console.log(
+          `Found ${availableTeamMembers.length} available team members:`,
+          availableTeamMembers
         );
 
         if (availableTeamMembers.length === 0) {
@@ -76,6 +88,20 @@ export async function POST(request: NextRequest) {
           Math.random() * availableTeamMembers.length
         );
         finalTeamMemberId = availableTeamMembers[randomIndex];
+
+        console.log(`Assigned team member: ${finalTeamMemberId}`);
+      }
+
+      // Double-check we have a valid team_member_id
+      if (!finalTeamMemberId) {
+        return NextResponse.json(
+          {
+            error: `Could not assign a team member for ${
+              appt.service_name || 'service'
+            }`,
+          },
+          { status: 409 }
+        );
       }
 
       processedAppointments.push({
@@ -95,6 +121,10 @@ export async function POST(request: NextRequest) {
           p_end_time: appt.end_time,
         }
       );
+
+      if (availError) {
+        console.error('Error checking availability:', availError);
+      }
 
       if (availError || !isAvailable) {
         return NextResponse.json(
@@ -134,26 +164,31 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (bookingError || !bookingGroup) {
-      console.error('Error creating booking:', bookingError);
+      console.error('Error creating booking group:', bookingError);
       return NextResponse.json(
-        { error: 'Failed to create booking' },
+        { error: 'Failed to create booking', details: bookingError?.message },
         { status: 500 }
       );
     }
 
-    // Create appointments with assigned team members
+    // Create appointments with all required fields
     const appointmentsData = processedAppointments.map((appt) => ({
       booking_group_id: bookingGroup.id,
       service_id: appt.service_id,
-      team_member_id: appt.team_member_id, // Now always has a real team member ID
+      team_member_id: appt.team_member_id,
       start_time: appt.start_time,
       end_time: appt.end_time,
       duration_minutes: appt.duration_minutes,
-      service_name: appt.service_name,
+      service_name: appt.service_name, // Required field
       price: appt.price,
       notes: appt.notes || null,
       status: 'confirmed',
     }));
+
+    console.log(
+      'Inserting appointments:',
+      JSON.stringify(appointmentsData, null, 2)
+    );
 
     const { error: appointmentsError } = await supabaseAdmin
       .from('appointments')
@@ -161,16 +196,27 @@ export async function POST(request: NextRequest) {
 
     if (appointmentsError) {
       console.error('Error creating appointments:', appointmentsError);
+      console.error(
+        'Appointment data:',
+        JSON.stringify(appointmentsData, null, 2)
+      );
+
       // Rollback: delete booking group
       await supabaseAdmin
         .from('booking_groups')
         .delete()
         .eq('id', bookingGroup.id);
+
       return NextResponse.json(
-        { error: 'Failed to create appointments' },
+        {
+          error: 'Failed to create appointments',
+          details: appointmentsError.message,
+        },
         { status: 500 }
       );
     }
+
+    console.log('Booking created successfully:', bookingGroup.id);
 
     // TODO: Send confirmation email to guest
 
@@ -185,7 +231,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error in create booking API:', error);
     return NextResponse.json(
-      { error: 'An unexpected error occurred' },
+      {
+        error: 'An unexpected error occurred',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 }
     );
   }
@@ -201,6 +250,13 @@ async function getAvailableTeamMembers(
   endTime: string
 ): Promise<string[]> {
   try {
+    console.log('Getting available team members for:', {
+      venueId,
+      date,
+      startTime,
+      endTime,
+    });
+
     // 1. Get all team members with shifts at this venue on this date
     const { data: shifts, error: shiftsError } = await supabaseAdmin
       .from('shifts')
@@ -208,7 +264,15 @@ async function getAvailableTeamMembers(
       .eq('venue_id', venueId)
       .eq('shift_date', date);
 
-    if (shiftsError || !shifts || shifts.length === 0) {
+    console.log(`Found ${shifts?.length || 0} shifts for this date:`, shifts);
+
+    if (shiftsError) {
+      console.error('Error fetching shifts:', shiftsError);
+      return [];
+    }
+
+    if (!shifts || shifts.length === 0) {
+      console.log('No shifts found for this date');
       return [];
     }
 
@@ -221,10 +285,19 @@ async function getAvailableTeamMembers(
       const requestStart = timeToMinutes(startTime);
       const requestEnd = timeToMinutes(endTime);
 
+      const coversSlot = shiftStart <= requestStart && shiftEnd >= requestEnd;
+
+      console.log('Checking shift:', {
+        team_member_id: shift.team_member_id,
+        shiftTime: `${shift.start_time} - ${shift.end_time}`,
+        requestTime: `${startTime} - ${endTime}`,
+        coversSlot,
+      });
+
       // Check if shift covers the requested time
-      if (shiftStart <= requestStart && shiftEnd >= requestEnd) {
+      if (coversSlot) {
         // Check if team member has no conflicting appointments
-        const { data: isAvailable } = await supabaseAdmin.rpc(
+        const { data: isAvailable, error: rpcError } = await supabaseAdmin.rpc(
           'is_time_slot_available',
           {
             p_team_member_id: shift.team_member_id,
@@ -234,12 +307,25 @@ async function getAvailableTeamMembers(
           }
         );
 
+        if (rpcError) {
+          console.error(
+            `RPC error for team member ${shift.team_member_id}:`,
+            rpcError
+          );
+        }
+
+        console.log(
+          `Team member ${shift.team_member_id} availability:`,
+          isAvailable
+        );
+
         if (isAvailable) {
           availableTeamMembers.push(shift.team_member_id);
         }
       }
     }
 
+    console.log('Final available team members:', availableTeamMembers);
     return availableTeamMembers;
   } catch (error) {
     console.error('Error getting available team members:', error);

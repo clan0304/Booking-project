@@ -419,3 +419,137 @@ export async function cancelPayment(
     return { error: 'Failed to cancel payment' };
   }
 }
+/**
+ * Charge a saved payment method during checkout
+ * Creates PaymentIntent, confirms it, and records transaction
+ */
+export async function chargeSavedCard(
+  bookingGroupId: string,
+  venueId: string,
+  amount: number,
+  clientId: string,
+  paymentMethodDbId: string,
+  items: CheckoutItem[],
+  tipAmount: number = 0
+): Promise<{
+  transaction: Transaction | null;
+  paymentIntentId: string | null;
+  error: string | null;
+}> {
+  try {
+    const { supabaseUserId } = await requireStaff(); // ← Use supabaseUserId, not userId
+
+    // Get Stripe customer ID
+    const stripeCustomerId = await getStripeCustomerId(clientId);
+    if (!stripeCustomerId) {
+      return {
+        transaction: null,
+        paymentIntentId: null,
+        error: 'Customer not found in Stripe',
+      };
+    }
+
+    // Get the Stripe payment method ID from our database
+    const { data: pm } = await supabaseAdmin
+      .from('payment_methods')
+      .select('stripe_payment_method_id')
+      .eq('id', paymentMethodDbId)
+      .single();
+
+    if (!pm) {
+      return {
+        transaction: null,
+        paymentIntentId: null,
+        error: 'Payment method not found',
+      };
+    }
+
+    // Create and confirm PaymentIntent in one step
+    let paymentIntent: Stripe.PaymentIntent;
+    try {
+      paymentIntent = await stripe.paymentIntents.create({
+        amount: formatAmountForStripe(amount + tipAmount),
+        currency: 'aud',
+        customer: stripeCustomerId,
+        payment_method: pm.stripe_payment_method_id,
+        off_session: true,
+        confirm: true,
+        description: 'Service payment',
+        metadata: {
+          booking_group_id: bookingGroupId,
+          venue_id: venueId,
+          client_id: clientId,
+          processed_by: supabaseUserId, // ← Use supabaseUserId for metadata too
+        },
+      });
+    } catch (stripeError) {
+      const err = stripeError as Stripe.errors.StripeCardError;
+      console.error('Stripe charge error:', err);
+      return {
+        transaction: null,
+        paymentIntentId: null,
+        error: err.message || 'Card was declined',
+      };
+    }
+
+    // Get charge ID
+    const chargeId =
+      typeof paymentIntent.latest_charge === 'string'
+        ? paymentIntent.latest_charge
+        : paymentIntent.latest_charge?.id ?? null;
+
+    // Create transaction record
+    const { data: transaction, error: txError } = await supabaseAdmin
+      .from('transactions')
+      .insert({
+        booking_group_id: bookingGroupId,
+        venue_id: venueId,
+        client_id: clientId,
+        stripe_payment_intent_id: paymentIntent.id,
+        stripe_charge_id: chargeId,
+        amount,
+        tip_amount: tipAmount,
+        payment_method: 'card_saved' as PaymentMethodType,
+        payment_method_id: paymentMethodDbId,
+        status: paymentIntent.status === 'succeeded' ? 'succeeded' : 'pending',
+        description: 'Card payment (saved card)',
+        processed_by: supabaseUserId, // ← Use supabaseUserId here
+      })
+      .select()
+      .single();
+
+    if (txError) {
+      console.error('Error creating transaction:', txError);
+      return {
+        transaction: null,
+        paymentIntentId: paymentIntent.id,
+        error: 'Payment succeeded but failed to record transaction',
+      };
+    }
+
+    // Create transaction items
+    if (items.length > 0) {
+      const transactionItems = items.map((item) => ({
+        transaction_id: transaction.id,
+        item_type: item.type,
+        item_id: item.id,
+        item_name: item.name,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        discount_amount: 0,
+        total_price: item.quantity * item.unitPrice,
+      }));
+
+      await supabaseAdmin.from('transaction_items').insert(transactionItems);
+    }
+
+    return { transaction, paymentIntentId: paymentIntent.id, error: null };
+  } catch (error) {
+    console.error('Error charging saved card:', error);
+    return {
+      transaction: null,
+      paymentIntentId: null,
+      error: 'Failed to process payment',
+    };
+  }
+}

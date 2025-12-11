@@ -307,16 +307,29 @@ export function SingleEditMode({
               </div>
             </div>
           </div>
-
-          {/* Price Display */}
           <div>
             <label className="block text-sm font-semibold text-gray-900 mb-2">
               Price
             </label>
-            <div className="px-4 py-3.5 bg-gray-50 rounded-xl border border-gray-200">
-              <span className="font-semibold text-gray-900">
-                A$ {appointment.price.toFixed(0)}
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">
+                A$
               </span>
+              <input
+                type="number"
+                value={appointment.price ?? ''}
+                onChange={(e) =>
+                  onUpdateAppointmentField(
+                    appointmentId,
+                    'price',
+                    e.target.value ? parseFloat(e.target.value) : 0
+                  )
+                }
+                className="w-full pl-12 pr-4 py-3.5 bg-gray-50 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent font-medium text-gray-900"
+                min="0"
+                step="0.01"
+                placeholder="0"
+              />
             </div>
           </div>
 

@@ -1,12 +1,21 @@
 // components/public/bookings/booking-flow.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ServiceSelection } from './service-selection';
 import { TeamMemberSelection } from './team-member-selection';
 import { DateTimeSelection } from './date-time-selection';
+import { GuestInformation } from './guest-information';
+import { PaymentDetails } from './payment-details';
 import { BookingSummary } from './booking-summary';
-import { CheckCircle, ChevronRight, ArrowLeft } from 'lucide-react';
+import {
+  CheckCircle,
+  ChevronRight,
+  ArrowLeft,
+  Lock,
+  Loader2,
+} from 'lucide-react';
+import { getPublicPaymentInfo } from '@/app/actions/stripe';
 import type {
   Venue,
   Service,
@@ -14,6 +23,23 @@ import type {
   SelectedAppointment,
   BookingData,
 } from '@/types/bookings';
+import Link from 'next/link';
+
+interface SavedCard {
+  id: string;
+  brand: string;
+  last4: string;
+  exp_month: number;
+  exp_year: number;
+  is_default: boolean;
+}
+
+interface CancellationPolicy {
+  id: string;
+  notice_hours: number;
+  fee_percentage: number;
+  fee_fixed_amount: number | null;
+}
 
 interface AuthenticatedUser {
   id: string;
@@ -36,6 +62,8 @@ type BookingStep =
   | 'service'
   | 'team-member'
   | 'date-time'
+  | 'guest-info'
+  | 'payment'
   | 'review'
   | 'confirmed';
 
@@ -58,6 +86,99 @@ export function BookingFlow({
     }),
   });
 
+  // Payment-related state
+  const [paymentInfo, setPaymentInfo] = useState<{
+    clientId: string | null;
+    existingCard: SavedCard | null;
+    cancellationPolicy: CancellationPolicy | null;
+    hasCard: boolean;
+    loading: boolean;
+  }>({
+    clientId: null,
+    existingCard: null,
+    cancellationPolicy: null,
+    hasCard: false,
+    loading: true,
+  });
+
+  // Fetch payment info when component mounts (for authenticated users)
+  useEffect(() => {
+    if (authenticatedUser) {
+      fetchPaymentInfo();
+    } else {
+      setPaymentInfo((prev) => ({ ...prev, loading: false }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticatedUser?.id, venue.id]);
+
+  const fetchPaymentInfo = async () => {
+    try {
+      const result = await getPublicPaymentInfo(venue.id);
+
+      if (result.error) {
+        console.error('Failed to fetch payment info:', result.error);
+        setPaymentInfo((prev) => ({ ...prev, loading: false }));
+      } else {
+        console.log('Payment info loaded:', {
+          hasCard: result.hasCard,
+          cardLast4: result.existingCard?.last4,
+        });
+
+        setPaymentInfo({
+          clientId: result.clientId,
+          existingCard: result.existingCard as SavedCard | null,
+          cancellationPolicy: result.cancellationPolicy,
+          hasCard: result.hasCard,
+          loading: false,
+        });
+
+        // If user has a saved card, store the payment method ID
+        if (result.existingCard) {
+          setBookingData((prev) => ({
+            ...prev,
+            paymentMethodId: result.existingCard!.id,
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching payment info:', error);
+      setPaymentInfo((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  // Check if user must be authenticated
+  if (!authenticatedUser) {
+    return (
+      <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+        <Lock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-gray-900 mb-2">
+          Sign In Required
+        </h2>
+        <p className="text-gray-600 mb-6">
+          Please sign in or create an account to book an appointment.
+        </p>
+        <Link
+          href="/sign-in"
+          className="inline-block bg-[#6C5CE7] text-white px-6 py-3 rounded-lg font-medium hover:bg-[#5b4bc4] transition-colors"
+        >
+          Sign In to Continue
+        </Link>
+      </div>
+    );
+  }
+
+  // Show loading while fetching payment info
+  if (paymentInfo.loading) {
+    return (
+      <div className="bg-white rounded-xl shadow-lg p-8 flex items-center justify-center min-h-[300px]">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#6C5CE7] mx-auto mb-4" />
+          <p className="text-gray-600">Loading your information...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Define step configuration
   const steps = [
     { id: 'service' as const, label: 'Services', shortLabel: 'Services' },
@@ -67,180 +188,181 @@ export function BookingFlow({
       shortLabel: 'Professional',
     },
     { id: 'date-time' as const, label: 'Time', shortLabel: 'Time' },
+    { id: 'guest-info' as const, label: 'Your Info', shortLabel: 'Info' },
+    { id: 'payment' as const, label: 'Payment', shortLabel: 'Payment' },
     { id: 'review' as const, label: 'Confirm', shortLabel: 'Confirm' },
   ];
 
-  const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
+  // Filter out payment step if user already has card
+  const visibleSteps = paymentInfo.hasCard
+    ? steps.filter((s) => s.id !== 'payment')
+    : steps;
+
+  const currentStepIndex = visibleSteps.findIndex((s) => s.id === currentStep);
 
   const updateBookingData = (data: Partial<BookingData>) => {
     setBookingData((prev) => ({ ...prev, ...data }));
   };
 
+  const goToStep = (step: BookingStep) => {
+    setCurrentStep(step);
+  };
+
   const goToNextStep = () => {
-    const nextStepMap: Record<BookingStep, BookingStep> = {
-      service: 'team-member',
-      'team-member': 'date-time',
-      'date-time': 'review',
-      review: 'confirmed',
-      confirmed: 'confirmed',
-    };
-    setCurrentStep(nextStepMap[currentStep]);
-  };
+    const stepOrder: BookingStep[] = paymentInfo.hasCard
+      ? [
+          'service',
+          'team-member',
+          'date-time',
+          'guest-info',
+          'review',
+          'confirmed',
+        ]
+      : [
+          'service',
+          'team-member',
+          'date-time',
+          'guest-info',
+          'payment',
+          'review',
+          'confirmed',
+        ];
 
-  const goToPreviousStep = () => {
-    const prevStepMap: Record<BookingStep, BookingStep> = {
-      service: 'service',
-      'team-member': 'service',
-      'date-time': 'team-member',
-      review: 'date-time',
-      confirmed: 'review',
-    };
-    setCurrentStep(prevStepMap[currentStep]);
-  };
-
-  // ✅ NEW: Jump to specific step (only allowed for completed steps)
-  const goToStep = (stepId: BookingStep) => {
-    const targetIndex = steps.findIndex((s) => s.id === stepId);
-
-    // Only allow jumping to current or previous steps
-    if (targetIndex <= currentStepIndex) {
-      setCurrentStep(stepId);
+    const currentIndex = stepOrder.indexOf(currentStep);
+    if (currentIndex < stepOrder.length - 1) {
+      setCurrentStep(stepOrder[currentIndex + 1]);
     }
   };
 
-  // Check if a step can be clicked (completed or current)
-  const canNavigateToStep = (stepId: BookingStep) => {
-    const targetIndex = steps.findIndex((s) => s.id === stepId);
-    return targetIndex <= currentStepIndex;
+  const goToPreviousStep = () => {
+    const stepOrder: BookingStep[] = paymentInfo.hasCard
+      ? ['service', 'team-member', 'date-time', 'guest-info', 'review']
+      : [
+          'service',
+          'team-member',
+          'date-time',
+          'guest-info',
+          'payment',
+          'review',
+        ];
+
+    const currentIndex = stepOrder.indexOf(currentStep);
+    if (currentIndex > 0) {
+      setCurrentStep(stepOrder[currentIndex - 1]);
+    }
   };
 
+  // Handler to change/update card
+  const handleChangeCard = () => {
+    // Go to payment step to enter new card
+    setCurrentStep('payment');
+  };
+
+  // Handler when new card is saved
+  const handlePaymentMethodSaved = (paymentMethodId: string) => {
+    updateBookingData({ paymentMethodId });
+
+    // Refresh payment info to get the new card details
+    fetchPaymentInfo();
+
+    goToNextStep();
+  };
+
+  const totalPrice =
+    bookingData.appointments?.reduce((sum, appt) => sum + appt.price, 0) || 0;
+
+  // Render confirmed state
   if (currentStep === 'confirmed') {
     return (
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
-          <div className="flex justify-center mb-4">
-            <div className="rounded-full bg-green-100 p-3">
-              <CheckCircle className="h-12 w-12 text-green-600" />
-            </div>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            Booking Confirmed!
-          </h2>
-          <p className="text-gray-600 mb-6">
-            Your appointment has been successfully booked. We&apos;ve sent a
-            confirmation email to {bookingData.guestEmail}.
-          </p>
-          <div className="bg-gray-50 rounded-lg p-4 text-left">
-            <h3 className="font-semibold text-gray-900 mb-2">
-              Booking Details
-            </h3>
-            <div className="space-y-2 text-sm text-gray-600">
-              <p>
-                <strong>Date:</strong> {bookingData.bookingDate}
-              </p>
-              <p>
-                <strong>Location:</strong> {venue.name}
-              </p>
-              <p>
-                <strong>Services:</strong>{' '}
-                {bookingData.appointments?.length || 0}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="mt-6 w-full bg-[#6C5CE7] text-white py-3 rounded-lg font-medium hover:bg-[#5b4bc4] transition-colors"
-          >
-            Book Another Appointment
-          </button>
+      <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <CheckCircle className="h-8 w-8 text-green-600" />
         </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+          Booking Confirmed!
+        </h2>
+        <p className="text-gray-600 mb-6">
+          Thank you for your booking at {venue.name}. We&apos;ve sent a
+          confirmation to {bookingData.guestEmail}.
+        </p>
+        <Link
+          href="/account/bookings"
+          className="inline-block bg-[#6C5CE7] text-white px-6 py-3 rounded-lg font-medium hover:bg-[#5b4bc4] transition-colors"
+        >
+          View My Bookings
+        </Link>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      {/* Show user info banner if authenticated */}
-      {authenticatedUser && (
-        <div className="mb-6 bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <p className="text-sm text-purple-900">
-            <strong>Booking as:</strong> {authenticatedUser.first_name}{' '}
-            {authenticatedUser.last_name} ({authenticatedUser.email})
-          </p>
-        </div>
-      )}
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+      {/* Progress Steps */}
+      <div className="border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between">
+          {/* Back Button */}
+          <button
+            onClick={goToPreviousStep}
+            disabled={currentStep === 'service'}
+            className={`flex items-center gap-1 text-sm font-medium transition-colors ${
+              currentStep === 'service'
+                ? 'text-gray-300 cursor-not-allowed'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="hidden sm:inline">Back</span>
+          </button>
 
-      {/* ✅ NEW: Fresha-Style Header with Back Arrow + Breadcrumb */}
-      <div className="mb-6">
-        <div className="flex items-center gap-4 mb-6">
-          {/* Back Arrow Button */}
-          {currentStep !== 'service' && (
-            <button
-              onClick={goToPreviousStep}
-              className="flex-shrink-0 w-12 h-12 rounded-full border-2 border-gray-300 flex items-center justify-center hover:bg-gray-50 transition-colors"
-              aria-label="Go back"
-            >
-              <ArrowLeft className="h-5 w-5 text-gray-700" />
-            </button>
-          )}
-        </div>
+          {/* Step Indicators */}
+          <div className="flex items-center gap-2">
+            {visibleSteps.map((step, index) => {
+              const isActive = step.id === currentStep;
+              const isCompleted = index < currentStepIndex;
 
-        {/* Breadcrumb Navigation */}
-        <div className="flex items-center gap-2 text-sm mb-8">
-          {steps.map((step, index) => {
-            const isCompleted = index < currentStepIndex;
-            const isCurrent = index === currentStepIndex;
-            const isClickable = canNavigateToStep(step.id);
-
-            return (
-              <div key={step.id} className="flex items-center gap-2">
-                {/* Step Button/Label */}
-                <button
-                  onClick={() => isClickable && goToStep(step.id)}
-                  disabled={!isClickable}
-                  className={`font-medium transition-colors ${
-                    isCurrent
-                      ? 'text-gray-900 text-lg'
-                      : isCompleted
-                      ? 'text-gray-900 hover:text-gray-700 cursor-pointer'
-                      : 'text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  {step.shortLabel}
-                </button>
-
-                {/* Chevron Separator */}
-                {index < steps.length - 1 && (
-                  <ChevronRight
-                    className={`h-4 w-4 ${
-                      isCompleted || isCurrent
-                        ? 'text-gray-400'
-                        : 'text-gray-300'
+              return (
+                <div key={step.id} className="flex items-center">
+                  <div
+                    className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-[#6C5CE7] text-white'
+                        : isCompleted
+                        ? 'bg-green-500 text-white'
+                        : 'bg-gray-200 text-gray-600'
                     }`}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  >
+                    {isCompleted ? (
+                      <CheckCircle className="h-5 w-5" />
+                    ) : (
+                      index + 1
+                    )}
+                  </div>
+                  {index < visibleSteps.length - 1 && (
+                    <ChevronRight className="h-4 w-4 text-gray-400 mx-1" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
-        {/* Step Title */}
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          {steps[currentStepIndex].label}
-        </h1>
+          {/* Step Label */}
+          <span className="text-sm font-medium text-gray-600">
+            {visibleSteps[currentStepIndex]?.label}
+          </span>
+        </div>
       </div>
 
       {/* Step Content */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+      <div className="p-6">
         {currentStep === 'service' && (
           <ServiceSelection
             services={services}
             selectedAppointments={bookingData.appointments || []}
-            onSelect={(appointments) => {
+            onSelect={(appointments: SelectedAppointment[]) => {
               updateBookingData({ appointments });
-              goToNextStep();
+              goToStep('team-member');
             }}
-            onBack={goToPreviousStep}
+            onBack={() => {}}
           />
         )}
 
@@ -249,9 +371,9 @@ export function BookingFlow({
             teamMembers={teamMembers}
             services={services}
             appointments={bookingData.appointments || []}
-            onSelect={(appointments) => {
+            onSelect={(appointments: SelectedAppointment[]) => {
               updateBookingData({ appointments });
-              goToNextStep();
+              goToStep('date-time');
             }}
             onBack={goToPreviousStep}
           />
@@ -261,10 +383,39 @@ export function BookingFlow({
           <DateTimeSelection
             venueId={venue.id}
             appointments={bookingData.appointments || []}
-            onSelect={(date, appointments) => {
-              updateBookingData({ bookingDate: date, appointments });
+            onSelect={(date: string, appointments: SelectedAppointment[]) => {
+              updateBookingData({ appointments, bookingDate: date });
+              goToStep('guest-info');
+            }}
+            onBack={goToPreviousStep}
+          />
+        )}
+
+        {currentStep === 'guest-info' && (
+          <GuestInformation
+            initialData={{
+              guestFirstName: bookingData.guestFirstName || '',
+              guestLastName: bookingData.guestLastName || '',
+              guestEmail: bookingData.guestEmail || '',
+              guestPhone: bookingData.guestPhone || '',
+              notes: bookingData.notes,
+            }}
+            onSubmit={(data) => {
+              updateBookingData(data);
               goToNextStep();
             }}
+            onBack={goToPreviousStep}
+          />
+        )}
+
+        {currentStep === 'payment' && (
+          <PaymentDetails
+            clientId={paymentInfo.clientId || authenticatedUser.id}
+            venueId={venue.id}
+            totalPrice={totalPrice}
+            existingCard={paymentInfo.existingCard}
+            cancellationPolicy={paymentInfo.cancellationPolicy}
+            onPaymentMethodSaved={handlePaymentMethodSaved}
             onBack={goToPreviousStep}
           />
         )}
@@ -273,8 +424,11 @@ export function BookingFlow({
           <BookingSummary
             venue={venue}
             bookingData={bookingData as BookingData}
-            authenticatedUserId={authenticatedUser?.id || null}
-            onConfirm={() => goToNextStep()}
+            authenticatedUserId={authenticatedUser.id}
+            savedCard={paymentInfo.existingCard}
+            cancellationPolicy={paymentInfo.cancellationPolicy}
+            onChangeCard={handleChangeCard}
+            onConfirm={goToNextStep}
             onBack={goToPreviousStep}
           />
         )}

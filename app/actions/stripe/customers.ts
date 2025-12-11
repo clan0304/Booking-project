@@ -6,7 +6,8 @@ import { requireStaff } from '@/lib/auth';
 import type { StripeCustomer } from '@/types/payments';
 
 /**
- * Get or create a Stripe customer for a client
+ * Get or create a Stripe customer for a client (ADMIN/STAFF USE)
+ * Requires staff role - for admin checkout flows
  */
 export async function getOrCreateStripeCustomer(
   clientId: string
@@ -39,7 +40,8 @@ export async function getOrCreateStripeCustomer(
     // Create Stripe customer
     const stripeCustomer = await stripe.customers.create({
       email: client.email || undefined,
-      name: `${client.first_name} ${client.last_name}`.trim() || undefined,
+      name:
+        `${client.first_name} ${client.last_name || ''}`.trim() || undefined,
       phone: client.phone_number || undefined,
       metadata: {
         client_id: clientId,
@@ -64,6 +66,71 @@ export async function getOrCreateStripeCustomer(
   } catch (error) {
     console.error('Error creating Stripe customer:', error);
     return { customerId: '', error: 'Failed to create customer' };
+  }
+}
+
+/**
+ * Get or create a Stripe customer for PUBLIC booking flow
+ * Does NOT require staff role - for public users saving their own card
+ * Security: Caller (createPublicSetupIntent) gets clientId from auth session
+ */
+export async function getOrCreateStripeCustomerPublic(
+  clientId: string
+): Promise<{ customerId: string | null; error: string | null }> {
+  try {
+    // No requireStaff() - security is handled by caller getting clientId from session
+
+    // Check if customer already exists
+    const { data: existing } = await supabaseAdmin
+      .from('stripe_customers')
+      .select('stripe_customer_id')
+      .eq('client_id', clientId)
+      .single();
+
+    if (existing) {
+      return { customerId: existing.stripe_customer_id, error: null };
+    }
+
+    // Get client details
+    const { data: client, error: clientError } = await supabaseAdmin
+      .from('users')
+      .select('id, email, first_name, last_name, phone_number')
+      .eq('id', clientId)
+      .single();
+
+    if (clientError || !client) {
+      return { customerId: null, error: 'Client not found' };
+    }
+
+    // Create Stripe customer
+    const stripeCustomer = await stripe.customers.create({
+      email: client.email || undefined,
+      name:
+        `${client.first_name} ${client.last_name || ''}`.trim() || undefined,
+      phone: client.phone_number || undefined,
+      metadata: {
+        client_id: clientId,
+      },
+    });
+
+    // Save to database
+    const { error: insertError } = await supabaseAdmin
+      .from('stripe_customers')
+      .insert({
+        client_id: clientId,
+        stripe_customer_id: stripeCustomer.id,
+      });
+
+    if (insertError) {
+      // Clean up Stripe customer if DB insert fails
+      await stripe.customers.del(stripeCustomer.id);
+      return { customerId: null, error: 'Failed to save customer' };
+    }
+
+    return { customerId: stripeCustomer.id, error: null };
+  } catch (error) {
+    console.error('Error creating Stripe customer (public):', error);
+    return { customerId: null, error: 'Failed to create customer' };
   }
 }
 
@@ -127,7 +194,7 @@ export async function deleteStripeCustomer(
       // Delete from Stripe
       await stripe.customers.del(customer.stripe_customer_id);
 
-      // Delete from database (CASCADE will handle this, but being explicit)
+      // Delete from database
       await supabaseAdmin
         .from('stripe_customers')
         .delete()
@@ -170,7 +237,8 @@ export async function syncStripeCustomer(
     // Update Stripe customer
     await stripe.customers.update(stripeCustomerId, {
       email: client.email || undefined,
-      name: `${client.first_name} ${client.last_name}`.trim() || undefined,
+      name:
+        `${client.first_name} ${client.last_name || ''}`.trim() || undefined,
       phone: client.phone_number || undefined,
     });
 

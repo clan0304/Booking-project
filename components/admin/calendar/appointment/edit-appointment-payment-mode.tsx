@@ -11,7 +11,11 @@ import { TerminalFormReal as TerminalForm } from '@/components/admin/checkout/pa
 import { ManualCardForm } from '@/components/admin/checkout/payment-forms/manual-card-form';
 import { CashForm } from '@/components/admin/checkout/payment-forms/cash-form';
 import { TestPaymentForm } from '@/components/admin/checkout/payment-forms/test-payment-form';
-import { recordCardPayment, recordCashPayment } from '@/app/actions/stripe';
+import {
+  recordCardPayment,
+  recordCashPayment,
+  chargeSavedCard,
+} from '@/app/actions/stripe';
 import { getClientPaymentMethods } from '@/app/actions/stripe/setup-intents';
 import { updateBooking } from '@/app/actions/bookings';
 import type {
@@ -178,10 +182,39 @@ export function PaymentMode({
               p.id === payment.id ? { ...p, status: 'succeeded' as const } : p
             ),
           }));
+        } else if (payment.method === 'card_saved' && payment.paymentMethodId) {
+          // ✅ SAVED CARD - Use chargeSavedCard which creates PaymentIntent + confirms + records
+          if (!booking.client_id) {
+            throw new Error('Client ID required for saved card payment');
+          }
+
+          const { error, paymentIntentId } = await chargeSavedCard(
+            booking.id,
+            booking.venue_id,
+            payment.amount,
+            booking.client_id,
+            payment.paymentMethodId,
+            checkoutItems,
+            payment.tipAmount || 0
+          );
+
+          if (error) throw new Error(error);
+
+          setState((prev) => ({
+            ...prev,
+            payments: prev.payments.map((p) =>
+              p.id === payment.id
+                ? {
+                    ...p,
+                    status: 'succeeded' as const,
+                    paymentIntentId: paymentIntentId || undefined,
+                  }
+                : p
+            ),
+          }));
         } else if (
           payment.method === 'card_online' ||
-          payment.method === 'card_terminal' ||
-          payment.method === 'card_saved'
+          payment.method === 'card_terminal'
         ) {
           if (payment.paymentIntentId) {
             // ✅ REAL card payment - has Stripe PaymentIntent

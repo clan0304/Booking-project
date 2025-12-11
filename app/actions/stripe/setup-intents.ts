@@ -1,23 +1,31 @@
 'use server';
 
+import { auth } from '@clerk/nextjs/server';
 import { stripe } from '@/lib/stripe/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { requireStaff } from '@/lib/auth';
-import { getOrCreateStripeCustomer } from './customers';
+import {
+  getOrCreateStripeCustomer,
+  getOrCreateStripeCustomerPublic,
+} from './customers';
 import type {
   CreateSetupIntentResponse,
   PaymentMethod,
 } from '@/types/payments';
 
+// ==============================================
+// ADMIN FUNCTIONS (Require Staff Role)
+// ==============================================
+
 /**
- * Create a SetupIntent to save a card without charging
- * Used for: booking card collection, adding new payment method
+ * Create a SetupIntent to save a card without charging (ADMIN USE)
+ * Used for: admin adding card for client
  */
 export async function createSetupIntent(
   clientId: string
 ): Promise<{ data: CreateSetupIntentResponse | null; error: string | null }> {
   try {
-    // Get or create Stripe customer
+    // Get or create Stripe customer (requires staff)
     const { customerId, error: customerError } =
       await getOrCreateStripeCustomer(clientId);
 
@@ -32,7 +40,8 @@ export async function createSetupIntent(
       usage: 'off_session', // Allow charging later without customer present
       metadata: {
         client_id: clientId,
-        stripe_customer_id: customerId, // Pass this for webhook handler
+        stripe_customer_id: customerId,
+        source: 'admin',
       },
     });
 
@@ -137,7 +146,7 @@ export async function savePaymentMethod(
 }
 
 /**
- * Get all saved payment methods for a client
+ * Get all saved payment methods for a client (ADMIN USE)
  */
 export async function getClientPaymentMethods(
   clientId: string
@@ -165,7 +174,7 @@ export async function getClientPaymentMethods(
 }
 
 /**
- * Set a payment method as default
+ * Set a payment method as default (ADMIN USE)
  */
 export async function setDefaultPaymentMethod(
   clientId: string,
@@ -199,7 +208,7 @@ export async function setDefaultPaymentMethod(
 }
 
 /**
- * Remove a saved payment method
+ * Remove a saved payment method (ADMIN USE)
  */
 export async function removePaymentMethod(
   paymentMethodId: string
@@ -306,5 +315,200 @@ export async function getDefaultPaymentMethod(
   } catch (error) {
     console.error('Error fetching default payment method:', error);
     return { paymentMethod: null, error: 'Failed to fetch payment method' };
+  }
+}
+
+// ==============================================
+// PUBLIC FUNCTIONS (No Staff Role Required)
+// ==============================================
+
+/**
+ * Create a SetupIntent for PUBLIC booking flow
+ * Used when customers save their card during online booking
+ * Does NOT require staff role - only requires authenticated user
+ */
+export async function createPublicSetupIntent(
+  venueId?: string
+): Promise<{ data: CreateSetupIntentResponse | null; error: string | null }> {
+  try {
+    // Verify user is authenticated (any role)
+    const { userId: clerkUserId } = await auth();
+
+    if (!clerkUserId) {
+      return { data: null, error: 'Authentication required' };
+    }
+
+    // Get user from database
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('clerk_user_id', clerkUserId)
+      .single();
+
+    if (userError || !user) {
+      return { data: null, error: 'User not found' };
+    }
+
+    const clientId = user.id;
+
+    // Get or create Stripe customer (public version - no staff check)
+    const { customerId, error: customerError } =
+      await getOrCreateStripeCustomerPublic(clientId);
+
+    if (customerError || !customerId) {
+      return {
+        data: null,
+        error: customerError || 'Failed to create customer',
+      };
+    }
+
+    // Create SetupIntent
+    const setupIntent = await stripe.setupIntents.create({
+      customer: customerId,
+      payment_method_types: ['card'],
+      usage: 'off_session',
+      metadata: {
+        client_id: clientId,
+        stripe_customer_id: customerId,
+        venue_id: venueId || '',
+        source: 'public_booking',
+      },
+    });
+
+    if (!setupIntent.client_secret) {
+      return { data: null, error: 'Failed to create setup intent' };
+    }
+
+    return {
+      data: {
+        clientSecret: setupIntent.client_secret,
+        setupIntentId: setupIntent.id,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('Error creating public SetupIntent:', error);
+    return { data: null, error: 'Failed to create setup intent' };
+  }
+}
+
+/**
+ * Get payment info for PUBLIC booking flow
+ * Returns existing card and cancellation policy
+ */
+export async function getPublicPaymentInfo(venueId: string): Promise<{
+  clientId: string | null;
+  existingCard: {
+    id: string;
+    brand: string;
+    last4: string;
+    exp_month: number;
+    exp_year: number;
+    is_default: boolean;
+  } | null;
+  cancellationPolicy: {
+    id: string;
+    notice_hours: number;
+    fee_percentage: number;
+    fee_fixed_amount: number | null;
+  } | null;
+  hasCard: boolean;
+  error: string | null;
+}> {
+  try {
+    // Verify user is authenticated
+    const { userId: clerkUserId } = await auth();
+
+    if (!clerkUserId) {
+      return {
+        clientId: null,
+        existingCard: null,
+        cancellationPolicy: null,
+        hasCard: false,
+        error: 'Authentication required',
+      };
+    }
+
+    // Get user from database
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('clerk_user_id', clerkUserId)
+      .single();
+
+    if (userError || !user) {
+      return {
+        clientId: null,
+        existingCard: null,
+        cancellationPolicy: null,
+        hasCard: false,
+        error: 'User not found',
+      };
+    }
+
+    const clientId = user.id;
+
+    // Get existing payment methods for this client
+    const { data: paymentMethods } = await supabaseAdmin
+      .from('payment_methods')
+      .select(
+        'id, card_brand, card_last4, card_exp_month, card_exp_year, is_default'
+      )
+      .eq('client_id', clientId)
+      .eq('is_active', true)
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    const existingCard =
+      paymentMethods && paymentMethods.length > 0
+        ? {
+            id: paymentMethods[0].id,
+            brand: paymentMethods[0].card_brand,
+            last4: paymentMethods[0].card_last4,
+            exp_month: paymentMethods[0].card_exp_month,
+            exp_year: paymentMethods[0].card_exp_year,
+            is_default: paymentMethods[0].is_default,
+          }
+        : null;
+
+    // Get cancellation policy for venue
+    const { data: policy } = await supabaseAdmin
+      .from('cancellation_policies')
+      .select('id, notice_hours, late_cancel_fee_value, late_cancel_fee_type')
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .single();
+
+    const cancellationPolicy = policy
+      ? {
+          id: policy.id,
+          notice_hours: policy.notice_hours,
+          fee_percentage:
+            policy.late_cancel_fee_type === 'percentage'
+              ? policy.late_cancel_fee_value
+              : 0,
+          fee_fixed_amount:
+            policy.late_cancel_fee_type === 'fixed'
+              ? policy.late_cancel_fee_value
+              : null,
+        }
+      : null;
+
+    return {
+      clientId,
+      existingCard,
+      cancellationPolicy,
+      hasCard: !!existingCard,
+      error: null,
+    };
+  } catch (error) {
+    console.error('Error getting public payment info:', error);
+    return {
+      clientId: null,
+      existingCard: null,
+      cancellationPolicy: null,
+      hasCard: false,
+      error: 'Failed to get payment info',
+    };
   }
 }

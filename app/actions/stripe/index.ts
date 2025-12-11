@@ -6,6 +6,7 @@
 // Customer management
 export {
   getOrCreateStripeCustomer,
+  getOrCreateStripeCustomerPublic,
   getStripeCustomerId,
   getStripeCustomer,
   deleteStripeCustomer,
@@ -21,6 +22,9 @@ export {
   removePaymentMethod,
   clientHasPaymentMethod,
   getDefaultPaymentMethod,
+  // NEW: Public functions
+  createPublicSetupIntent,
+  getPublicPaymentInfo,
 } from './setup-intents';
 
 // Payment intents (charge cards)
@@ -32,6 +36,7 @@ export {
   getTransaction,
   getBookingTransactions,
   cancelPayment,
+  chargeSavedCard,
 } from './payment-intents';
 
 // Refunds

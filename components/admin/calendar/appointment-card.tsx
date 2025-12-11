@@ -313,11 +313,15 @@ export function AppointmentCard({
 
   return (
     <>
-      {/* Main Appointment Card */}
+      {/* Main Appointment Card - OUTER CONTAINER */}
       <div
         ref={cardRef}
         className={`absolute left-1 right-1 rounded-lg overflow-hidden cursor-pointer select-none ${
           isCompleted ? 'opacity-70' : ''
+        } ${
+          isGroupHovered && !isInteracting
+            ? 'ring-2 ring-inset ring-purple-400'
+            : ''
         }`}
         onMouseEnter={() => {
           if (!isInteracting) {
@@ -364,18 +368,13 @@ export function AppointmentCard({
         {/* MAIN APPOINTMENT CARD BODY (DRAGGABLE) */}
         <div
           className={`
-    h-full rounded-md p-2 transition-all duration-200 overflow-hidden
-    ${
-      isInteracting
-        ? 'border-2 border-purple-600 shadow-lg cursor-grabbing'
-        : 'hover:shadow-md cursor-grab group-hover:w-[97%]'
-    }
-    ${
-      isGroupHovered && !isInteracting
-        ? 'ring-2 ring-purple-400 ring-offset-1'
-        : ''
-    }
-  `}
+            h-full rounded-md p-2 transition-all duration-200 overflow-hidden
+            ${
+              isInteracting
+                ? 'border-2 border-purple-600 shadow-lg cursor-grabbing'
+                : 'hover:shadow-md cursor-grab group-hover:w-[97%]'
+            }
+          `}
           style={{ backgroundColor }}
           onPointerDown={handleBodyPointerDown}
           onPointerMove={handlePointerMove}
