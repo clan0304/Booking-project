@@ -1,5 +1,6 @@
 // types/calendar.ts
 // Type definitions for admin calendar components
+import type { ClientType } from '@/lib/client-type-helpers';
 
 /**
  * Venue information from calendar bookings
@@ -200,6 +201,7 @@ export interface BookingGroupWithAppointments {
   status: 'confirmed' | 'cancelled' | 'completed' | 'no_show';
   notes: string | null;
   internal_notes: string | null;
+  client_type: ClientType | null;
 
   // Timestamps
   created_at: string;

@@ -7,6 +7,7 @@ import { supabaseAdmin } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { calculateAppointmentTimes } from '@/lib/booking-helpers';
 import { BookingGroupWithAppointments } from '@/types/calendar';
+import { detectClientType } from '@/lib/client-type-helpers';
 
 interface CreateCalendarAppointmentData {
   venueId: string;
@@ -91,11 +92,23 @@ interface AppointmentPriceData {
   duration_minutes: number;
 }
 
-// REPLACE the entire createCalendarAppointment function in app/actions/calendar-appointments.ts
-
+/**
+ * Create a new calendar appointment from admin calendar
+ * Supports:
+ * - Existing clients (by ID)
+ * - Walk-in appointments
+ * - New client creation
+ * - Multiple services per booking
+ * - Auto-detection of client type (A, B, B+, C) for commission tracking
+ */
 export async function createCalendarAppointment(
   data: CreateCalendarAppointmentData
-) {
+): Promise<{
+  success: boolean;
+  message?: string;
+  bookingId?: string;
+  error?: string;
+}> {
   try {
     await requireAdmin();
 
@@ -115,93 +128,65 @@ export async function createCalendarAppointment(
     }
 
     // =====================================================
-    // 2. HANDLE CLIENT CREATION/SELECTION
+    // 2. HANDLE CLIENT (existing, new, or walk-in)
     // =====================================================
 
     let finalClientId: string | null = null;
-    let guestFirstName: string;
+    let guestFirstName: string | null = null;
     let guestLastName: string | null = null;
     let guestEmail: string | null = null;
     let guestPhone: string | null = null;
 
-    if (data.walkIn) {
-      // ✅ Walk-in: No user record, just guest info
-      guestFirstName = 'Walk-In';
-      finalClientId = null;
+    if (data.clientId) {
+      // Existing client
+      finalClientId = data.clientId;
     } else if (data.newClient) {
-      // ✅ Create new client user record
-      const { firstName, lastName, email, phone, birthday } = data.newClient;
-
-      if (!firstName) {
-        return { success: false, error: 'Client first name is required' };
-      }
-
-      // Check email uniqueness if provided
-      if (email) {
-        const { data: existing } = await supabaseAdmin
-          .from('users')
-          .select('id')
-          .eq('email', email.toLowerCase())
-          .maybeSingle();
-
-        if (existing) {
-          return { success: false, error: 'Email already exists' };
-        }
-      }
-
-      // Create user record
-      const { data: newUser, error: createError } = await supabaseAdmin
+      // Create new client
+      const { data: newClient, error: clientError } = await supabaseAdmin
         .from('users')
         .insert({
-          email: email?.toLowerCase() || null,
-          first_name: firstName,
-          last_name: lastName || null,
-          phone_number: phone || null,
-          birthday: birthday || null,
+          first_name: data.newClient.firstName,
+          last_name: data.newClient.lastName || null,
+          email: data.newClient.email || null,
+          phone_number: data.newClient.phone || null,
+          birthday: data.newClient.birthday || null,
           roles: ['client'],
           is_registered: false,
-          clerk_user_id: null,
-          onboarding_completed: true,
         })
-        .select()
+        .select('id')
         .single();
 
-      if (createError || !newUser) {
-        console.error('Error creating client:', createError);
-        return { success: false, error: 'Failed to create client' };
+      if (clientError || !newClient) {
+        console.error('Error creating new client:', clientError);
+        return { success: false, error: 'Failed to create new client' };
       }
 
-      // ✅ NEW: Populate guest fields from newly created user
-      finalClientId = newUser.id;
-      guestFirstName = newUser.first_name;
-      guestLastName = newUser.last_name;
-      guestEmail = newUser.email;
-      guestPhone = newUser.phone_number;
-    } else if (data.clientId) {
-      // ✅ NEW: Fetch existing client's information
-      const { data: existingClient, error: fetchError } = await supabaseAdmin
-        .from('users')
-        .select('id, first_name, last_name, email, phone_number')
-        .eq('id', data.clientId)
-        .single();
-
-      if (fetchError || !existingClient) {
-        console.error('Error fetching client:', fetchError);
-        return { success: false, error: 'Client not found' };
-      }
-
-      // ✅ NEW: Populate guest fields from existing user
-      finalClientId = existingClient.id;
-      guestFirstName = existingClient.first_name;
-      guestLastName = existingClient.last_name;
-      guestEmail = existingClient.email;
-      guestPhone = existingClient.phone_number;
+      finalClientId = newClient.id;
+    } else if (data.walkIn) {
+      // Walk-in - no client ID, use guest fields
+      guestFirstName = 'Walk-in';
+      guestLastName = null;
+      guestEmail = null;
+      guestPhone = null;
     } else {
-      return {
-        success: false,
-        error:
-          'Client information required (select existing, create new, or walk-in)',
-      };
+      // Default to walk-in if nothing specified
+      guestFirstName = 'Walk-in';
+    }
+
+    // If we have a client ID, fetch their info for guest fields (backup)
+    if (finalClientId) {
+      const { data: clientData } = await supabaseAdmin
+        .from('users')
+        .select('first_name, last_name, email, phone_number')
+        .eq('id', finalClientId)
+        .single();
+
+      if (clientData) {
+        guestFirstName = clientData.first_name;
+        guestLastName = clientData.last_name;
+        guestEmail = clientData.email;
+        guestPhone = clientData.phone_number;
+      }
     }
 
     // =====================================================
@@ -216,7 +201,14 @@ export async function createCalendarAppointment(
     const totalPrice = data.services.reduce((sum, s) => sum + s.price, 0);
 
     // =====================================================
-    // 4. CREATE BOOKING GROUP
+    // 4. AUTO-DETECT CLIENT TYPE (NEW!)
+    // =====================================================
+
+    // Import detectClientType from '@/lib/client-type-helpers'
+    const clientType = await detectClientType(finalClientId, data.teamMemberId);
+
+    // =====================================================
+    // 5. CREATE BOOKING GROUP
     // =====================================================
 
     const { data: bookingGroup, error: bookingError } = await supabaseAdmin
@@ -226,7 +218,6 @@ export async function createCalendarAppointment(
         booking_date: data.bookingDate,
         booking_source: 'admin',
         client_id: finalClientId,
-        // ✅ FIXED: Guest fields now properly populated
         guest_first_name: guestFirstName,
         guest_last_name: guestLastName,
         guest_email: guestEmail,
@@ -236,6 +227,7 @@ export async function createCalendarAppointment(
         status: 'confirmed',
         notes: data.bookingNotes || null,
         internal_notes: data.internalNotes || null,
+        client_type: clientType, // ← NEW: Auto-detected client type
       })
       .select()
       .single();
@@ -246,7 +238,7 @@ export async function createCalendarAppointment(
     }
 
     // =====================================================
-    // 5. CREATE APPOINTMENTS
+    // 6. CREATE APPOINTMENTS
     // =====================================================
 
     const appointmentInserts = data.services.map((service, index) => {
@@ -279,7 +271,7 @@ export async function createCalendarAppointment(
     }
 
     // =====================================================
-    // 6. SUCCESS - REVALIDATE & RETURN
+    // 7. SUCCESS - REVALIDATE & RETURN
     // =====================================================
 
     revalidatePath('/admin/calendar');
@@ -986,6 +978,7 @@ export async function getBookingByAppointmentId(
         status,
         notes,
         internal_notes,
+        client_type,
         created_at,
         updated_at,
         client:users!booking_groups_client_id_fkey (
@@ -1164,5 +1157,51 @@ export async function addAppointmentToBooking(data: {
       success: false,
       error: 'An unexpected error occurred',
     };
+  }
+}
+
+// =====================================================
+// ADD THIS NEW ACTION TO calendar-appointments.ts
+// =====================================================
+
+/**
+ * Update client type for a booking group
+ * Used in edit modal to change commission type (A, B, B+, C)
+ *
+ * Type A: New Client (30%)
+ * Type B: Regular Client (40%)
+ * Type B+: Requested New (40%) - Manual only
+ * Type C: Salon Client (30%)
+ */
+export async function updateBookingClientType(
+  bookingId: string,
+  clientType: 'A' | 'B' | 'B+' | 'C'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireStaff();
+
+    // Validate client type
+    const validTypes = ['A', 'B', 'B+', 'C'];
+    if (!validTypes.includes(clientType)) {
+      return { success: false, error: 'Invalid client type' };
+    }
+
+    const { error } = await supabaseAdmin
+      .from('booking_groups')
+      .update({ client_type: clientType })
+      .eq('id', bookingId);
+
+    if (error) {
+      console.error('Error updating client type:', error);
+      return { success: false, error: 'Failed to update client type' };
+    }
+
+    revalidatePath('/admin/calendar');
+    revalidatePath('/admin/bookings');
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error in updateBookingClientType:', error);
+    return { success: false, error: 'An unexpected error occurred' };
   }
 }

@@ -316,7 +316,7 @@ export function AppointmentCard({
       {/* Main Appointment Card - OUTER CONTAINER */}
       <div
         ref={cardRef}
-        className={`absolute left-1 right-1 rounded-lg overflow-hidden cursor-pointer select-none ${
+        className={`absolute left-1 right-1 top-0 bottom-0  rounded-lg overflow-hidden cursor-pointer select-none ${
           isCompleted ? 'opacity-70' : ''
         } ${
           isGroupHovered && !isInteracting
@@ -338,19 +338,7 @@ export function AppointmentCard({
       >
         {/* TOP RESIZE HANDLE */}
         <div
-          className={`
-            resize-handle
-            absolute top-0 left-0 right-0 h-3
-            cursor-ns-resize z-20
-            flex items-center justify-center
-            transition-colors touch-none
-            ${
-              isHovered && !isInteracting
-                ? 'bg-purple-600/20'
-                : 'bg-transparent'
-            }
-            ${interactionMode === 'resize-top' ? 'bg-purple-600/30' : ''}
-          `}
+          className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize z-20 touch-none"
           onPointerDown={handleTopPointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -372,7 +360,7 @@ export function AppointmentCard({
             ${
               isInteracting
                 ? 'border-2 border-purple-600 shadow-lg cursor-grabbing'
-                : 'hover:shadow-md cursor-grab group-hover:w-[97%]'
+                : 'hover:border-2 hover:border-purple-500 cursor-grab group-hover:w-[97%]'
             }
           `}
           style={{ backgroundColor }}
@@ -442,19 +430,7 @@ export function AppointmentCard({
 
         {/* BOTTOM RESIZE HANDLE */}
         <div
-          className={`
-            resize-handle
-            absolute bottom-0 left-0 right-0 h-3
-            cursor-ns-resize z-20
-            flex items-center justify-center
-            transition-colors touch-none
-            ${
-              isHovered && !isInteracting
-                ? 'bg-purple-600/20'
-                : 'bg-transparent'
-            }
-            ${interactionMode === 'resize-bottom' ? 'bg-purple-600/30' : ''}
-          `}
+          className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize z-20 touch-none"
           onPointerDown={handleBottomPointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

@@ -1,7 +1,7 @@
 // components/admin/calendar/appointment/edit-appointment-view-mode.tsx
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import {
   ChevronDown,
   Plus,
@@ -16,10 +16,21 @@ import {
   Receipt,
 } from 'lucide-react';
 import Image from 'next/image';
+import { updateBookingClientType } from '@/app/actions/calendar-appointments';
+import type { ClientType } from '@/lib/client-type-helpers';
 import type {
   ViewModeProps,
   EditingAppointment,
+  BookingStatus,
 } from './edit-appointment-types';
+import type { BookingGroupWithAppointments } from '@/types/calendar';
+
+// Extended booking type that includes client_type
+// Using Omit to properly override the client_type property
+interface BookingWithClientType
+  extends Omit<BookingGroupWithAppointments, 'client_type'> {
+  client_type?: ClientType | null;
+}
 
 export function ViewMode({
   booking,
@@ -51,14 +62,47 @@ export function ViewMode({
   getClientInitials,
   getTotalPrice,
   getStatusLabel,
-}: ViewModeProps) {
+}: ViewModeProps): React.ReactElement {
+  // Cast booking to extended type with client_type
+  const bookingWithType = booking as BookingWithClientType;
+
   // State for delete confirmation tooltip
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const isCompleted = booking.status === 'completed';
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const isCompleted: boolean = booking.status === 'completed';
+
+  // =====================================================
+  // CLIENT TYPE STATE
+  // =====================================================
+  const [clientType, setClientType] = useState<ClientType | null>(
+    bookingWithType.client_type ?? null
+  );
+  const [isSavingClientType, setIsSavingClientType] = useState<boolean>(false);
+  const [showClientTypeDropdown, setShowClientTypeDropdown] =
+    useState<boolean>(false);
+
+  // Handle client type change
+  const handleClientTypeChange = async (type: ClientType): Promise<void> => {
+    setClientType(type);
+    setIsSavingClientType(true);
+
+    try {
+      const result = await updateBookingClientType(booking.id, type);
+      if (!result.success) {
+        console.error('Failed to update client type:', result.error);
+        // Revert on error
+        setClientType(bookingWithType.client_type ?? null);
+      }
+    } catch (error) {
+      console.error('Error updating client type:', error);
+      setClientType(bookingWithType.client_type ?? null);
+    } finally {
+      setIsSavingClientType(false);
+    }
+  };
 
   // Handle delete with confirmation
-  const handleDeleteClick = (appointmentId: string) => {
+  const handleDeleteClick = (appointmentId: string): void => {
     if (editingAppointments.size <= 1) {
       onDeleteBooking();
     } else {
@@ -67,7 +111,7 @@ export function ViewMode({
   };
 
   // Confirm delete
-  const handleConfirmDelete = async (appointmentId: string) => {
+  const handleConfirmDelete = async (appointmentId: string): Promise<void> => {
     setIsDeleting(true);
     try {
       await onDeleteAppointment(appointmentId);
@@ -80,28 +124,28 @@ export function ViewMode({
   };
 
   // Cancel delete
-  const handleCancelDelete = () => {
+  const handleCancelDelete = (): void => {
     setDeleteConfirmId(null);
   };
 
   // Get client photo
-  const getClientPhoto = () => {
-    return booking.client?.photo_url || null;
+  const getClientPhoto = (): string | null => {
+    return booking.client?.photo_url ?? null;
   };
 
   // Get client email
-  const getClientEmail = () => {
-    return booking.client?.email || null;
+  const getClientEmail = (): string | null => {
+    return booking.client?.email ?? null;
   };
 
   // Get client phone
-  const getClientPhone = () => {
-    return booking.client?.phone_number || null;
+  const getClientPhone = (): string | null => {
+    return booking.client?.phone_number ?? null;
   };
 
   // Generate gradient colors for avatar
   const getGradientColors = (name: string): string => {
-    const colors = [
+    const colors: string[] = [
       '#8B5CF6, #EC4899',
       '#3B82F6, #8B5CF6',
       '#10B981, #3B82F6',
@@ -109,7 +153,7 @@ export function ViewMode({
       '#EC4899, #EF4444',
       '#6366F1, #8B5CF6',
     ];
-    const index = name.charCodeAt(0) % colors.length;
+    const index: number = name.charCodeAt(0) % colors.length;
     return colors[index];
   };
 
@@ -140,15 +184,23 @@ export function ViewMode({
   };
 
   // Sort appointments by start time
-  const sortedAppointments = Array.from(editingAppointments.entries()).sort(
-    ([, a], [, b]) => {
-      const timeToMinutes = (time: string) => {
-        const [hours, minutes] = time.split(':').map(Number);
-        return hours * 60 + minutes;
-      };
-      return timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
-    }
-  );
+  const sortedAppointments: [string, EditingAppointment][] = Array.from(
+    editingAppointments.entries()
+  ).sort(([, a], [, b]) => {
+    const timeToMinutes = (time: string): number => {
+      const [hours, minutes] = time.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+    return timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+  });
+
+  // Status options for dropdown
+  const statusOptions: BookingStatus[] = [
+    'confirmed',
+    'completed',
+    'cancelled',
+    'no_show',
+  ];
 
   return (
     <div className="flex flex-col h-full">
@@ -163,7 +215,7 @@ export function ViewMode({
             </div>
             <div className="flex items-center gap-2 text-white/80 text-xs lg:text-sm mt-0.5">
               <span>
-                {formatTime(booking.appointments[0]?.start_time || '00:00')}
+                {formatTime(booking.appointments[0]?.start_time ?? '00:00')}
               </span>
               <span>•</span>
               <span>
@@ -182,8 +234,14 @@ export function ViewMode({
                   showStatusDropdown ? 'bg-white/10' : ''
                 }`}
               >
-                <span>{getStatusLabel(bookingStatus)}</span>
-                <ChevronDown className="w-3 h-3" />
+                <span className="font-medium capitalize">
+                  {getStatusLabel(bookingStatus)}
+                </span>
+                <ChevronDown
+                  className={`w-4 h-4 transition-transform ${
+                    showStatusDropdown ? 'rotate-180' : ''
+                  }`}
+                />
               </button>
 
               {showStatusDropdown && (
@@ -193,29 +251,25 @@ export function ViewMode({
                     onClick={onToggleStatusDropdown}
                   />
                   <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 py-1 min-w-[160px]">
-                    {(
-                      [
-                        'confirmed',
-                        'completed',
-                        'cancelled',
-                        'no_show',
-                      ] as const
-                    ).map((status) => (
+                    {statusOptions.map((status: BookingStatus) => (
                       <button
                         key={status}
-                        onClick={() => onStatusChange(status)}
-                        className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 flex items-center gap-2 text-sm"
+                        onClick={() => {
+                          onStatusChange(status);
+                          onToggleStatusDropdown();
+                        }}
+                        className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between ${
+                          bookingStatus === status
+                            ? 'text-purple-600 font-medium'
+                            : 'text-gray-700'
+                        }`}
                       >
+                        <span className="capitalize">
+                          {getStatusLabel(status)}
+                        </span>
                         {bookingStatus === status && (
                           <Check className="w-4 h-4 text-purple-600" />
                         )}
-                        <span
-                          className={
-                            bookingStatus === status ? 'text-purple-600' : ''
-                          }
-                        >
-                          {getStatusLabel(status)}
-                        </span>
                       </button>
                     ))}
                   </div>
@@ -285,7 +339,7 @@ export function ViewMode({
                 {getClientPhoto() ? (
                   <div className="relative w-14 h-14 lg:w-16 lg:h-16 rounded-full overflow-hidden">
                     <Image
-                      src={getClientPhoto()!}
+                      src={getClientPhoto() as string}
                       alt={getClientName()}
                       fill
                       className="object-cover"
@@ -346,6 +400,88 @@ export function ViewMode({
               </div>
             </div>
 
+            {/* =====================================================
+                CLIENT TYPE SECTION
+                ===================================================== */}
+            <div className="mt-5 pt-5 border-t border-gray-200">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Client Type
+              </label>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (allowEdit && !isSavingClientType) {
+                      setShowClientTypeDropdown(!showClientTypeDropdown);
+                    }
+                  }}
+                  disabled={isSavingClientType || !allowEdit}
+                  className={`
+                    w-full px-4 py-2.5 rounded-lg border-2 transition-all text-left font-semibold
+                    flex items-center justify-between
+                    ${
+                      clientType
+                        ? 'border-purple-500 bg-purple-50 text-purple-700'
+                        : 'border-gray-200 text-gray-500'
+                    }
+                    ${
+                      isSavingClientType || !allowEdit
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'cursor-pointer hover:border-purple-400'
+                    }
+                  `}
+                >
+                  <span>{clientType ?? 'Select type'}</span>
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform ${
+                      showClientTypeDropdown ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+
+                {/* Dropdown Menu */}
+                {showClientTypeDropdown && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowClientTypeDropdown(false)}
+                    />
+                    <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-1">
+                      {(['A', 'B', 'B+', 'C'] as ClientType[]).map(
+                        (type: ClientType) => (
+                          <button
+                            key={type}
+                            onClick={() => {
+                              void handleClientTypeChange(type);
+                              setShowClientTypeDropdown(false);
+                            }}
+                            className={`
+                            w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between
+                            ${
+                              clientType === type
+                                ? 'text-purple-600 font-semibold bg-purple-50'
+                                : 'text-gray-700'
+                            }
+                          `}
+                          >
+                            <span className="font-bold">{type}</span>
+                            {clientType === type && (
+                              <Check className="w-4 h-4 text-purple-600" />
+                            )}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              {isSavingClientType && (
+                <p className="text-xs text-purple-600 mt-2 animate-pulse">
+                  Saving...
+                </p>
+              )}
+            </div>
+
             {/* Notes Section - Hidden on mobile, visible on lg+ */}
             {bookingNotes && (
               <div className="hidden lg:block mt-5 pt-5 border-t border-gray-200">
@@ -373,91 +509,95 @@ export function ViewMode({
 
             {/* Appointments List */}
             <div className="space-y-3">
-              {sortedAppointments.map(([appointmentId, appointment]) => {
-                const isPendingAddition = appointmentId.startsWith('pending-');
+              {sortedAppointments.map(
+                ([appointmentId, appointment]: [
+                  string,
+                  EditingAppointment
+                ]) => {
+                  const isPendingAddition: boolean =
+                    appointmentId.startsWith('pending-');
 
-                return (
-                  <div key={appointmentId} className="relative group">
-                    {/* Service Card - Clickable */}
-                    <div
-                      onClick={() =>
-                        allowEdit && onEditAppointment(appointmentId)
-                      }
-                      className={`flex items-center gap-3 p-3 lg:p-4 bg-gray-50 rounded-xl transition-colors ${
-                        isPendingAddition
-                          ? 'ring-2 ring-green-200 bg-green-50'
-                          : ''
-                      } ${allowEdit ? 'cursor-pointer hover:bg-gray-100' : ''}`}
-                    >
-                      {/* Color Bar */}
+                  return (
+                    <div key={appointmentId} className="relative group">
+                      {/* Service Card - Clickable */}
                       <div
-                        className="w-1 self-stretch rounded flex-shrink-0"
-                        style={{
-                          backgroundColor: getCategoryColor(appointment),
+                        onClick={() => {
+                          if (allowEdit) {
+                            onEditAppointment(appointmentId);
+                          }
                         }}
-                      />
+                        className={`flex items-center gap-3 p-3 lg:p-4 bg-gray-50 rounded-xl transition-colors ${
+                          isPendingAddition
+                            ? 'ring-2 ring-green-200 bg-green-50'
+                            : ''
+                        } ${
+                          allowEdit ? 'cursor-pointer hover:bg-gray-100' : ''
+                        }`}
+                      >
+                        {/* Color Bar */}
+                        <div
+                          className="w-1 self-stretch rounded flex-shrink-0"
+                          style={{
+                            backgroundColor: getCategoryColor(appointment),
+                          }}
+                        />
 
-                      {/* Service Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold text-gray-900 text-sm lg:text-base truncate">
-                            {appointment.serviceName}
-                          </p>
-                          {isPendingAddition && (
-                            <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
-                              NEW
+                        {/* Service Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-gray-900 text-sm lg:text-base truncate">
+                              {appointment.serviceName}
+                            </p>
+                            {isPendingAddition && (
+                              <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                                NEW
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
+                            <span className="flex-shrink-0">
+                              {formatTime(appointment.startTime)}
                             </span>
+                            <span className="text-gray-300">•</span>
+                            <span className="flex-shrink-0">
+                              {appointment.duration}min
+                            </span>
+                            <span className="text-gray-300">•</span>
+                            <span className="truncate">
+                              {getTeamMemberName(appointment.teamMemberId)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Price & Actions */}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <p className="font-semibold text-gray-900">
+                            {getPriceDisplay(appointment.price)}
+                          </p>
+
+                          {/* Delete button - show on hover or always on mobile */}
+                          {allowEdit && (
+                            <button
+                              onClick={(
+                                e: React.MouseEvent<HTMLButtonElement>
+                              ) => {
+                                e.stopPropagation();
+                                handleDeleteClick(appointmentId);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {allowEdit && (
+                            <ChevronRight className="w-4 h-4 text-gray-400" />
                           )}
                         </div>
-                        <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
-                          <span className="flex-shrink-0">
-                            {formatTime(appointment.startTime)}
-                          </span>
-                          <span className="text-gray-300">•</span>
-                          <span className="flex-shrink-0">
-                            {appointment.duration}min
-                          </span>
-                          <span className="text-gray-300">•</span>
-                          <span className="truncate">
-                            {getTeamMemberName(appointment.teamMemberId)}
-                          </span>
-                        </div>
                       </div>
 
-                      {/* Price */}
-                      <div className="flex-shrink-0 text-right">
-                        <p className="font-semibold text-gray-900 text-sm lg:text-base">
-                          {getPriceDisplay(appointment.price)}
-                        </p>
-                      </div>
-
-                      {/* Edit Arrow */}
-                      {allowEdit && (
-                        <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                      )}
-                    </div>
-
-                    {/* Delete Button - On hover */}
-                    {allowEdit && editingAppointments.size > 1 && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteClick(appointmentId);
-                        }}
-                        className="absolute -right-2 -top-2 p-1.5 bg-white border border-gray-200 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:border-red-200"
-                        title="Remove service"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-500" />
-                      </button>
-                    )}
-
-                    {/* Delete Confirmation Tooltip */}
-                    {deleteConfirmId === appointmentId && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40"
-                          onClick={handleCancelDelete}
-                        />
+                      {/* Delete Confirmation Tooltip */}
+                      {deleteConfirmId === appointmentId && (
                         <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 min-w-[220px]">
                           <p className="text-sm text-gray-700 mb-3">
                             Remove this service?
@@ -470,7 +610,9 @@ export function ViewMode({
                               Cancel
                             </button>
                             <button
-                              onClick={() => handleConfirmDelete(appointmentId)}
+                              onClick={() => {
+                                void handleConfirmDelete(appointmentId);
+                              }}
                               disabled={isDeleting}
                               className="flex-1 px-3 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
                             >
@@ -478,11 +620,11 @@ export function ViewMode({
                             </button>
                           </div>
                         </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+                      )}
+                    </div>
+                  );
+                }
+              )}
             </div>
 
             {/* Add Service Button */}
@@ -525,7 +667,9 @@ export function ViewMode({
             {/* Save button - hide when completed */}
             {hasUnsavedChanges && !isCompleted && (
               <button
-                onClick={onSave}
+                onClick={() => {
+                  void onSave();
+                }}
                 disabled={isSaving}
                 className="px-4 lg:px-5 py-2.5 lg:py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
@@ -551,7 +695,9 @@ export function ViewMode({
               </button>
             ) : (
               <button
-                onClick={onCheckout}
+                onClick={() => {
+                  void onCheckout();
+                }}
                 disabled={isSaving}
                 className="px-5 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-xl hover:bg-gray-900 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed"
               >

@@ -1,6 +1,7 @@
 // app/api/public/bookings/create/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { detectClientTypeForPublicBooking } from '@/lib/client-type-helpers';
 
 interface CreateBookingRequest {
   venue_id: string;
@@ -22,6 +23,17 @@ interface CreateBookingRequest {
     price: number;
     notes?: string;
   }>;
+}
+
+interface ProcessedAppointment {
+  service_id: string;
+  team_member_id: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  service_name: string;
+  price: number;
+  notes?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -50,8 +62,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // =====================================================
+    // DETERMINE IF SPECIFIC STYLIST WAS REQUESTED
+    // This is true when ANY appointment has a specific team_member_id
+    // (not null, not 'any')
+    // =====================================================
+    const isSpecificStylistRequested = body.appointments.some(
+      (appt) => appt.team_member_id && appt.team_member_id !== 'any'
+    );
+
+    console.log('Is specific stylist requested:', isSpecificStylistRequested);
+
     // Process appointments and assign team members for "any" selections
-    const processedAppointments = [];
+    const processedAppointments: ProcessedAppointment[] = [];
 
     for (const appt of body.appointments) {
       let finalTeamMemberId = appt.team_member_id;
@@ -143,6 +166,26 @@ export async function POST(request: NextRequest) {
       0
     );
 
+    // =====================================================
+    // AUTO-DETECT CLIENT TYPE
+    // IMPORTANT: This must happen AFTER processedAppointments has final team_member_id
+    // If "Any Professional" randomly assigns a stylist the client has seen before,
+    // they should get Type B (Regular) not Type C (Salon Client)
+    // =====================================================
+    const clientType = await detectClientTypeForPublicBooking(
+      body.client_id || null,
+      processedAppointments[0]?.team_member_id || '',
+      isSpecificStylistRequested,
+      body.guest_email
+    );
+
+    console.log('Detected client type:', clientType, {
+      isSpecificStylistRequested,
+      clientId: body.client_id,
+      email: body.guest_email,
+      assignedTeamMemberId: processedAppointments[0]?.team_member_id,
+    });
+
     // Create booking group
     const { data: bookingGroup, error: bookingError } = await supabaseAdmin
       .from('booking_groups')
@@ -159,6 +202,7 @@ export async function POST(request: NextRequest) {
         notes: body.notes || null,
         booking_source: 'online',
         status: 'confirmed',
+        client_type: clientType, // ← Auto-detected client type
       })
       .select()
       .single();
@@ -179,7 +223,7 @@ export async function POST(request: NextRequest) {
       start_time: appt.start_time,
       end_time: appt.end_time,
       duration_minutes: appt.duration_minutes,
-      service_name: appt.service_name, // Required field
+      service_name: appt.service_name,
       price: appt.price,
       notes: appt.notes || null,
       status: 'confirmed',

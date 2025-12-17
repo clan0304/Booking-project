@@ -1022,11 +1022,8 @@ export function DayView({
                                 zIndex: isInteracting ? 100 : layout.zIndex,
                               }}
                             >
-                              {/* Hover trigger area - covers full width including gap */}
-                              <div className="absolute inset-0 pointer-events-auto" />
-
-                              {/* Card that shrinks on hover */}
-                              <div className="relative h-full w-full group-hover:w-[95%] transition-all duration-200 pointer-events-none">
+                              {/* Card shrinks on hover - gap allows clicking time slot beneath */}
+                              <div className="relative h-full w-full group-hover:w-[90%] transition-all duration-200">
                                 <div className="h-full w-full pointer-events-auto relative hover:z-[100]">
                                   <AppointmentCard
                                     appointment={{
