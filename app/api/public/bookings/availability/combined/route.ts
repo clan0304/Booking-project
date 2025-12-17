@@ -88,6 +88,9 @@ interface BatchDateResponse {
  * Supports TWO modes:
  * 1. Single date (backward compatible): ?date=2025-12-09&venue_id=xxx
  * 2. Date range (batch mode): ?start_date=2025-12-09&end_date=2025-12-31&venue_id=xxx
+ *
+ * Optional parameter:
+ * - team_member_id: Filter availability for a specific team member only
  */
 export async function GET(request: NextRequest) {
   try {
@@ -101,6 +104,9 @@ export async function GET(request: NextRequest) {
     // Check for single date param (backward compatible)
     const singleDate = searchParams.get('date');
 
+    // Optional: specific team member filter
+    const teamMemberId = searchParams.get('team_member_id');
+
     if (!venueId) {
       return NextResponse.json(
         { error: 'Missing venue_id parameter' },
@@ -111,10 +117,10 @@ export async function GET(request: NextRequest) {
     // Route to appropriate handler
     if (startDate && endDate) {
       // Batch mode: return availability for date range
-      return handleBatchRequest(venueId, startDate, endDate);
+      return handleBatchRequest(venueId, startDate, endDate, teamMemberId);
     } else if (singleDate) {
       // Single date mode: backward compatible
-      return handleSingleDateRequest(venueId, singleDate);
+      return handleSingleDateRequest(venueId, singleDate, teamMemberId);
     } else {
       return NextResponse.json(
         { error: 'Missing date or start_date/end_date parameters' },
@@ -133,11 +139,13 @@ export async function GET(request: NextRequest) {
 /**
  * Handle batch request for date range
  * Returns availability for all dates in ONE response
+ * Optionally filters by specific team_member_id
  */
 async function handleBatchRequest(
   venueId: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  teamMemberId: string | null
 ): Promise<NextResponse<BatchDateResponse | { error: string }>> {
   // Generate array of dates in range
   const dates: string[] = [];
@@ -164,13 +172,20 @@ async function handleBatchRequest(
     ((closedDays as VenueClosedDay[]) || []).map((d) => d.closed_date)
   );
 
-  // 2. Fetch ALL shifts in range (ONE query)
-  const { data: shifts, error: shiftsError } = await supabaseAdmin
+  // 2. Fetch shifts in range (filter by team_member_id if provided)
+  let shiftsQuery = supabaseAdmin
     .from('shifts')
     .select('id, team_member_id, shift_date, start_time, end_time, notes')
     .eq('venue_id', venueId)
     .gte('shift_date', startDate)
     .lte('shift_date', endDate);
+
+  // ✅ Filter by specific team member if provided
+  if (teamMemberId) {
+    shiftsQuery = shiftsQuery.eq('team_member_id', teamMemberId);
+  }
+
+  const { data: shifts, error: shiftsError } = await shiftsQuery;
 
   if (shiftsError) {
     console.error('Error fetching shifts:', shiftsError);
@@ -190,8 +205,8 @@ async function handleBatchRequest(
     shiftsByDate.set(shift.shift_date, existing);
   }
 
-  // 3. Fetch ALL appointments in range (ONE query)
-  const { data: appointments, error: appointmentsError } = await supabaseAdmin
+  // 3. Fetch appointments in range (filter by team_member_id if provided)
+  let appointmentsQuery = supabaseAdmin
     .from('appointments')
     .select(
       `
@@ -208,6 +223,14 @@ async function handleBatchRequest(
     .gte('booking_groups.booking_date', startDate)
     .lte('booking_groups.booking_date', endDate)
     .neq('status', 'cancelled');
+
+  // ✅ Filter by specific team member if provided
+  if (teamMemberId) {
+    appointmentsQuery = appointmentsQuery.eq('team_member_id', teamMemberId);
+  }
+
+  const { data: appointments, error: appointmentsError } =
+    await appointmentsQuery;
 
   if (appointmentsError) {
     console.error('Error fetching appointments:', appointmentsError);
@@ -241,13 +264,20 @@ async function handleBatchRequest(
     appointmentsByDate.set(bookingDate, existing);
   }
 
-  // 4. Fetch ALL blocked times in range (ONE query)
-  const { data: blockedTimes, error: blockedError } = await supabaseAdmin
+  // 4. Fetch blocked times in range (filter by team_member_id if provided)
+  let blockedTimesQuery = supabaseAdmin
     .from('blocked_times')
     .select('id, team_member_id, blocked_date, start_time, end_time, reason')
     .eq('venue_id', venueId)
     .gte('blocked_date', startDate)
     .lte('blocked_date', endDate);
+
+  // ✅ Filter by specific team member if provided
+  if (teamMemberId) {
+    blockedTimesQuery = blockedTimesQuery.eq('team_member_id', teamMemberId);
+  }
+
+  const { data: blockedTimes, error: blockedError } = await blockedTimesQuery;
 
   if (blockedError) {
     console.error('Error fetching blocked times:', blockedError);
@@ -337,10 +367,12 @@ async function handleBatchRequest(
 
 /**
  * Handle single date request (backward compatible)
+ * Optionally filters by specific team_member_id
  */
 async function handleSingleDateRequest(
   venueId: string,
-  date: string
+  date: string,
+  teamMemberId: string | null
 ): Promise<NextResponse<SingleDateResponse | { error: string }>> {
   // 1. Check if venue is closed on this date
   const { data: closedDays } = await supabaseAdmin
@@ -363,12 +395,18 @@ async function handleSingleDateRequest(
     });
   }
 
-  // 2. Get all shifts for this venue on this date
-  const { data: shifts, error: shiftsError } = await supabaseAdmin
+  // 2. Get shifts for this venue on this date (filter by team_member_id if provided)
+  let shiftsQuery = supabaseAdmin
     .from('shifts')
     .select('id, team_member_id, shift_date, start_time, end_time, notes')
     .eq('venue_id', venueId)
     .eq('shift_date', date);
+
+  if (teamMemberId) {
+    shiftsQuery = shiftsQuery.eq('team_member_id', teamMemberId);
+  }
+
+  const { data: shifts, error: shiftsError } = await shiftsQuery;
 
   if (shiftsError) {
     console.error('Error fetching shifts:', shiftsError);
@@ -382,7 +420,9 @@ async function handleSingleDateRequest(
     return NextResponse.json({
       available: false,
       reason: 'no_shifts',
-      message: 'No team members are scheduled to work on this date',
+      message: teamMemberId
+        ? 'This team member is not scheduled to work on this date'
+        : 'No team members are scheduled to work on this date',
       slots: [],
       teamMemberSlots: {},
     });
@@ -390,8 +430,8 @@ async function handleSingleDateRequest(
 
   const typedShifts = shifts as Shift[];
 
-  // 3. Get all appointments for this venue on this date
-  const { data: appointments, error: appointmentsError } = await supabaseAdmin
+  // 3. Get appointments for this venue on this date (filter by team_member_id if provided)
+  let appointmentsQuery = supabaseAdmin
     .from('appointments')
     .select(
       `
@@ -407,6 +447,13 @@ async function handleSingleDateRequest(
     .eq('booking_groups.venue_id', venueId)
     .eq('booking_groups.booking_date', date)
     .neq('status', 'cancelled');
+
+  if (teamMemberId) {
+    appointmentsQuery = appointmentsQuery.eq('team_member_id', teamMemberId);
+  }
+
+  const { data: appointments, error: appointmentsError } =
+    await appointmentsQuery;
 
   if (appointmentsError) {
     console.error('Error fetching appointments:', appointmentsError);
@@ -433,12 +480,18 @@ async function handleSingleDateRequest(
     })
   );
 
-  // 4. Get all blocked times for this venue on this date
-  const { data: blockedTimes, error: blockedError } = await supabaseAdmin
+  // 4. Get blocked times for this venue on this date (filter by team_member_id if provided)
+  let blockedTimesQuery = supabaseAdmin
     .from('blocked_times')
     .select('id, team_member_id, blocked_date, start_time, end_time, reason')
     .eq('venue_id', venueId)
     .eq('blocked_date', date);
+
+  if (teamMemberId) {
+    blockedTimesQuery = blockedTimesQuery.eq('team_member_id', teamMemberId);
+  }
+
+  const { data: blockedTimes, error: blockedError } = await blockedTimesQuery;
 
   if (blockedError) {
     console.error('Error fetching blocked times:', blockedError);

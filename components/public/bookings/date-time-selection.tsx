@@ -121,7 +121,7 @@ export function DateTimeSelection({
     };
   }, [today]);
 
-  // ✅ OPTIMIZED: Fetch 30-day availability in ONE request (only once on mount)
+  // ✅ FIXED: Fetch 30-day availability using /combined endpoint for BOTH cases
   useEffect(() => {
     const fetchAvailability = async () => {
       if (appointments.length === 0) return;
@@ -135,39 +135,26 @@ export function DateTimeSelection({
           (appt) => appt.teamMemberId === 'any'
         );
 
-        if (hasAnyProfessional) {
-          // ✅ ONE REQUEST for 30-day range
-          const response = await fetch(
-            `/api/public/bookings/availability/combined?start_date=${dateRange.start}&end_date=${dateRange.end}&venue_id=${venueId}`
-          );
-          const data = await response.json();
+        // ✅ Build URL - use /combined endpoint for BOTH cases
+        let url = `/api/public/bookings/availability/combined?start_date=${dateRange.start}&end_date=${dateRange.end}&venue_id=${venueId}`;
 
-          if (data.availability) {
-            const availability: Record<string, boolean> = {};
-            for (const [date, info] of Object.entries(data.availability)) {
-              const dateInfo = info as { available: boolean; slots: string[] };
-              availability[date] =
-                dateInfo.available && dateInfo.slots.length > 0;
-            }
-            setDayAvailability(availability);
-          }
-        } else {
-          // For specific team member
+        // ✅ Add team_member_id filter for specific designer
+        if (!hasAnyProfessional) {
           const appointment = appointments[0];
-          const response = await fetch(
-            `/api/public/bookings/availability?team_member_id=${appointment.teamMemberId}&start_date=${dateRange.start}&end_date=${dateRange.end}&venue_id=${venueId}`
-          );
-          const data = await response.json();
+          url += `&team_member_id=${appointment.teamMemberId}`;
+        }
 
-          if (data.availability) {
-            const availability: Record<string, boolean> = {};
-            for (const [date, info] of Object.entries(data.availability)) {
-              const dateInfo = info as { available: boolean; slots: string[] };
-              availability[date] =
-                dateInfo.available && dateInfo.slots.length > 0;
-            }
-            setDayAvailability(availability);
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.availability) {
+          const availability: Record<string, boolean> = {};
+          for (const [date, info] of Object.entries(data.availability)) {
+            const dateInfo = info as { available: boolean; slots: string[] };
+            availability[date] =
+              dateInfo.available && dateInfo.slots.length > 0;
           }
+          setDayAvailability(availability);
         }
       } catch (error) {
         console.error('Error checking availability:', error);
@@ -180,7 +167,7 @@ export function DateTimeSelection({
     fetchAvailability();
   }, [appointments, venueId, dateRange]);
 
-  // Fetch available time slots when date is selected (single date)
+  // ✅ FIXED: Fetch available time slots using /combined endpoint for BOTH cases
   useEffect(() => {
     if (!selectedDate || appointments.length === 0) return;
 
@@ -191,44 +178,26 @@ export function DateTimeSelection({
           (appt) => appt.teamMemberId === 'any'
         );
 
-        if (hasAnyProfessional) {
-          const response = await fetch(
-            `/api/public/bookings/availability/combined?date=${selectedDate}&venue_id=${venueId}`
+        // ✅ Build URL - use /combined endpoint for BOTH cases
+        let url = `/api/public/bookings/availability/combined?date=${selectedDate}&venue_id=${venueId}`;
+
+        // ✅ Add team_member_id filter for specific designer
+        if (!hasAnyProfessional) {
+          const appointment = appointments[0];
+          url += `&team_member_id=${appointment.teamMemberId}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.available && data.slots) {
+          const filteredSlots = filterSlotsBy24HourRule(
+            selectedDate,
+            data.slots
           );
-
-          const data = await response.json();
-
-          if (data.available && data.slots) {
-            const filteredSlots = filterSlotsBy24HourRule(
-              selectedDate,
-              data.slots
-            );
-            setAvailableSlots(filteredSlots);
-          } else {
-            setAvailableSlots([]);
-          }
-        } else {
-          const allSlots: Record<string, string[]> = {};
-
-          for (const appointment of appointments) {
-            const response = await fetch(
-              `/api/public/bookings/availability?team_member_id=${appointment.teamMemberId}&date=${selectedDate}&venue_id=${venueId}`
-            );
-
-            const data = await response.json();
-
-            if (data.available && data.slots) {
-              allSlots[appointment.serviceId] = data.slots;
-            } else {
-              allSlots[appointment.serviceId] = [];
-            }
-          }
-
-          const firstServiceId = appointments[0].serviceId;
-          const slots = allSlots[firstServiceId] || [];
-
-          const filteredSlots = filterSlotsBy24HourRule(selectedDate, slots);
           setAvailableSlots(filteredSlots);
+        } else {
+          setAvailableSlots([]);
         }
       } catch (error) {
         console.error('Error fetching slots:', error);
@@ -291,10 +260,20 @@ export function DateTimeSelection({
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2">
-          Select Date & Time
-        </h2>
-        <p className="text-gray-600">
           Choose when you&apos;d like your appointment
+        </h2>
+        <p className="text-sm text-gray-500">
+          Bookings available from{' '}
+          {new Date(dateRange.start + 'T00:00:00').toLocaleDateString('en-AU', {
+            day: 'numeric',
+            month: 'short',
+          })}{' '}
+          to{' '}
+          {new Date(dateRange.end + 'T00:00:00').toLocaleDateString('en-AU', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          })}
         </p>
       </div>
 
@@ -349,93 +328,72 @@ export function DateTimeSelection({
             ))}
           </div>
 
-          {/* Calendar Days */}
+          {/* Calendar Grid */}
           <div className="grid grid-cols-7 gap-1">
-            {days.map((day, index) => {
-              const dateStr = formatLocalDate(day);
-              const isCurrentMonth = day.getMonth() === currentMonth.getMonth();
-              const isPastDate = day < today;
-              const isToday = day.getTime() === today.getTime();
+            {days.map((date, idx) => {
+              const dateStr = formatLocalDate(date);
+              const isCurrentMonth =
+                date.getMonth() === currentMonth.getMonth();
+              const isToday = dateStr === formatLocalDate(today);
               const isSelected = dateStr === selectedDate;
-              const isWithin24Hours = !isDateBookable(day);
-              const isOutsideWindow = !isWithinBookableWindow(day);
-              const hasAvailability = dayAvailability[dateStr];
-              const isUnavailable = hasAvailability === false;
+              const isPast = date < today;
+              const isWithinWindow = isWithinBookableWindow(date);
 
-              // Disable if: not current month, past, within 24hrs, outside 30-day window, or no availability
+              // Check availability from fetched data
+              const hasAvailability = dayAvailability[dateStr] === true;
+              const isBookable =
+                isWithinWindow && !isPast && isDateBookable(date);
               const isDisabled =
                 !isCurrentMonth ||
-                isPastDate ||
-                isWithin24Hours ||
-                isOutsideWindow ||
-                isUnavailable;
+                isPast ||
+                !isWithinWindow ||
+                !hasAvailability ||
+                !isBookable;
 
               return (
                 <button
-                  key={index}
-                  onClick={() => handleDateSelect(day)}
+                  key={idx}
+                  onClick={() => !isDisabled && handleDateSelect(date)}
                   disabled={isDisabled}
                   className={`
-                    relative aspect-square flex items-center justify-center text-sm rounded-lg transition-colors
+                    relative aspect-square flex items-center justify-center text-sm rounded-lg transition-all
                     ${!isCurrentMonth ? 'text-gray-300' : ''}
+                    ${isSelected ? 'bg-[#6C5CE7] text-white font-semibold' : ''}
                     ${
-                      isDisabled
-                        ? 'text-gray-300 cursor-not-allowed bg-gray-50'
-                        : 'text-gray-900 hover:bg-gray-100'
+                      isToday && !isSelected
+                        ? 'border-2 border-[#6C5CE7] text-[#6C5CE7] font-semibold'
+                        : ''
                     }
-                    ${isToday ? 'font-bold border border-[#6C5CE7]' : ''}
                     ${
-                      isSelected
-                        ? 'bg-[#6C5CE7] text-white hover:bg-[#5b4bc4]'
+                      isDisabled && isCurrentMonth
+                        ? 'text-gray-300 cursor-not-allowed'
+                        : ''
+                    }
+                    ${
+                      !isDisabled && !isSelected
+                        ? 'hover:bg-gray-100 text-gray-700 cursor-pointer'
                         : ''
                     }
                   `}
-                  title={
-                    isWithin24Hours
-                      ? 'Must book 24 hours in advance'
-                      : isOutsideWindow
-                      ? 'Outside booking window'
-                      : isUnavailable
-                      ? 'No availability'
-                      : ''
-                  }
                 >
-                  {day.getDate()}
-                  {/* Show loading indicator while checking availability */}
-                  {checkingAvailability &&
-                    isCurrentMonth &&
-                    !isPastDate &&
-                    !isOutsideWindow &&
-                    !isSelected && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-50 rounded-lg">
-                        <div className="w-3 h-3 border-2 border-gray-300 border-t-[#6C5CE7] rounded-full animate-spin"></div>
-                      </div>
-                    )}
+                  {date.getDate()}
                 </button>
               );
             })}
           </div>
 
-          {/* Booking window info */}
-          <p className="text-xs text-gray-500 mt-3 text-center">
-            Bookings available from{' '}
-            {new Date(dateRange.start + 'T00:00:00').toLocaleDateString(
-              'en-AU',
-              { month: 'short', day: 'numeric' }
-            )}{' '}
-            to{' '}
-            {new Date(dateRange.end + 'T00:00:00').toLocaleDateString('en-AU', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </p>
+          {/* Loading indicator */}
+          {checkingAvailability && (
+            <div className="mt-4 text-center text-sm text-gray-500">
+              Checking availability...
+            </div>
+          )}
         </div>
 
         {/* Time Slots */}
         <div className="border border-gray-200 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">
-            <Clock className="h-5 w-5 text-gray-600" />
+            <Clock className="h-5 w-5 text-gray-400" />
             <h3 className="font-semibold text-gray-900">Available Times</h3>
           </div>
 

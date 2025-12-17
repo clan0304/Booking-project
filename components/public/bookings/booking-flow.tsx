@@ -2,16 +2,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { ServiceSelection } from './service-selection';
 import { TeamMemberSelection } from './team-member-selection';
 import { DateTimeSelection } from './date-time-selection';
-import { GuestInformation } from './guest-information';
 import { PaymentDetails } from './payment-details';
 import { BookingSummary } from './booking-summary';
 import {
   CheckCircle,
   ChevronRight,
   ArrowLeft,
+  X,
   Lock,
   Loader2,
 } from 'lucide-react';
@@ -62,10 +63,167 @@ type BookingStep =
   | 'service'
   | 'team-member'
   | 'date-time'
-  | 'guest-info'
   | 'payment'
   | 'review'
   | 'confirmed';
+
+// =====================================================
+// FRESHA-STYLE BREADCRUMB TYPES & HELPERS
+// =====================================================
+
+type DisplayStep = 'services' | 'professional' | 'time' | 'confirm';
+
+const DISPLAY_STEPS: { key: DisplayStep; label: string }[] = [
+  { key: 'services', label: 'Services' },
+  { key: 'professional', label: 'Professional' },
+  { key: 'time', label: 'Time' },
+  { key: 'confirm', label: 'Confirm' },
+];
+
+// Map internal steps to display steps
+function getDisplayStep(internalStep: BookingStep): DisplayStep {
+  switch (internalStep) {
+    case 'service':
+      return 'services';
+    case 'team-member':
+      return 'professional';
+    case 'date-time':
+      return 'time';
+    case 'payment':
+    case 'review':
+      return 'confirm';
+    default:
+      return 'services';
+  }
+}
+
+// Get the first internal step for a display step
+function getInternalStepForDisplay(displayStep: DisplayStep): BookingStep {
+  switch (displayStep) {
+    case 'services':
+      return 'service';
+    case 'professional':
+      return 'team-member';
+    case 'time':
+      return 'date-time';
+    case 'confirm':
+      return 'review';
+    default:
+      return 'service';
+  }
+}
+
+// =====================================================
+// BOOKING PROGRESS COMPONENT (Fresha-style)
+// =====================================================
+
+interface BookingProgressProps {
+  currentStep: BookingStep;
+  onStepClick: (step: BookingStep) => void;
+  onBack: () => void;
+  onClose: () => void;
+}
+
+function BookingProgress({
+  currentStep,
+  onStepClick,
+  onBack,
+  onClose,
+}: BookingProgressProps) {
+  const currentDisplayStep = getDisplayStep(currentStep);
+  const currentDisplayIndex = DISPLAY_STEPS.findIndex(
+    (s) => s.key === currentDisplayStep
+  );
+
+  const handleStepClick = (displayStep: DisplayStep, index: number) => {
+    // Only allow clicking on completed steps (before current display step)
+    if (index < currentDisplayIndex) {
+      const internalStep = getInternalStepForDisplay(displayStep);
+      onStepClick(internalStep);
+    }
+  };
+
+  return (
+    <div className="sticky top-0 z-10 bg-white border-b border-gray-100">
+      <div className="max-w-4xl mx-auto px-4 py-4">
+        <div className="flex items-center justify-between">
+          {/* Back Button */}
+          <button
+            onClick={onBack}
+            disabled={currentStep === 'service'}
+            className={`p-2.5 -ml-2 rounded-full border transition-colors ${
+              currentStep === 'service'
+                ? 'border-gray-100 text-gray-300 cursor-not-allowed'
+                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+            aria-label="Go back"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+
+          {/* Breadcrumb Steps */}
+          <nav
+            className="flex items-center gap-1 sm:gap-2"
+            aria-label="Booking progress"
+          >
+            {DISPLAY_STEPS.map((step, index) => {
+              const isCompleted = index < currentDisplayIndex;
+              const isCurrent = index === currentDisplayIndex;
+              const isFuture = index > currentDisplayIndex;
+
+              return (
+                <div key={step.key} className="flex items-center">
+                  {/* Step Label */}
+                  <button
+                    onClick={() => handleStepClick(step.key, index)}
+                    disabled={isFuture || isCurrent}
+                    className={`
+                      text-sm font-medium transition-colors px-1
+                      ${
+                        isCompleted
+                          ? 'text-gray-900 hover:text-[#6C5CE7] cursor-pointer'
+                          : ''
+                      }
+                      ${isCurrent ? 'text-gray-900 cursor-default' : ''}
+                      ${isFuture ? 'text-gray-400 cursor-default' : ''}
+                    `}
+                    aria-current={isCurrent ? 'step' : undefined}
+                  >
+                    {step.label}
+                  </button>
+
+                  {/* Chevron Separator (except after last item) */}
+                  {index < DISPLAY_STEPS.length - 1 && (
+                    <ChevronRight
+                      className={`h-4 w-4 mx-1 sm:mx-2 flex-shrink-0 ${
+                        index < currentDisplayIndex
+                          ? 'text-gray-400'
+                          : 'text-gray-300'
+                      }`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+
+          {/* Close Button */}
+          <button
+            onClick={onClose}
+            className="p-2.5 -mr-2 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
+            aria-label="Close booking"
+          >
+            <X className="h-5 w-5 text-gray-600" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================
+// MAIN BOOKING FLOW COMPONENT
+// =====================================================
 
 export function BookingFlow({
   venue,
@@ -73,6 +231,7 @@ export function BookingFlow({
   teamMembers,
   authenticatedUser,
 }: BookingFlowProps) {
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState<BookingStep>('service');
   const [bookingData, setBookingData] = useState<Partial<BookingData>>({
     venueId: venue.id,
@@ -179,27 +338,6 @@ export function BookingFlow({
     );
   }
 
-  // Define step configuration
-  const steps = [
-    { id: 'service' as const, label: 'Services', shortLabel: 'Services' },
-    {
-      id: 'team-member' as const,
-      label: 'Professional',
-      shortLabel: 'Professional',
-    },
-    { id: 'date-time' as const, label: 'Time', shortLabel: 'Time' },
-    { id: 'guest-info' as const, label: 'Your Info', shortLabel: 'Info' },
-    { id: 'payment' as const, label: 'Payment', shortLabel: 'Payment' },
-    { id: 'review' as const, label: 'Confirm', shortLabel: 'Confirm' },
-  ];
-
-  // Filter out payment step if user already has card
-  const visibleSteps = paymentInfo.hasCard
-    ? steps.filter((s) => s.id !== 'payment')
-    : steps;
-
-  const currentStepIndex = visibleSteps.findIndex((s) => s.id === currentStep);
-
   const updateBookingData = (data: Partial<BookingData>) => {
     setBookingData((prev) => ({ ...prev, ...data }));
   };
@@ -208,26 +346,24 @@ export function BookingFlow({
     setCurrentStep(step);
   };
 
-  const goToNextStep = () => {
-    const stepOrder: BookingStep[] = paymentInfo.hasCard
-      ? [
-          'service',
-          'team-member',
-          'date-time',
-          'guest-info',
-          'review',
-          'confirmed',
-        ]
-      : [
-          'service',
-          'team-member',
-          'date-time',
-          'guest-info',
-          'payment',
-          'review',
-          'confirmed',
-        ];
+  // Get step order - skip guest-info for authenticated users (Fresha-style)
+  const getStepOrder = (): BookingStep[] => {
+    // Authenticated users skip guest-info step
+    if (paymentInfo.hasCard) {
+      return ['service', 'team-member', 'date-time', 'review', 'confirmed'];
+    }
+    return [
+      'service',
+      'team-member',
+      'date-time',
+      'payment',
+      'review',
+      'confirmed',
+    ];
+  };
 
+  const goToNextStep = () => {
+    const stepOrder = getStepOrder();
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex < stepOrder.length - 1) {
       setCurrentStep(stepOrder[currentIndex + 1]);
@@ -235,21 +371,16 @@ export function BookingFlow({
   };
 
   const goToPreviousStep = () => {
-    const stepOrder: BookingStep[] = paymentInfo.hasCard
-      ? ['service', 'team-member', 'date-time', 'guest-info', 'review']
-      : [
-          'service',
-          'team-member',
-          'date-time',
-          'guest-info',
-          'payment',
-          'review',
-        ];
-
+    const stepOrder = getStepOrder();
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex > 0) {
       setCurrentStep(stepOrder[currentIndex - 1]);
     }
+  };
+
+  // Handler to close booking and go back to venue page
+  const handleClose = () => {
+    router.push(`/${venue.slug}`);
   };
 
   // Handler to change/update card
@@ -297,60 +428,13 @@ export function BookingFlow({
 
   return (
     <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-      {/* Progress Steps */}
-      <div className="border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          {/* Back Button */}
-          <button
-            onClick={goToPreviousStep}
-            disabled={currentStep === 'service'}
-            className={`flex items-center gap-1 text-sm font-medium transition-colors ${
-              currentStep === 'service'
-                ? 'text-gray-300 cursor-not-allowed'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">Back</span>
-          </button>
-
-          {/* Step Indicators */}
-          <div className="flex items-center gap-2">
-            {visibleSteps.map((step, index) => {
-              const isActive = step.id === currentStep;
-              const isCompleted = index < currentStepIndex;
-
-              return (
-                <div key={step.id} className="flex items-center">
-                  <div
-                    className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'bg-[#6C5CE7] text-white'
-                        : isCompleted
-                        ? 'bg-green-500 text-white'
-                        : 'bg-gray-200 text-gray-600'
-                    }`}
-                  >
-                    {isCompleted ? (
-                      <CheckCircle className="h-5 w-5" />
-                    ) : (
-                      index + 1
-                    )}
-                  </div>
-                  {index < visibleSteps.length - 1 && (
-                    <ChevronRight className="h-4 w-4 text-gray-400 mx-1" />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Step Label */}
-          <span className="text-sm font-medium text-gray-600">
-            {visibleSteps[currentStepIndex]?.label}
-          </span>
-        </div>
-      </div>
+      {/* Fresha-style Progress Header */}
+      <BookingProgress
+        currentStep={currentStep}
+        onStepClick={goToStep}
+        onBack={goToPreviousStep}
+        onClose={handleClose}
+      />
 
       {/* Step Content */}
       <div className="p-6">
@@ -385,23 +469,7 @@ export function BookingFlow({
             appointments={bookingData.appointments || []}
             onSelect={(date: string, appointments: SelectedAppointment[]) => {
               updateBookingData({ appointments, bookingDate: date });
-              goToStep('guest-info');
-            }}
-            onBack={goToPreviousStep}
-          />
-        )}
-
-        {currentStep === 'guest-info' && (
-          <GuestInformation
-            initialData={{
-              guestFirstName: bookingData.guestFirstName || '',
-              guestLastName: bookingData.guestLastName || '',
-              guestEmail: bookingData.guestEmail || '',
-              guestPhone: bookingData.guestPhone || '',
-              notes: bookingData.notes,
-            }}
-            onSubmit={(data) => {
-              updateBookingData(data);
+              // Skip guest-info, go to next step (payment or review)
               goToNextStep();
             }}
             onBack={goToPreviousStep}
