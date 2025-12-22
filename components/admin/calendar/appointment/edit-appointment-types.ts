@@ -112,6 +112,7 @@ export interface ViewModeProps {
   onDeleteBooking: () => void;
   onDeleteAppointment: (appointmentId: string) => Promise<void>;
   onClose: () => void;
+  onRebook: () => void;
 
   // Helper functions
   formatDate: (dateStr: string) => string;

@@ -14,6 +14,7 @@ import {
   X,
   ChevronRight,
   Receipt,
+  RefreshCcw,
 } from 'lucide-react';
 import Image from 'next/image';
 import { updateBookingClientType } from '@/app/actions/calendar-appointments';
@@ -54,6 +55,7 @@ export function ViewMode({
   onEditAppointment,
   onDeleteBooking,
   onDeleteAppointment,
+  onRebook,
   onClose,
   formatDate,
   formatTime,
@@ -293,6 +295,17 @@ export function ViewMode({
                     onClick={onToggleMoreMenu}
                   />
                   <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 py-1 min-w-[180px]">
+                    {/* ✅ NEW: Rebook button */}
+                    <button
+                      onClick={() => {
+                        onToggleMoreMenu();
+                        onRebook();
+                      }}
+                      className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-50 text-sm flex items-center gap-2"
+                    >
+                      <RefreshCcw className="w-4 h-4" />
+                      Rebook
+                    </button>
                     <button
                       onClick={() => {
                         onToggleMoreMenu();

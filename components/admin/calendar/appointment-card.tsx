@@ -11,18 +11,27 @@ interface AppointmentCardProps {
   booking: CalendarBooking;
   compact?: boolean;
   onClick?: () => void;
-  // NEW: Interaction mode props
+  // Interaction mode props
   interactionMode?: 'resize-top' | 'resize-bottom' | 'drag' | null;
   onResizeTopStart?: (appointmentId: string, startY: number) => void;
   onResizeBottomStart?: (appointmentId: string, startY: number) => void;
-  onDragStart?: (appointmentId: string, startY: number) => void;
-  onInteractionMove?: (clientY: number) => void;
+  // ✅ UPDATED: Now passes cardRect for smooth floating drag
+  onDragStart?: (
+    appointmentId: string,
+    startY: number,
+    startX: number,
+    cardRect: { top: number; left: number; width: number; height: number }
+  ) => void;
+  onInteractionMove?: (clientY: number, clientX: number) => void;
   onInteractionEnd?: () => void;
 
-  // NEW: Grouped hover props
+  // Grouped hover props
   isGroupHovered?: boolean;
   onGroupHoverStart?: () => void;
   onGroupHoverEnd?: () => void;
+
+  // ✅ NEW: Hide card when floating clone is shown
+  isFloating?: boolean;
 }
 
 // Default color if no category color is available
@@ -42,6 +51,7 @@ export function AppointmentCard({
   isGroupHovered = false,
   onGroupHoverStart,
   onGroupHoverEnd,
+  isFloating = false,
 }: AppointmentCardProps) {
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const [arrowPosition, setArrowPosition] = useState(0);
@@ -141,13 +151,26 @@ export function AppointmentCard({
     e.stopPropagation();
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
-    onDragStart?.(appointment.id, e.clientY);
+
+    // ✅ Get card bounding rect for smooth floating drag
+    const rect = cardRef.current?.getBoundingClientRect();
+    const cardRect = rect
+      ? {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+        }
+      : { top: e.clientY, left: e.clientX, width: 180, height: 60 };
+
+    onDragStart?.(appointment.id, e.clientY, e.clientX, cardRect);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isInteracting) {
       e.preventDefault();
-      onInteractionMove?.(e.clientY);
+      // ✅ UPDATED: Pass both Y and X coordinates
+      onInteractionMove?.(e.clientY, e.clientX);
     }
   };
 
@@ -185,123 +208,113 @@ export function AppointmentCard({
           <div className="flex items-start gap-3">
             <div className="flex-shrink-0">
               {booking.client_id ? (
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white font-semibold">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-medium"
+                  style={{ backgroundColor }}
+                >
                   {clientName.substring(0, 2).toUpperCase()}
                 </div>
               ) : (
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center text-white font-semibold">
-                  WI
+                <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
+                  <User className="w-5 h-5 text-orange-600" />
                 </div>
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-semibold text-sm text-gray-900 truncate">
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-gray-900 truncate">
                   {clientName}
-                </h3>
+                </p>
                 {!booking.client_id && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700">
+                  <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-medium">
                     Walk-in
                   </span>
                 )}
               </div>
-              {(booking.guest_email || booking.guest_phone) && (
-                <div className="space-y-0.5">
-                  {booking.guest_email && (
-                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                      <Mail className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                      <span className="truncate">{booking.guest_email}</span>
-                    </div>
-                  )}
-                  {booking.guest_phone && (
-                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                      <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                      <span>{booking.guest_phone}</span>
-                    </div>
-                  )}
+              {booking.guest_email && (
+                <div className="flex items-center gap-1 mt-0.5 text-xs text-gray-500">
+                  <Mail className="w-3 h-3" />
+                  <span className="truncate">{booking.guest_email}</span>
+                </div>
+              )}
+              {booking.guest_phone && (
+                <div className="flex items-center gap-1 mt-0.5 text-xs text-gray-500">
+                  <Phone className="w-3 h-3" />
+                  <span>{booking.guest_phone}</span>
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Appointment Details */}
-        <div className="mb-3">
-          <h4 className="text-xs font-semibold text-gray-700 mb-2">
-            Appointment
-          </h4>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 text-xs text-gray-600">
-              <Calendar className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span>{booking.booking_date}</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-gray-600">
-              <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span>
-                {timeRange} ({appointment.duration_minutes} min)
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-gray-600">
-              <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span className="truncate">with {teamMemberName}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Service & Price */}
-        <div className="bg-gray-50 rounded-lg p-2.5">
-          <div className="flex items-center justify-between">
+        {/* Service Info */}
+        <div className="space-y-2.5">
+          <div className="flex items-start gap-2">
+            <Calendar className="w-4 h-4 text-gray-400 mt-0.5" />
             <div>
-              <p className="font-medium text-xs text-gray-900 mb-0.5">
+              <p className="font-medium text-gray-900">
                 {appointment.service_name}
               </p>
-              <p className="text-[10px] text-gray-500">
-                {appointment.duration_minutes} minutes
-              </p>
             </div>
-            <div className="flex items-center gap-1 text-sm font-semibold text-gray-900">
-              <DollarSign className="w-3.5 h-3.5" />
-              {appointment.price.toFixed(2)}
-            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-gray-400" />
+            <span className="text-sm text-gray-600">
+              {timeRange} ({appointment.duration_minutes}min)
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <User className="w-4 h-4 text-gray-400" />
+            <span className="text-sm text-gray-600">{teamMemberName}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-gray-400" />
+            <span className="text-sm text-gray-600">
+              ${Number(appointment.price).toFixed(2)}
+            </span>
           </div>
         </div>
 
-        {/* Notes */}
-        {(booking.notes || appointment.notes || booking.internal_notes) && (
-          <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
-            {booking.notes && (
-              <div className="bg-blue-50 rounded p-2">
-                <p className="text-[10px] font-medium text-blue-900 mb-0.5">
-                  Client Notes:
-                </p>
-                <p className="text-xs text-blue-800">{booking.notes}</p>
-              </div>
-            )}
-            {appointment.notes && (
-              <div className="bg-purple-50 rounded p-2">
-                <p className="text-[10px] font-medium text-purple-900 mb-0.5">
-                  Service Notes:
-                </p>
-                <p className="text-xs text-purple-800">{appointment.notes}</p>
-              </div>
-            )}
-            {booking.internal_notes && (
-              <div className="bg-yellow-50 rounded p-2">
-                <p className="text-[10px] font-medium text-yellow-900 mb-0.5">
-                  Internal Notes:
-                </p>
-                <p className="text-xs text-yellow-800">
-                  {booking.internal_notes}
-                </p>
-              </div>
-            )}
+        {/* Booking Notes */}
+        {booking.notes && (
+          <div className="mt-3 pt-3 border-t border-gray-200">
+            <p className="text-xs text-gray-500 italic">
+              &ldquo;{booking.notes}&rdquo;
+            </p>
           </div>
         )}
 
-        {/* Arrow */}
+        {/* Booking Status Badge */}
+        {booking.status && booking.status !== 'confirmed' && (
+          <div className="mt-3 pt-3 border-t border-gray-200">
+            <span
+              className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                booking.status === 'completed'
+                  ? 'bg-green-100 text-green-800'
+                  : booking.status === 'cancelled'
+                  ? 'bg-red-100 text-red-800'
+                  : booking.status === 'no_show'
+                  ? 'bg-gray-100 text-gray-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}
+            >
+              {booking.status.charAt(0).toUpperCase() +
+                booking.status.slice(1).replace('_', ' ')}
+            </span>
+          </div>
+        )}
+
+        {/* Arrow pointing to card */}
         <div
-          className="absolute left-0 w-0 h-0 -ml-2 border-t-8 border-t-transparent border-b-8 border-b-transparent border-r-8 border-r-white"
-          style={{ top: `${arrowPosition}px` }}
+          className="absolute w-3 h-3 bg-white border-l border-t border-gray-200 transform -rotate-45"
+          style={{
+            left: '-7px',
+            top: `${arrowPosition}px`,
+            marginTop: '-6px',
+          }}
         />
       </div>
     </div>
@@ -313,138 +326,89 @@ export function AppointmentCard({
 
   return (
     <>
-      {/* Main Appointment Card - OUTER CONTAINER */}
       <div
         ref={cardRef}
-        className={`absolute left-1 right-1 top-0 bottom-0  rounded-lg overflow-hidden cursor-pointer select-none ${
-          isCompleted ? 'opacity-70' : ''
-        } ${
-          isGroupHovered && !isInteracting
-            ? 'ring-2 ring-inset ring-purple-400'
-            : ''
-        }`}
+        className={`
+          h-full rounded-lg relative overflow-hidden cursor-pointer transition-all duration-100
+          ${
+            isInteracting && !isFloating
+              ? 'shadow-lg ring-2 ring-purple-500 opacity-90'
+              : 'hover:shadow-md hover:ring-1 hover:ring-purple-400'
+          }
+          ${
+            isGroupHovered && !isHovered
+              ? 'shadow-md ring-1 ring-purple-300'
+              : ''
+          }
+          ${isCompleted ? 'border border-gray-300' : ''}
+          ${isFloating ? 'opacity-30 pointer-events-none' : ''}
+        `}
+        style={{
+          backgroundColor,
+          touchAction: 'none',
+        }}
         onMouseEnter={() => {
-          if (!isInteracting) {
+          if (!isFloating) {
             setIsHovered(true);
             onGroupHoverStart?.();
           }
         }}
         onMouseLeave={() => {
-          if (!isInteracting) {
-            setIsHovered(false);
-            onGroupHoverEnd?.();
+          setIsHovered(false);
+          onGroupHoverEnd?.();
+        }}
+        onPointerDown={handleBodyPointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onClick={(e) => {
+          // Only trigger onClick if not interacting
+          if (!isInteracting && !isFloating) {
+            e.stopPropagation();
+            onClick?.();
           }
         }}
       >
-        {/* TOP RESIZE HANDLE */}
+        {/* Top resize handle */}
         <div
-          className="resize-handle absolute top-0 left-0 right-0 h-3 cursor-ns-resize z-20 touch-none"
+          className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize z-10 hover:bg-black/10"
           onPointerDown={handleTopPointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerCancel}
-        ></div>
+        />
 
-        {/* MAIN APPOINTMENT CARD BODY (DRAGGABLE) */}
-        <div
-          className={`
-            h-full rounded-md p-2 transition-all duration-200 overflow-hidden
-            ${
-              isInteracting
-                ? 'border-2 border-purple-600 shadow-lg cursor-grabbing'
-                : 'hover:border-2 hover:border-purple-500 cursor-grab group-hover:w-[97%]'
-            }
-          `}
-          style={{ backgroundColor }}
-          onPointerDown={handleBodyPointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerCancel}
-          onClick={() => {
-            if (!isInteracting) {
-              onClick?.();
-            }
-          }}
-        >
-          {compact ? (
-            // Compact view for week view
-            <div className="flex flex-col text-white leading-tight">
-              <p className="font-semibold text-[10px] mb-0.5 truncate">
-                {timeRange}
-              </p>
-              <p className="font-medium text-[10px] mb-0.5 truncate">
-                {clientName}
-              </p>
-              <p className="text-[10px] truncate">{appointment.service_name}</p>
-            </div>
-          ) : (
-            // Full view for day view
-            <div className="flex flex-col text-white leading-tight">
-              {/* Mobile: Stack everything */}
-              <div className="block md:hidden">
-                <p className="font-semibold text-[11px] mb-0.5 truncate">
-                  {timeRange}
-                </p>
-                <p className="font-medium text-[11px] mb-0.5 truncate">
-                  {clientName}
-                </p>
-                <p className="text-[10px] truncate">
-                  {appointment.service_name}
-                </p>
-              </div>
+        {/* Content */}
+        <div className="h-full flex flex-col p-1.5 overflow-hidden">
+          {/* Time */}
+          <p className="text-xs text-white/90 truncate leading-tight">
+            {startTime}
+          </p>
 
-              {/* Tablet/Desktop: Time and name on same row */}
-              <div className="hidden md:flex md:flex-col">
-                <div className="flex items-center justify-between gap-1 mb-0.5">
-                  <p className="font-semibold text-[11px] truncate">
-                    {timeRange}
-                  </p>
-                  <p className="font-medium text-[11px] truncate">
-                    {clientName}
-                  </p>
-                </div>
-                <p className="text-[10px] truncate leading-tight">
-                  {appointment.service_name}
-                </p>
-              </div>
+          {/* Client name (bold) or Walk-in */}
+          <p className="text-xs font-bold text-white truncate leading-tight mt-0.5">
+            {clientName || 'Walk-in'}
+          </p>
 
-              {/* Status badge if not confirmed */}
-              {!isInteracting && appointment.status !== 'confirmed' && (
-                <div className="mt-1">
-                  <span className="inline-block px-1.5 py-0.5 text-[9px] font-medium rounded-full bg-white/30 truncate">
-                    {appointment.status}
-                  </span>
-                </div>
-              )}
-            </div>
+          {/* Service name */}
+          {!compact && (
+            <p className="text-xs text-white/80 truncate leading-tight mt-0.5">
+              {appointment.service_name}
+            </p>
           )}
         </div>
 
-        {/* BOTTOM RESIZE HANDLE */}
+        {/* Bottom resize handle */}
         <div
-          className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize z-20 touch-none"
+          className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-10 hover:bg-black/10"
           onPointerDown={handleBottomPointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerCancel}
-        ></div>
+        />
 
-        {/* Active interaction indicators */}
-        {interactionMode === 'resize-top' && (
-          <div className="absolute top-0 left-0 right-0 h-1 bg-purple-600 rounded-t-md" />
-        )}
-        {interactionMode === 'resize-bottom' && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-b-md" />
-        )}
-        {interactionMode === 'drag' && (
-          <div className="absolute inset-0 border-2 border-purple-600 rounded-md pointer-events-none" />
+        {/* Completed overlay */}
+        {isCompleted && (
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-gray-500/20 pointer-events-none" />
         )}
       </div>
 
-      {/* Render tooltip via portal */}
-      {typeof window !== 'undefined' &&
-        tooltipContent &&
-        createPortal(tooltipContent, document.body)}
+      {/* Tooltip via portal */}
+      {mounted && tooltipContent && createPortal(tooltipContent, document.body)}
     </>
   );
 }

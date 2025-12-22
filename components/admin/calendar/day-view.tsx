@@ -1,7 +1,7 @@
 // components/admin/calendar/day-view.tsx
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { TimeSlotActionsModal } from './time-slot-actions-modal';
 import { BlockedTimeModal } from './blocked-time-modal';
 import { AppointmentCard } from './appointment-card';
@@ -51,106 +51,113 @@ interface DayViewProps {
 }
 
 // =====================================================
-// OVERLAP HANDLING HELPERS
+// HELPER FUNCTIONS
 // =====================================================
 
-/**
- * Convert HH:MM time to minutes since midnight
- */
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
   return hours * 60 + minutes;
 }
 
-/**
- * Convert minutes since midnight to HH:MM format
- */
 function minutesToTime(minutes: number): string {
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
-/**
- * Add minutes to a time string (HH:MM format)
- */
-function addMinutesToTime(time: string, minutesToAdd: number): string {
-  const [hours, mins] = time.split(':').map(Number);
-  const totalMinutes = hours * 60 + mins + minutesToAdd;
-
-  // Cap at 23:59
-  const cappedMinutes = Math.max(0, Math.min(totalMinutes, 24 * 60 - 1));
-
-  return minutesToTime(cappedMinutes);
+function addMinutesToTime(time: string, minutes: number): string {
+  const totalMinutes = timeToMinutes(time) + minutes;
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, totalMinutes));
+  return minutesToTime(clamped);
 }
 
-/**
- * Check if two appointments overlap in time
- */
-function appointmentsOverlap(
-  appt1: AppointmentWithBooking,
-  appt2: AppointmentWithBooking
-): boolean {
-  const start1 = timeToMinutes(appt1.start_time);
-  const end1 = timeToMinutes(appt1.end_time);
-  const start2 = timeToMinutes(appt2.start_time);
-  const end2 = timeToMinutes(appt2.end_time);
-
-  // Overlaps if one starts before the other ends
-  return start1 < end2 && start2 < end1;
-}
-
-/**
- * Layout information for positioning overlapping appointments
- */
 interface AppointmentLayout {
   width: string;
   left: string;
   zIndex: number;
 }
 
-/**
- * Calculate layout for overlapping appointments
- * Returns a Map of appointment ID to layout properties
- */
 function calculateAppointmentLayouts(
   appointments: AppointmentWithBooking[]
 ): Map<string, AppointmentLayout> {
   const layouts = new Map<string, AppointmentLayout>();
 
-  // Sort appointments by start time for consistent column assignment
+  if (appointments.length === 0) return layouts;
+
   const sorted = [...appointments].sort((a, b) => {
-    const startA = timeToMinutes(a.start_time);
-    const startB = timeToMinutes(b.start_time);
-    return startA - startB;
+    return timeToMinutes(a.start_time) - timeToMinutes(b.start_time);
   });
 
-  // For each appointment, find overlapping ones and assign layout
+  const groups: AppointmentWithBooking[][] = [];
+  let currentGroup: AppointmentWithBooking[] = [];
+  let groupEnd = 0;
+
   for (const appointment of sorted) {
-    // Find all appointments that overlap with this one
-    const overlapping = appointments.filter((other) =>
-      appointmentsOverlap(appointment, other)
-    );
+    const start = timeToMinutes(appointment.start_time);
+    const end = timeToMinutes(appointment.end_time);
 
-    const maxConcurrent = overlapping.length;
+    if (currentGroup.length === 0 || start < groupEnd) {
+      currentGroup.push(appointment);
+      groupEnd = Math.max(groupEnd, end);
+    } else {
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+      }
+      currentGroup = [appointment];
+      groupEnd = end;
+    }
+  }
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
 
-    // Find this appointment's position among overlapping ones
-    const position = overlapping
-      .sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time))
-      .findIndex((a) => a.id === appointment.id);
+  for (const group of groups) {
+    const maxConcurrent = group.length;
 
-    // Calculate width and left position
-    const widthPercent = 100 / maxConcurrent;
-    const leftPercent = (position / maxConcurrent) * 100;
+    for (const appointment of group) {
+      const position = group
+        .sort(
+          (a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time)
+        )
+        .findIndex((a) => a.id === appointment.id);
 
-    layouts.set(appointment.id, {
-      width: `${widthPercent - 0.5}%`, // Subtract 0.5% for visual gap
-      left: `${leftPercent}%`,
-      zIndex: position,
-    });
+      const widthPercent = 100 / maxConcurrent;
+      const leftPercent = (position / maxConcurrent) * 100;
+
+      layouts.set(appointment.id, {
+        width: `${widthPercent - 0.5}%`,
+        left: `${leftPercent}%`,
+        zIndex: position,
+      });
+    }
   }
 
   return layouts;
+}
+
+// =====================================================
+// INTERACTION STATE TYPE
+// =====================================================
+interface InteractionState {
+  mode: 'resize-top' | 'resize-bottom' | 'drag';
+  appointmentId: string;
+  startY: number;
+  startX: number;
+  originalStartTime: string;
+  originalEndTime: string;
+  originalDuration: number;
+  originalTeamMemberId: string;
+  currentStartTime: string;
+  currentEndTime: string;
+  currentDuration: number;
+  currentTeamMemberId: string | null;
+}
+
+interface LocalAppointmentUpdate {
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  team_member_id?: string;
 }
 
 // =====================================================
@@ -182,60 +189,64 @@ export function DayView({
   const [selectedBlockedTime, setSelectedBlockedTime] =
     useState<BlockedTime | null>(null);
 
-  // NEW: Loading state for save operation
+  // Loading state for save operation
   const [isSaving, setIsSaving] = useState(false);
 
-  // NEW: Local state for updated appointments (persists after save without refresh)
+  // Local state for updated appointments
   const [updatedAppointments, setUpdatedAppointments] = useState<
-    Map<
-      string,
-      { start_time: string; end_time: string; duration_minutes: number }
-    >
+    Map<string, LocalAppointmentUpdate>
   >(new Map());
 
-  // NEW: Interaction state for resize/drag
-  const [interactionState, setInteractionState] = useState<{
-    mode: 'resize-top' | 'resize-bottom' | 'drag';
-    appointmentId: string;
-    startY: number;
-    originalStartTime: string;
-    originalEndTime: string;
-    originalDuration: number;
-    currentStartTime: string;
-    currentEndTime: string;
-    currentDuration: number;
-  } | null>(null);
+  // Interaction state for resize/drag
+  const [interactionState, setInteractionState] =
+    useState<InteractionState | null>(null);
 
-  // NEW: Flag to prevent onClick after drag/resize
+  // Flag to prevent onClick after drag/resize
   const [justInteracted, setJustInteracted] = useState(false);
 
-  // NEW: Current time for time indicator
+  // Current time for time indicator
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Ref to track column boundaries for horizontal drag
+  const columnRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // Highlighted column during drag
+  const [highlightedTeamMemberId, setHighlightedTeamMemberId] = useState<
+    string | null
+  >(null);
+
+  // ✅ NEW: Floating card position for smooth Fresha-style drag
+  const [floatingCardPosition, setFloatingCardPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Grouped hover state
+  const [hoveredBookingId, setHoveredBookingId] = useState<string | null>(null);
 
   // Update current time every minute
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(new Date());
-    }, 60000); // Update every minute
+    }, 60000);
 
     return () => clearInterval(interval);
   }, []);
 
-  // Generate time slots (8 AM to 8 PM, 15-min intervals)
+  // Generate time slots
   const timeSlots = useMemo((): string[] => {
     const slots: string[] = [];
     for (let hour = 0; hour < 24; hour++) {
       slots.push(`${hour.toString().padStart(2, '0')}:00`);
-      if (hour < 23 || (hour === 23 && true)) {
-        slots.push(`${hour.toString().padStart(2, '0')}:15`);
-        slots.push(`${hour.toString().padStart(2, '0')}:30`);
-        slots.push(`${hour.toString().padStart(2, '0')}:45`);
-      }
+      slots.push(`${hour.toString().padStart(2, '0')}:15`);
+      slots.push(`${hour.toString().padStart(2, '0')}:30`);
+      slots.push(`${hour.toString().padStart(2, '0')}:45`);
     }
     return slots;
   }, []);
 
-  // Generate hour labels (only show on the hour)
+  // Generate hour labels
   const hourLabels = useMemo((): string[] => {
     const labels: string[] = [];
     for (let hour = 0; hour < 24; hour++) {
@@ -244,27 +255,28 @@ export function DayView({
     return labels;
   }, []);
 
-  // Group appointments by team member with local updates applied
+  // Group appointments by team member
   const appointmentsByMember = useMemo((): AppointmentsByMember[] => {
-    // First, create a map of appointments by team member ID
     const appointmentsMap = new Map<string, AppointmentWithBooking[]>();
 
     bookings.forEach((booking) => {
       booking.appointments?.forEach((appointment) => {
-        const memberId = appointment.team_member_id;
+        const localUpdate = updatedAppointments.get(appointment.id);
+        const memberId =
+          localUpdate?.team_member_id || appointment.team_member_id;
 
         if (!appointmentsMap.has(memberId)) {
           appointmentsMap.set(memberId, []);
         }
 
-        // Check for local updates (drag-and-drop)
-        const localUpdate = updatedAppointments.get(appointment.id);
         const finalAppointment: AppointmentWithBooking = localUpdate
           ? {
               ...appointment,
               start_time: localUpdate.start_time,
               end_time: localUpdate.end_time,
               duration_minutes: localUpdate.duration_minutes,
+              team_member_id:
+                localUpdate.team_member_id || appointment.team_member_id,
               booking,
             }
           : {
@@ -276,8 +288,6 @@ export function DayView({
       });
     });
 
-    // ✅ Use assignedTeamMembers as the source of truth for ordering
-    // This preserves the custom display_order from the database
     const result: AppointmentsByMember[] = assignedTeamMembers.map(
       (member) => ({
         member,
@@ -285,12 +295,9 @@ export function DayView({
       })
     );
 
-    // Handle edge case: appointments for team members not in assignedTeamMembers
-    // (shouldn't happen normally, but just in case)
     appointmentsMap.forEach((appointments, memberId) => {
       const alreadyIncluded = result.some((r) => r.member.id === memberId);
       if (!alreadyIncluded && appointments.length > 0) {
-        // Get member info from first appointment
         const firstAppt = appointments[0];
         if (firstAppt.team_member) {
           result.push({
@@ -319,9 +326,7 @@ export function DayView({
     return grouped;
   }, [blockedTimes]);
 
-  // =====================================================
-  // Group booking holds by team member (Step 4 - already done)
-  // =====================================================
+  // Group booking holds by team member
   const holdsByMember = useMemo(() => {
     const grouped = new Map<string, BookingHold[]>();
 
@@ -336,7 +341,7 @@ export function DayView({
     return grouped;
   }, [bookingHolds, currentDate]);
 
-  // Calculate appointment layouts for ALL members (must be at component level)
+  // Calculate appointment layouts
   const allAppointmentLayouts = useMemo(() => {
     const layouts = new Map<string, Map<string, AppointmentLayout>>();
 
@@ -347,62 +352,378 @@ export function DayView({
     return layouts;
   }, [appointmentsByMember]);
 
-  // Format time for display (12-hour format)
+  // Format time for display
   const formatTime12Hour = (time: string): string => {
     const [hour, min] = time.split(':');
-    const hourNum = parseInt(hour);
-    const period = hourNum >= 12 ? 'PM' : 'AM';
-    const displayHour =
-      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
-    return `${displayHour}:${min} ${period}`;
-  };
-
-  // Format time label for left column (simplified)
-  const formatTimeLabel = (time: string): string => {
-    const [hour] = time.split(':');
     const hourNum = parseInt(hour);
     const period = hourNum >= 12 ? 'pm' : 'am';
     const displayHour =
       hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
-    return `${displayHour}${period}`;
+    return `${displayHour}:${min}${period}`;
   };
 
-  // Calculate position and height for appointments/blocked times
-  const getStyle = (
-    startTime: string,
-    endTime: string
-  ): { top: number; height: number } => {
-    const [startHour, startMin] = startTime.split(':').map(Number);
-    const [endHour, endMin] = endTime.split(':').map(Number);
+  // Current time indicator
+  const shouldShowCurrentTime = useMemo(() => {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(
+      today.getMonth() + 1
+    ).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return currentDate === todayStr;
+  }, [currentDate]);
 
-    const startMinutes = startHour * 60 + startMin;
-    const endMinutes = endHour * 60 + endMin;
+  const getCurrentTimePosition = useMemo(() => {
+    if (!shouldShowCurrentTime) return null;
 
-    const baseMinutes = 0; // 12 AM (midnight)
-    const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
-    const height = ((endMinutes - startMinutes) / 15) * 20;
+    const now = currentTime;
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const totalMinutes = hours * 60 + minutes;
+    const top = (totalMinutes / 15) * 20;
 
-    return { top, height };
+    return {
+      top,
+      time: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(
+        2,
+        '0'
+      )}`,
+    };
+  }, [shouldShowCurrentTime, currentTime]);
+
+  // Auto-scroll to current time
+  useEffect(() => {
+    if (shouldShowCurrentTime && getCurrentTimePosition) {
+      setTimeout(() => {
+        const indicatorPosition = getCurrentTimePosition.top;
+        const calendarElement = document.querySelector(
+          '.bg-white.rounded-lg.border'
+        );
+        if (calendarElement) {
+          const calendarTop =
+            calendarElement.getBoundingClientRect().top + window.scrollY;
+          const targetScroll =
+            calendarTop + indicatorPosition - window.innerHeight / 2 + 200;
+
+          window.scrollTo({
+            top: Math.max(0, targetScroll),
+            behavior: 'smooth',
+          });
+        }
+      }, 100);
+    }
+  }, [shouldShowCurrentTime, getCurrentTimePosition, currentDate]);
+
+  // Find team member from X position
+  const findTeamMemberFromX = useCallback((clientX: number): string | null => {
+    for (const [memberId, element] of columnRefs.current.entries()) {
+      const rect = element.getBoundingClientRect();
+      if (clientX >= rect.left && clientX <= rect.right) {
+        return memberId;
+      }
+    }
+    return null;
+  }, []);
+
+  // ============================================
+  // INTERACTION HANDLERS
+  // ============================================
+
+  const handleResizeTopStart = (appointmentId: string, startY: number) => {
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === appointmentId);
+
+    if (!appointment) return;
+
+    setInteractionState({
+      mode: 'resize-top',
+      appointmentId,
+      startY,
+      startX: 0,
+      originalStartTime: appointment.start_time,
+      originalEndTime: appointment.end_time,
+      originalDuration: appointment.duration_minutes,
+      originalTeamMemberId: appointment.team_member_id,
+      currentStartTime: appointment.start_time,
+      currentEndTime: appointment.end_time,
+      currentDuration: appointment.duration_minutes,
+      currentTeamMemberId: null,
+    });
   };
 
-  // =====================================================
-  // Step 5: Helper function for hold positioning
-  // =====================================================
-  const getHoldStyle = (hold: BookingHold): { top: number; height: number } => {
-    const [startHour, startMin] = hold.start_time.split(':').map(Number);
-    const [endHour, endMin] = hold.end_time.split(':').map(Number);
+  const handleResizeBottomStart = (appointmentId: string, startY: number) => {
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === appointmentId);
 
-    const startMinutes = startHour * 60 + startMin;
-    const endMinutes = endHour * 60 + endMin;
+    if (!appointment) return;
 
-    const baseMinutes = 0; // 12 AM (midnight)
-    const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
-    const height = ((endMinutes - startMinutes) / 15) * 20;
-
-    return { top, height: Math.max(height, 40) }; // Minimum 40px height
+    setInteractionState({
+      mode: 'resize-bottom',
+      appointmentId,
+      startY,
+      startX: 0,
+      originalStartTime: appointment.start_time,
+      originalEndTime: appointment.end_time,
+      originalDuration: appointment.duration_minutes,
+      originalTeamMemberId: appointment.team_member_id,
+      currentStartTime: appointment.start_time,
+      currentEndTime: appointment.end_time,
+      currentDuration: appointment.duration_minutes,
+      currentTeamMemberId: null,
+    });
   };
 
-  // Handle empty slot click
+  const handleDragStart = (
+    appointmentId: string,
+    startY: number,
+    startX: number,
+    cardRect?: { top: number; left: number; width: number; height: number }
+  ) => {
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === appointmentId);
+
+    if (!appointment) return;
+
+    // ✅ Calculate offset from cursor to card top-left for smooth dragging
+    if (cardRect) {
+      dragOffsetRef.current = {
+        x: startX - cardRect.left,
+        y: startY - cardRect.top,
+      };
+      // Initialize floating position
+      setFloatingCardPosition({
+        x: cardRect.left,
+        y: cardRect.top,
+      });
+    }
+
+    setInteractionState({
+      mode: 'drag',
+      appointmentId,
+      startY,
+      startX,
+      originalStartTime: appointment.start_time,
+      originalEndTime: appointment.end_time,
+      originalDuration: appointment.duration_minutes,
+      originalTeamMemberId: appointment.team_member_id,
+      currentStartTime: appointment.start_time,
+      currentEndTime: appointment.end_time,
+      currentDuration: appointment.duration_minutes,
+      currentTeamMemberId: null,
+    });
+  };
+
+  const handleInteractionMove = (clientY: number, clientX: number) => {
+    if (!interactionState) return;
+
+    const deltaY = clientY - interactionState.startY;
+    const deltaMinutes = Math.round((deltaY / 20) * 15);
+    const snappedDelta = Math.round(deltaMinutes / 5) * 5;
+
+    let newStartTime: string;
+    let newEndTime: string;
+    let newDuration: number;
+    let newTeamMemberId: string | null = interactionState.currentTeamMemberId;
+
+    switch (interactionState.mode) {
+      case 'resize-top':
+        newStartTime = addMinutesToTime(
+          interactionState.originalStartTime,
+          snappedDelta
+        );
+        newEndTime = interactionState.originalEndTime;
+
+        const startMinutes = timeToMinutes(newStartTime);
+        const endMinutes = timeToMinutes(newEndTime);
+        newDuration = Math.max(5, endMinutes - startMinutes);
+
+        if (newDuration < 5) {
+          newStartTime = addMinutesToTime(newEndTime, -5);
+          newDuration = 5;
+        }
+        break;
+
+      case 'resize-bottom':
+        newStartTime = interactionState.originalStartTime;
+        newDuration = Math.max(
+          5,
+          interactionState.originalDuration + snappedDelta
+        );
+        newEndTime = addMinutesToTime(newStartTime, newDuration);
+        break;
+
+      case 'drag':
+        // ✅ Update floating card position to follow cursor exactly
+        setFloatingCardPosition({
+          x: clientX - dragOffsetRef.current.x,
+          y: clientY - dragOffsetRef.current.y,
+        });
+
+        // Calculate snapped time for the drop preview
+        newStartTime = addMinutesToTime(
+          interactionState.originalStartTime,
+          snappedDelta
+        );
+        newEndTime = addMinutesToTime(
+          interactionState.originalEndTime,
+          snappedDelta
+        );
+        newDuration = interactionState.originalDuration;
+
+        // Detect which column the cursor is over
+        const targetMemberId = findTeamMemberFromX(clientX);
+
+        if (targetMemberId) {
+          if (targetMemberId !== interactionState.originalTeamMemberId) {
+            newTeamMemberId = targetMemberId;
+            setHighlightedTeamMemberId(targetMemberId);
+          } else {
+            newTeamMemberId = null;
+            setHighlightedTeamMemberId(null);
+          }
+        }
+        break;
+
+      default:
+        return;
+    }
+
+    setInteractionState({
+      ...interactionState,
+      currentStartTime: newStartTime,
+      currentEndTime: newEndTime,
+      currentDuration: newDuration,
+      currentTeamMemberId: newTeamMemberId,
+    });
+  };
+
+  const handleInteractionEnd = async () => {
+    if (!interactionState) return;
+
+    setHighlightedTeamMemberId(null);
+    setFloatingCardPosition(null); // ✅ Clear floating card
+
+    const appointment = appointmentsByMember
+      .flatMap((m) => m.appointments)
+      .find((a) => a.id === interactionState.appointmentId);
+
+    if (!appointment) {
+      setInteractionState(null);
+      return;
+    }
+
+    const startChanged =
+      interactionState.currentStartTime !== interactionState.originalStartTime;
+    const endChanged =
+      interactionState.currentEndTime !== interactionState.originalEndTime;
+    const durationChanged =
+      interactionState.currentDuration !== interactionState.originalDuration;
+    const teamMemberChanged =
+      interactionState.currentTeamMemberId !== null &&
+      interactionState.currentTeamMemberId !==
+        interactionState.originalTeamMemberId;
+
+    if (
+      !startChanged &&
+      !durationChanged &&
+      !endChanged &&
+      !teamMemberChanged
+    ) {
+      setInteractionState(null);
+      return;
+    }
+
+    const appointmentId = interactionState.appointmentId;
+    const newStartTime = interactionState.currentStartTime;
+    const newEndTime = interactionState.currentEndTime;
+    const newDuration = interactionState.currentDuration;
+    const newTeamMemberId = interactionState.currentTeamMemberId;
+    const mode = interactionState.mode;
+
+    setInteractionState(null);
+
+    setJustInteracted(true);
+    setTimeout(() => setJustInteracted(false), 100);
+
+    setUpdatedAppointments((prev) => {
+      const updated = new Map(prev);
+      const updateData: LocalAppointmentUpdate = {
+        start_time: newStartTime,
+        end_time: newEndTime,
+        duration_minutes: newDuration,
+      };
+      if (newTeamMemberId) {
+        updateData.team_member_id = newTeamMemberId;
+      }
+      updated.set(appointmentId, updateData);
+      return updated;
+    });
+
+    setIsSaving(true);
+
+    try {
+      const { resizeAppointment, moveAppointment } = await import(
+        '@/app/actions/calendar-appointments'
+      );
+
+      let result;
+
+      if (mode === 'drag') {
+        result = await moveAppointment({
+          appointmentId,
+          bookingId: appointment.booking.id,
+          newStartTime,
+          newEndTime,
+          newTeamMemberId: newTeamMemberId || undefined,
+        });
+      } else {
+        result = await resizeAppointment({
+          appointmentId,
+          bookingId: appointment.booking.id,
+          newStartTime,
+          newEndTime,
+          newDuration,
+        });
+      }
+
+      if (!result.success) {
+        setUpdatedAppointments((prev) => {
+          const updated = new Map(prev);
+          updated.delete(appointmentId);
+          return updated;
+        });
+        alert(result.error || 'Failed to update appointment');
+      } else if (teamMemberChanged) {
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('Error updating appointment:', error);
+      setUpdatedAppointments((prev) => {
+        const updated = new Map(prev);
+        updated.delete(appointmentId);
+        return updated;
+      });
+      alert('An unexpected error occurred');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Column width calculation
+  const getColumnWidth = (memberCount: number): string => {
+    if (memberCount === 1) return '100%';
+    if (memberCount === 2) return '50%';
+    if (memberCount === 3) return '33.333%';
+    if (memberCount === 4) return '25%';
+    if (memberCount === 5) return '20%';
+    return '200px';
+  };
+
+  const columnWidth = getColumnWidth(appointmentsByMember.length);
+  const useFixedWidth = appointmentsByMember.length >= 6;
+
+  // Slot click handler
   const handleSlotClick = (
     time: string,
     teamMemberId: string,
@@ -412,7 +733,7 @@ export function DayView({
     setShowActionsModal(true);
   };
 
-  // Handle blocked time click
+  // Blocked time click handler
   const handleBlockedTimeClick = (
     blockedTime: BlockedTime,
     teamMemberName: string
@@ -426,6 +747,7 @@ export function DayView({
     setShowBlockedTimeModal(true);
   };
 
+  // Appointment click handler
   const handleAppointmentClick = async (
     appointment: AppointmentWithBooking
   ) => {
@@ -445,362 +767,51 @@ export function DayView({
         alert('Failed to load booking details. Please try again.');
       }
     } catch (error) {
-      console.error('Error loading booking:', error);
+      console.error('Error fetching booking:', error);
       setIsEditModalOpen(false);
-      alert('An error occurred while loading booking details.');
+      alert('An unexpected error occurred');
     } finally {
       setIsLoadingBooking(false);
     }
   };
 
-  const handleEditSuccess = () => {
-    setIsEditModalOpen(false);
-    setSelectedBooking(null);
-    onRefresh();
+  // Get style for positioning
+  const getStyle = (startTime: string, endTime: string) => {
+    const startMinutes = timeToMinutes(startTime);
+    const endMinutes = timeToMinutes(endTime);
+    const top = (startMinutes / 15) * 20;
+    const height = ((endMinutes - startMinutes) / 15) * 20;
+    return { top, height };
   };
 
-  // ============================================
-  // CURRENT TIME INDICATOR HELPERS
-  // ============================================
+  // Get hold style
+  const getHoldStyle = (hold: BookingHold): { top: number; height: number } => {
+    const [startHour, startMin] = hold.start_time.split(':').map(Number);
+    const [endHour, endMin] = hold.end_time.split(':').map(Number);
 
-  /**
-   * Check if current time indicator should be shown
-   * Only show if viewing today
-   */
-  const shouldShowCurrentTime = useMemo(() => {
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(
-      today.getMonth() + 1
-    ).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    return currentDate === todayStr;
-  }, [currentDate]);
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
 
-  /**
-   * Calculate position of current time indicator
-   */
-  const getCurrentTimePosition = useMemo(() => {
-    if (!shouldShowCurrentTime) return null;
+    const top = (startMinutes / 15) * 20;
+    const height = ((endMinutes - startMinutes) / 15) * 20;
 
-    // Get local time
-    const hours = currentTime.getHours();
-    const minutes = currentTime.getMinutes();
-    const totalMinutes = hours * 60 + minutes;
+    return { top, height: Math.max(height, 40) };
+  };
 
-    // Calculate top position (20px per 15min slot)
-    const top = (totalMinutes / 15) * 20;
-
-    return { top, time: `${hours}:${String(minutes).padStart(2, '0')}` };
-  }, [currentTime, shouldShowCurrentTime]);
-
-  /**
-   * Format current time for display (12-hour format)
-   */
-  const formatCurrentTime = (time: string): string => {
-    const [hour, min] = time.split(':');
+  // Format time label
+  const formatTimeLabel = (time: string): string => {
+    const [hour] = time.split(':');
     const hourNum = parseInt(hour);
-    const period = hourNum >= 12 ? 'pm' : 'am';
-    const displayHour =
-      hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
-    return `${displayHour}:${min}${period}`;
+    if (hourNum === 0) return '12am';
+    if (hourNum === 12) return '12pm';
+    if (hourNum > 12) return `${hourNum - 12}pm`;
+    return `${hourNum}am`;
   };
-
-  // Auto-scroll to current time when viewing today (MOVED AFTER useMemo declarations)
-  useEffect(() => {
-    if (shouldShowCurrentTime && getCurrentTimePosition) {
-      // Small delay to ensure DOM is ready
-      setTimeout(() => {
-        // Scroll window to show current time indicator
-        const indicatorPosition = getCurrentTimePosition.top;
-
-        // Get the calendar element's offset from top of page
-        const calendarElement = document.querySelector(
-          '.bg-white.rounded-lg.border'
-        );
-        if (calendarElement) {
-          const calendarTop =
-            calendarElement.getBoundingClientRect().top + window.scrollY;
-          const targetScroll =
-            calendarTop + indicatorPosition - window.innerHeight / 2 + 200;
-
-          // Smooth scroll to show the current time indicator
-          window.scrollTo({
-            top: Math.max(0, targetScroll),
-            behavior: 'smooth',
-          });
-        }
-      }, 100);
-    }
-  }, [shouldShowCurrentTime, getCurrentTimePosition, currentDate]); // Fixed dependencies
-
-  // ============================================
-  // NEW: INTERACTION HANDLERS
-  // ============================================
-
-  /**
-   * Handle resize from top (change start time)
-   */
-  const handleResizeTopStart = (appointmentId: string, startY: number) => {
-    const appointment = appointmentsByMember
-      .flatMap((m) => m.appointments)
-      .find((a) => a.id === appointmentId);
-
-    if (!appointment) return;
-
-    setInteractionState({
-      mode: 'resize-top',
-      appointmentId,
-      startY,
-      originalStartTime: appointment.start_time,
-      originalEndTime: appointment.end_time,
-      originalDuration: appointment.duration_minutes,
-      currentStartTime: appointment.start_time,
-      currentEndTime: appointment.end_time,
-      currentDuration: appointment.duration_minutes,
-    });
-  };
-
-  /**
-   * Handle resize from bottom (change end time)
-   */
-  const handleResizeBottomStart = (appointmentId: string, startY: number) => {
-    const appointment = appointmentsByMember
-      .flatMap((m) => m.appointments)
-      .find((a) => a.id === appointmentId);
-
-    if (!appointment) return;
-
-    setInteractionState({
-      mode: 'resize-bottom',
-      appointmentId,
-      startY,
-      originalStartTime: appointment.start_time,
-      originalEndTime: appointment.end_time,
-      originalDuration: appointment.duration_minutes,
-      currentStartTime: appointment.start_time,
-      currentEndTime: appointment.end_time,
-      currentDuration: appointment.duration_minutes,
-    });
-  };
-
-  /**
-   * Handle drag start (move appointment)
-   */
-  const handleDragStart = (appointmentId: string, startY: number) => {
-    const appointment = appointmentsByMember
-      .flatMap((m) => m.appointments)
-      .find((a) => a.id === appointmentId);
-
-    if (!appointment) return;
-
-    setInteractionState({
-      mode: 'drag',
-      appointmentId,
-      startY,
-      originalStartTime: appointment.start_time,
-      originalEndTime: appointment.end_time,
-      originalDuration: appointment.duration_minutes,
-      currentStartTime: appointment.start_time,
-      currentEndTime: appointment.end_time,
-      currentDuration: appointment.duration_minutes,
-    });
-  };
-
-  /**
-   * Handle interaction move (resize or drag)
-   */
-  const handleInteractionMove = (clientY: number) => {
-    if (!interactionState) return;
-
-    const deltaY = clientY - interactionState.startY;
-    const deltaMinutes = Math.round((deltaY / 20) * 15); // 20px = 15min
-    const snappedDelta = Math.round(deltaMinutes / 5) * 5; // Snap to 5min intervals
-
-    let newStartTime: string;
-    let newEndTime: string;
-    let newDuration: number;
-
-    switch (interactionState.mode) {
-      case 'resize-top':
-        // Change start time, keep end time fixed
-        newStartTime = addMinutesToTime(
-          interactionState.originalStartTime,
-          snappedDelta
-        );
-        newEndTime = interactionState.originalEndTime;
-
-        // Calculate new duration
-        const startMinutes = timeToMinutes(newStartTime);
-        const endMinutes = timeToMinutes(newEndTime);
-        newDuration = Math.max(5, endMinutes - startMinutes); // Min 5 min
-
-        // Adjust start time if duration would be too small
-        if (newDuration < 5) {
-          newStartTime = addMinutesToTime(newEndTime, -5);
-          newDuration = 5;
-        }
-        break;
-
-      case 'resize-bottom':
-        // Keep start time fixed, change end time
-        newStartTime = interactionState.originalStartTime;
-        newDuration = Math.max(
-          5,
-          interactionState.originalDuration + snappedDelta
-        );
-        newEndTime = addMinutesToTime(newStartTime, newDuration);
-        break;
-
-      case 'drag':
-        // Move both start and end time, keep duration same
-        newStartTime = addMinutesToTime(
-          interactionState.originalStartTime,
-          snappedDelta
-        );
-        newEndTime = addMinutesToTime(
-          interactionState.originalEndTime,
-          snappedDelta
-        );
-        newDuration = interactionState.originalDuration; // Duration unchanged!
-        break;
-
-      default:
-        return;
-    }
-
-    setInteractionState({
-      ...interactionState,
-      currentStartTime: newStartTime,
-      currentEndTime: newEndTime,
-      currentDuration: newDuration,
-    });
-  };
-
-  /**
-   * Handle interaction end (save changes)
-   */
-  const handleInteractionEnd = async () => {
-    if (!interactionState) return;
-
-    const appointment = appointmentsByMember
-      .flatMap((m) => m.appointments)
-      .find((a) => a.id === interactionState.appointmentId);
-
-    if (!appointment) {
-      setInteractionState(null);
-      return;
-    }
-
-    // Check if anything actually changed
-    const startChanged =
-      interactionState.currentStartTime !== interactionState.originalStartTime;
-    const endChanged =
-      interactionState.currentEndTime !== interactionState.originalEndTime;
-    const durationChanged =
-      interactionState.currentDuration !== interactionState.originalDuration;
-
-    if (!startChanged && !durationChanged && !endChanged) {
-      setInteractionState(null);
-      return;
-    }
-
-    // Store the values we need before clearing state
-    const appointmentId = interactionState.appointmentId;
-    const newStartTime = interactionState.currentStartTime;
-    const newEndTime = interactionState.currentEndTime;
-    const newDuration = interactionState.currentDuration;
-    const mode = interactionState.mode;
-
-    // Clear interaction state immediately
-    setInteractionState(null);
-
-    // Set flag to prevent onClick from firing
-    setJustInteracted(true);
-    setTimeout(() => setJustInteracted(false), 100); // Clear after 100ms
-
-    // Update local state immediately (optimistic update that persists!)
-    setUpdatedAppointments((prev) => {
-      const updated = new Map(prev);
-      updated.set(appointmentId, {
-        start_time: newStartTime,
-        end_time: newEndTime,
-        duration_minutes: newDuration,
-      });
-      return updated;
-    });
-
-    // Show loading state
-    setIsSaving(true);
-
-    try {
-      // Import the server actions
-      const { resizeAppointment, moveAppointment } = await import(
-        '@/app/actions/calendar-appointments'
-      );
-
-      let result;
-
-      if (mode === 'drag') {
-        // Use move appointment action
-        result = await moveAppointment({
-          appointmentId,
-          bookingId: appointment.booking.id,
-          newStartTime,
-          newEndTime,
-        });
-      } else {
-        // Use resize appointment action
-        result = await resizeAppointment({
-          appointmentId,
-          bookingId: appointment.booking.id,
-          newStartTime,
-          newEndTime,
-          newDuration,
-        });
-      }
-
-      if (!result.success) {
-        // Error: revert the local update
-        setUpdatedAppointments((prev) => {
-          const updated = new Map(prev);
-          updated.delete(appointmentId);
-          return updated;
-        });
-        alert(result.error || 'Failed to update appointment');
-      }
-      // ✅ Success: local state already updated, no refresh needed!
-    } catch (error) {
-      console.error('Error updating appointment:', error);
-      // Error: revert the local update
-      setUpdatedAppointments((prev) => {
-        const updated = new Map(prev);
-        updated.delete(appointmentId);
-        return updated;
-      });
-      alert('An unexpected error occurred');
-    } finally {
-      // Hide loading state
-      setIsSaving(false);
-    }
-  };
-
-  // Calculate dynamic column width based on number of team members
-  const getColumnWidth = (memberCount: number): string => {
-    if (memberCount === 1) return '100%';
-    if (memberCount === 2) return '50%';
-    if (memberCount === 3) return '33.333%';
-    if (memberCount === 4) return '25%';
-    if (memberCount === 5) return '20%';
-    return '200px'; // Fixed width for 6+ members, allows horizontal scroll
-  };
-
-  const columnWidth = getColumnWidth(appointmentsByMember.length);
-  const useFixedWidth = appointmentsByMember.length >= 6;
 
   return (
     <>
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         {appointmentsByMember.length === 0 ? (
-          // Empty state
           <div className="p-8 text-center">
             <p className="text-gray-500">
               No team members assigned to this venue
@@ -817,35 +828,34 @@ export function DayView({
             >
               {/* Team Member Headers */}
               <div className="flex border-b border-gray-200 bg-gray-50">
-                {/* Empty space for time labels column */}
                 <div className="flex-shrink-0 w-16" />
 
-                {/* Team Member Headers */}
                 {appointmentsByMember.map(({ member }) => (
                   <div
                     key={member.id}
-                    className="border-r border-gray-200 p-4"
+                    className={`border-r border-gray-200 p-4 transition-colors ${
+                      highlightedTeamMemberId === member.id
+                        ? 'bg-purple-100 ring-2 ring-inset ring-purple-400'
+                        : ''
+                    }`}
                     style={{
                       width: useFixedWidth ? '200px' : columnWidth,
                       minWidth: useFixedWidth ? '200px' : 'auto',
                     }}
                   >
-                    {/* Uniform layout with consistent sizing */}
                     <div className="flex flex-col items-center gap-3">
-                      {/* Photo Container - Fixed Size */}
                       <div className="flex-shrink-0">
                         {member.photo_url ? (
                           <Image
                             src={member.photo_url}
                             alt={`${member.first_name} ${member.last_name}`}
-                            width={56}
-                            height={56}
+                            width={48}
+                            height={48}
                             className="rounded-full object-cover"
-                            style={{ width: '56px', height: '56px' }}
                           />
                         ) : (
-                          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center flex-shrink-0">
-                            <span className="text-base font-semibold text-white">
+                          <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
+                            <span className="text-purple-600 font-semibold">
                               {member.first_name[0]}
                               {member.last_name[0]}
                             </span>
@@ -853,21 +863,20 @@ export function DayView({
                         )}
                       </div>
 
-                      {/* Text Container - Centered */}
-                      <div className="text-center w-full">
-                        <p className="text-sm font-semibold text-gray-900 truncate px-2">
-                          {member.first_name}
-                        </p>
+                      <div className="text-center min-w-0">
+                        <h3 className="font-semibold text-sm text-gray-900 truncate">
+                          {member.first_name} {member.last_name}
+                        </h3>
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* Calendar Grid - Time slots with columns for each member */}
+              {/* Time Grid */}
               <div className="flex">
                 {/* Time Labels Column */}
-                <div className="flex-shrink-0 w-16 border-r border-gray-200 bg-gray-50">
+                <div className="flex-shrink-0 w-16 bg-gray-50 border-r border-gray-200">
                   {timeSlots.map((time) => {
                     const isHourMark = time.endsWith(':00');
                     const showLabel = hourLabels.includes(time);
@@ -875,7 +884,7 @@ export function DayView({
                     return (
                       <div
                         key={time}
-                        className={`h-5 flex items-center justify-end pr-2 text-xs ${
+                        className={`h-5 px-2 text-xs text-right ${
                           showLabel
                             ? 'text-gray-600 font-medium'
                             : 'text-transparent'
@@ -892,91 +901,55 @@ export function DayView({
                   const memberName = `${member.first_name} ${member.last_name}`;
                   const memberBlockedTimes =
                     blockedTimesByMember.get(member.id) || [];
-                  // =====================================================
-                  // Get holds for this team member
-                  // =====================================================
                   const memberHolds = holdsByMember.get(member.id) || [];
-
-                  // Get pre-calculated layouts for this member
                   const appointmentLayouts =
                     allAppointmentLayouts.get(member.id) || new Map();
 
                   return (
                     <div
                       key={member.id}
-                      className="border-r border-gray-200 relative"
+                      ref={(el) => {
+                        if (el) {
+                          columnRefs.current.set(member.id, el);
+                        } else {
+                          columnRefs.current.delete(member.id);
+                        }
+                      }}
+                      className={`border-r border-gray-200 relative transition-colors ${
+                        highlightedTeamMemberId === member.id
+                          ? 'bg-purple-50'
+                          : ''
+                      }`}
                       style={{
                         width: useFixedWidth ? '200px' : columnWidth,
                         minWidth: useFixedWidth ? '200px' : 'auto',
                       }}
                     >
-                      {/* Time Slots Grid */}
-                      <div>
+                      {/* Time Slots Background */}
+                      <div className="relative">
                         {timeSlots.map((time) => {
-                          // Get shifts for this team member on current date
+                          const isHourMark = time.endsWith(':00');
+
                           const memberShifts = getShiftsForMemberAndDate(
                             member.id,
                             currentDate,
                             shifts
                           );
-
-                          // Check if this time slot is within team member's shift
-                          const hasShift = isTimeInShift(time, memberShifts);
-
-                          // Check if this time slot is blocked
+                          const inShift = isTimeInShift(time, memberShifts);
                           const isBlocked = isTimeBlocked(
                             time,
                             memberBlockedTimes
                           );
 
-                          // Check if time slot has an appointment
-                          const hasAppointment = appointments.some((apt) => {
-                            const aptStart = apt.start_time.substring(0, 5);
-                            const aptEnd = apt.end_time.substring(0, 5);
-                            return time >= aptStart && time < aptEnd;
-                          });
+                          let bgColorClass = 'bg-gray-100';
+                          let cursorClass = 'cursor-not-allowed';
+                          let isClickable = false;
+                          let titleText = 'Outside of working hours';
 
-                          // =====================================================
-                          // Check if time slot has a booking hold
-                          // =====================================================
-                          const hasHold = memberHolds.some((hold) => {
-                            const holdStart = hold.start_time.substring(0, 5);
-                            const holdEnd = hold.end_time.substring(0, 5);
-                            return time >= holdStart && time < holdEnd;
-                          });
-
-                          // Determine if slot is clickable (not booked, not blocked, not held)
-                          const isClickable =
-                            !hasAppointment && !isBlocked && !hasHold;
-
-                          // Determine background color based on state
-                          let bgColorClass = '';
-                          let cursorClass = '';
-                          let titleText = '';
-
-                          if (!hasShift) {
-                            // No shift = light gray, clickable
-                            bgColorClass = 'bg-gray-100 hover:bg-purple-100';
-                            cursorClass = 'cursor-pointer';
-                            titleText = formatTime12Hour(time);
-                          } else if (isBlocked) {
-                            // Has shift but blocked = dark gray, not clickable
-                            bgColorClass = 'bg-gray-400';
-                            cursorClass = 'cursor-not-allowed';
-                            titleText = 'Time blocked';
-                          } else if (hasHold) {
-                            // Has shift but held = light blue, not clickable
-                            bgColorClass = 'bg-sky-100';
-                            cursorClass = 'cursor-not-allowed';
-                            titleText = 'Online booking in progress';
-                          } else if (hasAppointment) {
-                            // Has shift with appointment = white, not clickable (stylist is working)
-                            bgColorClass = 'bg-white';
-                            cursorClass = 'cursor-not-allowed';
-                            titleText = 'Time slot booked';
-                          } else {
-                            // Has shift, available = white, clickable
-                            bgColorClass = 'bg-white hover:bg-purple-100';
+                          if (inShift && !isBlocked) {
+                            bgColorClass =
+                              'bg-white hover:bg-purple-50 active:bg-purple-100';
+                            isClickable = true;
                             cursorClass = 'cursor-pointer';
                             titleText = formatTime12Hour(time);
                           }
@@ -984,7 +957,9 @@ export function DayView({
                           return (
                             <div
                               key={time}
-                              className={`h-5 border-t border-gray-100 transition-colors ${bgColorClass} ${cursorClass} relative group`}
+                              className={`h-5 border-t border-gray-100 transition-colors ${bgColorClass} ${cursorClass} relative group ${
+                                isHourMark ? 'border-t-2 border-t-gray-300' : ''
+                              }`}
                               onClick={() => {
                                 if (isClickable) {
                                   handleSlotClick(time, member.id, memberName);
@@ -1009,56 +984,84 @@ export function DayView({
                         className="absolute inset-0 pointer-events-none"
                         style={{ height: `${timeSlots.length * 20}px` }}
                       >
-                        {/* Current Time Indicator (only on first column) */}
+                        {/* Current Time Indicator */}
                         {shouldShowCurrentTime &&
                           getCurrentTimePosition &&
                           member.id === appointmentsByMember[0]?.member.id && (
-                            <>
-                              {/* Time Badge - positioned in left margin */}
-                              <div
-                                className="absolute z-50"
-                                style={{
-                                  top: `${getCurrentTimePosition.top}px`,
-                                  left: '-64px', // Position in the time labels column
-                                  transform: 'translateY(-50%)',
-                                }}
-                              >
-                                <div className="bg-white text-red-600 text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm">
-                                  {formatCurrentTime(
-                                    getCurrentTimePosition.time
-                                  )}
-                                </div>
+                            <div
+                              className="absolute left-0 right-0 z-50 pointer-events-none"
+                              style={{ top: `${getCurrentTimePosition.top}px` }}
+                            >
+                              <div className="relative">
+                                <div className="absolute -left-4 -top-1.5 w-3 h-3 bg-red-500 rounded-full" />
+                                <div
+                                  className="h-0.5 bg-red-500"
+                                  style={{
+                                    width: `calc(${
+                                      appointmentsByMember.length * 100
+                                    }% + 64px)`,
+                                  }}
+                                />
                               </div>
-                            </>
+                            </div>
                           )}
 
-                        {/* Red Line across all columns */}
-                        {shouldShowCurrentTime && getCurrentTimePosition && (
-                          <div
-                            className="absolute left-0 right-0 h-0.5 bg-red-600 z-50 pointer-events-none"
-                            style={{
-                              top: `${getCurrentTimePosition.top}px`,
-                            }}
-                          />
-                        )}
+                        {/* Ghost placeholder for appointment being dragged */}
+                        {interactionState?.mode === 'drag' &&
+                          interactionState?.originalTeamMemberId ===
+                            member.id && (
+                            <div
+                              className="absolute px-1 pointer-events-none"
+                              style={{
+                                top: `${
+                                  (timeToMinutes(
+                                    interactionState.originalStartTime
+                                  ) /
+                                    15) *
+                                  20
+                                }px`,
+                                height: `${
+                                  ((timeToMinutes(
+                                    interactionState.originalEndTime
+                                  ) -
+                                    timeToMinutes(
+                                      interactionState.originalStartTime
+                                    )) /
+                                    15) *
+                                  20 *
+                                  0.99
+                                }px`,
+                                width: '100%',
+                                left: '0%',
+                              }}
+                            >
+                              <div className="h-full w-full rounded-lg border-2 border-dashed border-gray-400 bg-gray-200/50" />
+                            </div>
+                          )}
 
                         {/* Appointments */}
                         {appointments.map((appointment) => {
                           const isInteracting =
                             interactionState?.appointmentId === appointment.id;
+                          const isDragging =
+                            isInteracting && interactionState?.mode === 'drag';
 
-                          // Use interaction state values if actively interacting
-                          const displayStartTime = isInteracting
-                            ? interactionState.currentStartTime
-                            : appointment.start_time;
+                          // For non-dragging interactions (resize), use current values
+                          // For dragging, show original position (floating card handles visual)
+                          const displayStartTime =
+                            isInteracting && !isDragging
+                              ? interactionState.currentStartTime
+                              : appointment.start_time;
 
-                          const displayEndTime = isInteracting
-                            ? interactionState.currentEndTime
-                            : appointment.end_time;
+                          const displayEndTime =
+                            isInteracting && !isDragging
+                              ? interactionState.currentEndTime
+                              : appointment.end_time;
 
-                          const displayDuration = isInteracting
-                            ? interactionState.currentDuration
-                            : appointment.duration_minutes;
+                          const displayDuration =
+                            isInteracting && !isDragging
+                              ? interactionState.currentDuration
+                              : appointment.duration_minutes;
 
                           const { top, height } = getStyle(
                             displayStartTime,
@@ -1085,8 +1088,11 @@ export function DayView({
                                 zIndex: isInteracting ? 100 : layout.zIndex,
                               }}
                             >
-                              {/* Card shrinks on hover - gap allows clicking time slot beneath */}
-                              <div className="relative h-full w-full group-hover:w-[90%] transition-all duration-200">
+                              <div
+                                className={`relative h-full w-full transition-all duration-200 ${
+                                  !isInteracting ? 'group-hover:w-[90%]' : ''
+                                }`}
+                              >
                                 <div className="h-full w-full pointer-events-auto relative hover:z-[100]">
                                   <AppointmentCard
                                     appointment={{
@@ -1111,6 +1117,19 @@ export function DayView({
                                     onClick={() =>
                                       handleAppointmentClick(appointment)
                                     }
+                                    isGroupHovered={
+                                      hoveredBookingId ===
+                                      appointment.booking.id
+                                    }
+                                    onGroupHoverStart={() =>
+                                      setHoveredBookingId(
+                                        appointment.booking.id
+                                      )
+                                    }
+                                    onGroupHoverEnd={() =>
+                                      setHoveredBookingId(null)
+                                    }
+                                    isFloating={isDragging}
                                   />
                                 </div>
                               </div>
@@ -1151,9 +1170,7 @@ export function DayView({
                           );
                         })}
 
-                        {/* =====================================================
-                            Step 6: Render Booking Holds
-                            ===================================================== */}
+                        {/* Booking Holds */}
                         {memberHolds.map((hold) => {
                           const { top, height } = getHoldStyle(hold);
                           return (
@@ -1175,7 +1192,19 @@ export function DayView({
         )}
       </div>
 
-      {/* Modals */}
+      {/* Loading Overlay */}
+      {(isLoadingBooking || isSaving) && (
+        <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-4 shadow-lg flex items-center gap-3">
+            <div className="h-5 w-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-gray-700">
+              {isSaving ? 'Saving...' : 'Loading...'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Time Slot Actions Modal */}
       {showActionsModal && selectedSlot && (
         <TimeSlotActionsModal
           isOpen={showActionsModal}
@@ -1193,6 +1222,7 @@ export function DayView({
         />
       )}
 
+      {/* Blocked Time Modal */}
       {showBlockedTimeModal && selectedSlot && selectedBlockedTime && (
         <BlockedTimeModal
           isOpen={showBlockedTimeModal}
@@ -1212,6 +1242,7 @@ export function DayView({
         />
       )}
 
+      {/* Edit Appointment Modal */}
       {isEditModalOpen && (
         <>
           {isLoadingBooking ? (
@@ -1229,32 +1260,124 @@ export function DayView({
                 setSelectedBooking(null);
               }}
               booking={selectedBooking}
-              onSuccess={handleEditSuccess}
+              onSuccess={() => {
+                setIsEditModalOpen(false);
+                setSelectedBooking(null);
+                setUpdatedAppointments(new Map());
+                onRefresh();
+              }}
             />
           ) : null}
         </>
       )}
 
-      {/* Loading Overlay */}
-      {isSaving && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[999] flex items-center justify-center animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-2xl p-8 flex flex-col items-center gap-4">
-            {/* Spinning loader */}
-            <div className="relative w-16 h-16">
-              <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
-              <div className="absolute inset-0 border-4 border-purple-600 rounded-full border-t-transparent animate-spin"></div>
-            </div>
+      {/* ✅ Floating Card - follows cursor exactly during drag */}
+      {interactionState?.mode === 'drag' &&
+        floatingCardPosition &&
+        (() => {
+          // Find the appointment being dragged
+          const draggedAppointment = bookings
+            .flatMap(
+              (b) => b.appointments?.map((a) => ({ ...a, booking: b })) || []
+            )
+            .find((a) => a.id === interactionState.appointmentId);
 
-            {/* Loading text */}
-            <div className="text-center">
-              <p className="text-lg font-semibold text-gray-900">
-                Saving changes...
-              </p>
-              <p className="text-sm text-gray-500 mt-1">Please wait</p>
+          if (!draggedAppointment) return null;
+
+          const backgroundColor =
+            draggedAppointment.booking.status === 'completed'
+              ? '#9CA3AF'
+              : draggedAppointment.category_color || '#4ECDC4';
+
+          const clientName = `${draggedAppointment.booking.guest_first_name} ${
+            draggedAppointment.booking.guest_last_name || ''
+          }`.trim();
+
+          // ✅ Use current (snapped) start time for real-time feedback
+          const displayStartTime = interactionState.currentStartTime.substring(
+            0,
+            5
+          );
+          const displayEndTime = interactionState.currentEndTime.substring(
+            0,
+            5
+          );
+
+          // Format time for display (12-hour format)
+          const formatTimeDisplay = (time: string): string => {
+            const [hour, min] = time.split(':');
+            const hourNum = parseInt(hour);
+            const period = hourNum >= 12 ? 'pm' : 'am';
+            const displayHour =
+              hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+            return `${displayHour}:${min}${period}`;
+          };
+
+          const duration = interactionState.currentDuration;
+          const height = (duration / 15) * 20;
+
+          return (
+            <div
+              className="fixed pointer-events-none z-[1000]"
+              style={{
+                left: `${floatingCardPosition.x}px`,
+                top: `${floatingCardPosition.y}px`,
+                width: '180px',
+                height: `${Math.max(height * 0.99, 40)}px`,
+              }}
+            >
+              <div
+                className="h-full w-full rounded-lg shadow-2xl ring-2 ring-purple-500 overflow-hidden"
+                style={{ backgroundColor }}
+              >
+                <div className="h-full flex flex-col p-1.5 overflow-hidden">
+                  {/* ✅ Show updated time range */}
+                  <p className="text-xs text-white/90 truncate leading-tight">
+                    {formatTimeDisplay(displayStartTime)} -{' '}
+                    {formatTimeDisplay(displayEndTime)}
+                  </p>
+                  <p className="text-xs font-bold text-white truncate leading-tight mt-0.5">
+                    {clientName || 'Walk-in'}
+                  </p>
+                  <p className="text-xs text-white/80 truncate leading-tight mt-0.5">
+                    {draggedAppointment.service_name}
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          );
+        })()}
+
+      {/* ✅ Drop Preview - shows where the appointment will land */}
+      {interactionState?.mode === 'drag' &&
+        (() => {
+          const targetMemberId =
+            interactionState.currentTeamMemberId ||
+            interactionState.originalTeamMemberId;
+          const targetColumn = columnRefs.current.get(targetMemberId);
+
+          if (!targetColumn) return null;
+
+          const columnRect = targetColumn.getBoundingClientRect();
+          const duration = interactionState.currentDuration;
+          const height = (duration / 15) * 20;
+          const top =
+            (timeToMinutes(interactionState.currentStartTime) / 15) * 20;
+
+          return (
+            <div
+              className="fixed pointer-events-none z-[500]"
+              style={{
+                left: `${columnRect.left + 4}px`,
+                top: `${columnRect.top + top}px`,
+                width: `${columnRect.width - 8}px`,
+                height: `${Math.max(height * 0.99, 40)}px`,
+              }}
+            >
+              <div className="h-full w-full rounded-lg border-2 border-dashed border-purple-500 bg-purple-100/50" />
+            </div>
+          );
+        })()}
     </>
   );
 }
