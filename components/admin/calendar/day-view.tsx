@@ -12,7 +12,6 @@ import {
 } from '@/lib/shift-helpers';
 import type {
   CalendarBooking,
-  CalendarTeamMember,
   AppointmentWithBooking,
   AppointmentsByMember,
   BlockedTime,
@@ -21,6 +20,8 @@ import { EditAppointmentModal } from './appointment/edit-appointment-modal';
 import Image from 'next/image';
 import { getBookingByAppointmentId } from '@/app/actions/calendar-appointments';
 import type { BookingGroupWithAppointments } from '@/types/calendar';
+import { BookingHoldBlock } from './booking-hold-block';
+import type { BookingHold } from './calendar-client';
 
 interface DayViewProps {
   bookings: CalendarBooking[];
@@ -44,6 +45,7 @@ interface DayViewProps {
   }>;
   currentDate: string;
   blockedTimes: BlockedTime[];
+  bookingHolds: BookingHold[];
   venueId: string;
   onRefresh: () => void;
 }
@@ -161,6 +163,7 @@ export function DayView({
   assignedTeamMembers,
   currentDate,
   blockedTimes,
+  bookingHolds,
   venueId,
   onRefresh,
 }: DayViewProps) {
@@ -243,27 +246,18 @@ export function DayView({
 
   // Group appointments by team member with local updates applied
   const appointmentsByMember = useMemo((): AppointmentsByMember[] => {
-    const grouped = new Map<
-      string,
-      { member: CalendarTeamMember; appointments: AppointmentWithBooking[] }
-    >();
+    // First, create a map of appointments by team member ID
+    const appointmentsMap = new Map<string, AppointmentWithBooking[]>();
 
-    // First, add team members from bookings
     bookings.forEach((booking) => {
       booking.appointments?.forEach((appointment) => {
         const memberId = appointment.team_member_id;
-        const member = appointment.team_member;
 
-        if (!member) return;
-
-        if (!grouped.has(memberId)) {
-          grouped.set(memberId, {
-            member,
-            appointments: [],
-          });
+        if (!appointmentsMap.has(memberId)) {
+          appointmentsMap.set(memberId, []);
         }
 
-        // Apply local updates if they exist
+        // Check for local updates (drag-and-drop)
         const localUpdate = updatedAppointments.get(appointment.id);
         const finalAppointment: AppointmentWithBooking = localUpdate
           ? {
@@ -278,21 +272,36 @@ export function DayView({
               booking,
             };
 
-        grouped.get(memberId)!.appointments.push(finalAppointment);
+        appointmentsMap.get(memberId)!.push(finalAppointment);
       });
     });
 
-    // Then add team members from assignedTeamMembers who don't have bookings
-    assignedTeamMembers.forEach((member) => {
-      if (!grouped.has(member.id)) {
-        grouped.set(member.id, {
-          member,
-          appointments: [],
-        });
+    // ✅ Use assignedTeamMembers as the source of truth for ordering
+    // This preserves the custom display_order from the database
+    const result: AppointmentsByMember[] = assignedTeamMembers.map(
+      (member) => ({
+        member,
+        appointments: appointmentsMap.get(member.id) || [],
+      })
+    );
+
+    // Handle edge case: appointments for team members not in assignedTeamMembers
+    // (shouldn't happen normally, but just in case)
+    appointmentsMap.forEach((appointments, memberId) => {
+      const alreadyIncluded = result.some((r) => r.member.id === memberId);
+      if (!alreadyIncluded && appointments.length > 0) {
+        // Get member info from first appointment
+        const firstAppt = appointments[0];
+        if (firstAppt.team_member) {
+          result.push({
+            member: firstAppt.team_member,
+            appointments,
+          });
+        }
       }
     });
 
-    return Array.from(grouped.values());
+    return result;
   }, [bookings, assignedTeamMembers, updatedAppointments]);
 
   // Group blocked times by team member
@@ -309,6 +318,23 @@ export function DayView({
 
     return grouped;
   }, [blockedTimes]);
+
+  // =====================================================
+  // Group booking holds by team member (Step 4 - already done)
+  // =====================================================
+  const holdsByMember = useMemo(() => {
+    const grouped = new Map<string, BookingHold[]>();
+
+    bookingHolds.forEach((hold) => {
+      if (hold.hold_date !== currentDate) return;
+
+      const existing = grouped.get(hold.team_member_id) || [];
+      existing.push(hold);
+      grouped.set(hold.team_member_id, existing);
+    });
+
+    return grouped;
+  }, [bookingHolds, currentDate]);
 
   // Calculate appointment layouts for ALL members (must be at component level)
   const allAppointmentLayouts = useMemo(() => {
@@ -357,6 +383,23 @@ export function DayView({
     const height = ((endMinutes - startMinutes) / 15) * 20;
 
     return { top, height };
+  };
+
+  // =====================================================
+  // Step 5: Helper function for hold positioning
+  // =====================================================
+  const getHoldStyle = (hold: BookingHold): { top: number; height: number } => {
+    const [startHour, startMin] = hold.start_time.split(':').map(Number);
+    const [endHour, endMin] = hold.end_time.split(':').map(Number);
+
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
+
+    const baseMinutes = 0; // 12 AM (midnight)
+    const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
+    const height = ((endMinutes - startMinutes) / 15) * 20;
+
+    return { top, height: Math.max(height, 40) }; // Minimum 40px height
   };
 
   // Handle empty slot click
@@ -415,6 +458,7 @@ export function DayView({
     setSelectedBooking(null);
     onRefresh();
   };
+
   // ============================================
   // CURRENT TIME INDICATOR HELPERS
   // ============================================
@@ -848,6 +892,10 @@ export function DayView({
                   const memberName = `${member.first_name} ${member.last_name}`;
                   const memberBlockedTimes =
                     blockedTimesByMember.get(member.id) || [];
+                  // =====================================================
+                  // Get holds for this team member
+                  // =====================================================
+                  const memberHolds = holdsByMember.get(member.id) || [];
 
                   // Get pre-calculated layouts for this member
                   const appointmentLayouts =
@@ -888,8 +936,18 @@ export function DayView({
                             return time >= aptStart && time < aptEnd;
                           });
 
-                          // Determine if slot is clickable (not booked, not blocked)
-                          const isClickable = !hasAppointment && !isBlocked;
+                          // =====================================================
+                          // Check if time slot has a booking hold
+                          // =====================================================
+                          const hasHold = memberHolds.some((hold) => {
+                            const holdStart = hold.start_time.substring(0, 5);
+                            const holdEnd = hold.end_time.substring(0, 5);
+                            return time >= holdStart && time < holdEnd;
+                          });
+
+                          // Determine if slot is clickable (not booked, not blocked, not held)
+                          const isClickable =
+                            !hasAppointment && !isBlocked && !hasHold;
 
                           // Determine background color based on state
                           let bgColorClass = '';
@@ -906,6 +964,11 @@ export function DayView({
                             bgColorClass = 'bg-gray-400';
                             cursorClass = 'cursor-not-allowed';
                             titleText = 'Time blocked';
+                          } else if (hasHold) {
+                            // Has shift but held = light blue, not clickable
+                            bgColorClass = 'bg-sky-100';
+                            cursorClass = 'cursor-not-allowed';
+                            titleText = 'Online booking in progress';
                           } else if (hasAppointment) {
                             // Has shift with appointment = white, not clickable (stylist is working)
                             bgColorClass = 'bg-white';
@@ -941,7 +1004,7 @@ export function DayView({
                         })}
                       </div>
 
-                      {/* Appointments and Blocked Times Overlay */}
+                      {/* Appointments, Blocked Times, and Holds Overlay */}
                       <div
                         className="absolute inset-0 pointer-events-none"
                         style={{ height: `${timeSlots.length * 20}px` }}
@@ -1054,6 +1117,7 @@ export function DayView({
                             </div>
                           );
                         })}
+
                         {/* Blocked Times */}
                         {memberBlockedTimes.map((blockedTime) => {
                           const { top, height } = getStyle(
@@ -1084,6 +1148,21 @@ export function DayView({
                                 )}
                               </div>
                             </div>
+                          );
+                        })}
+
+                        {/* =====================================================
+                            Step 6: Render Booking Holds
+                            ===================================================== */}
+                        {memberHolds.map((hold) => {
+                          const { top, height } = getHoldStyle(hold);
+                          return (
+                            <BookingHoldBlock
+                              key={hold.id}
+                              hold={hold}
+                              topPosition={top}
+                              height={height}
+                            />
                           );
                         })}
                       </div>
@@ -1132,6 +1211,7 @@ export function DayView({
           onSuccess={onRefresh}
         />
       )}
+
       {isEditModalOpen && (
         <>
           {isLoadingBooking ? (
@@ -1154,6 +1234,7 @@ export function DayView({
           ) : null}
         </>
       )}
+
       {/* Loading Overlay */}
       {isSaving && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[999] flex items-center justify-center animate-in fade-in duration-200">

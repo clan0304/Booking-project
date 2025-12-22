@@ -5,11 +5,11 @@ import { useState } from 'react';
 import {
   Calendar,
   Clock,
-  User,
   CreditCard,
-  Shield,
+  User,
+  Loader2,
   AlertCircle,
-  Pencil,
+  CheckCircle,
 } from 'lucide-react';
 import type { Venue, BookingData } from '@/types/bookings';
 
@@ -35,9 +35,42 @@ interface BookingSummaryProps {
   authenticatedUserId: string;
   savedCard: SavedCard | null;
   cancellationPolicy: CancellationPolicy | null;
-  onChangeCard?: () => void;
+  onChangeCard: () => void;
   onConfirm: () => void;
   onBack: () => void;
+}
+
+// Format time to 12-hour format
+function formatTime(time: string): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  const period = hours >= 12 ? 'pm' : 'am';
+  const displayHours = hours % 12 || 12;
+  return `${displayHours}:${minutes.toString().padStart(2, '0')}${period}`;
+}
+
+// Format date for display
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr + 'T00:00:00');
+  return date.toLocaleDateString('en-AU', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+// Get card brand icon/display
+function getCardBrandDisplay(brand: string): string {
+  const brands: Record<string, string> = {
+    visa: 'Visa',
+    mastercard: 'Mastercard',
+    amex: 'American Express',
+    discover: 'Discover',
+    diners: 'Diners Club',
+    jcb: 'JCB',
+    unionpay: 'UnionPay',
+  };
+  return brands[brand.toLowerCase()] || brand;
 }
 
 export function BookingSummary({
@@ -52,60 +85,24 @@ export function BookingSummary({
 }: BookingSummaryProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [agreedToPolicy, setAgreedToPolicy] = useState(false);
+  const [agreedToPolicy, setAgreedToPolicy] = useState(!cancellationPolicy);
 
+  // Calculate total price
   const totalPrice = bookingData.appointments.reduce(
     (sum, appt) => sum + appt.price,
     0
   );
 
-  // Format date
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr + 'T00:00:00');
-    return date.toLocaleDateString('en-AU', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-  };
+  // Calculate total duration
+  const totalDuration = bookingData.appointments.reduce(
+    (sum, appt) => sum + appt.durationMinutes,
+    0
+  );
 
-  // Format time
-  const formatTime = (time: string) => {
-    const [hours, minutes] = time.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const hour12 = hour % 12 || 12;
-    return `${hour12}:${minutes} ${ampm}`;
-  };
-
-  // Get card brand display name
-  const getCardBrandDisplay = (brand: string) => {
-    const brandMap: Record<string, string> = {
-      visa: 'Visa',
-      mastercard: 'Mastercard',
-      amex: 'American Express',
-      discover: 'Discover',
-    };
-    return brandMap[brand.toLowerCase()] || brand;
-  };
-
-  // Calculate cancellation fee
-  const getCancellationFee = () => {
-    if (!cancellationPolicy) return null;
-    if (cancellationPolicy.fee_fixed_amount) {
-      return `A$${cancellationPolicy.fee_fixed_amount.toFixed(2)}`;
-    }
-    if (cancellationPolicy.fee_percentage > 0) {
-      const fee = (totalPrice * cancellationPolicy.fee_percentage) / 100;
-      return `A$${fee.toFixed(2)} (${cancellationPolicy.fee_percentage}%)`;
-    }
-    return null;
-  };
-
+  // Handle booking confirmation
   const handleConfirm = async () => {
     if (cancellationPolicy && !agreedToPolicy) {
-      setError('Please agree to the cancellation policy to continue.');
+      setError('Please agree to the cancellation policy to continue');
       return;
     }
 
@@ -130,8 +127,7 @@ export function BookingSummary({
           appointments: bookingData.appointments.map((appt) => ({
             service_id: appt.serviceId,
             service_name: appt.serviceName,
-            team_member_id:
-              appt.teamMemberId === 'any' ? null : appt.teamMemberId,
+            team_member_id: appt.teamMemberId,
             start_time: appt.startTime,
             end_time: appt.endTime,
             duration_minutes: appt.durationMinutes,
@@ -164,6 +160,14 @@ export function BookingSummary({
         <p className="text-gray-600">Please review your booking details</p>
       </div>
 
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
       {/* Booking Details Card */}
       <div className="border border-gray-200 rounded-xl overflow-hidden">
         {/* Venue & Date */}
@@ -181,40 +185,57 @@ export function BookingSummary({
           </div>
         </div>
 
-        {/* Services */}
+        {/* Services with Stylist Names */}
         <div className="p-4 space-y-3">
           {bookingData.appointments.map((appt, index) => (
             <div
               key={index}
               className="flex items-start justify-between py-2 border-b border-gray-100 last:border-0"
             >
-              <div>
+              <div className="flex-1">
                 <p className="font-medium text-gray-900">{appt.serviceName}</p>
-                <div className="flex items-center gap-3 text-sm text-gray-600 mt-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-gray-500">
+                  {/* Time */}
                   <span className="flex items-center gap-1">
-                    <User className="h-3 w-3" />
-                    {appt.teamMemberName || 'Any professional'}
+                    <Clock className="h-3.5 w-3.5" />
+                    {formatTime(appt.startTime)} - {formatTime(appt.endTime)}
                   </span>
+                  {/* Duration */}
                   <span>{appt.durationMinutes} min</span>
+                  {/* Stylist Name - Show assigned stylist */}
+                  {appt.teamMemberName &&
+                    appt.teamMemberName !== 'Any professional' && (
+                      <span className="flex items-center gap-1 text-[#6C5CE7]">
+                        <User className="h-3.5 w-3.5" />
+                        with {appt.teamMemberName}
+                      </span>
+                    )}
                 </div>
               </div>
-              <span className="font-medium text-gray-900">
-                A${appt.price.toFixed(2)}
+              <span className="font-medium text-gray-900 ml-4">
+                ${appt.price}
               </span>
             </div>
           ))}
+        </div>
 
-          {/* Total */}
-          <div className="flex justify-between pt-3 border-t border-gray-200">
-            <span className="font-semibold text-gray-900">Total</span>
-            <span className="font-semibold text-gray-900">
-              A${totalPrice.toFixed(2)}
+        {/* Total */}
+        <div className="bg-gray-50 p-4 border-t border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-gray-600">Total</span>
+              <span className="text-sm text-gray-500 ml-2">
+                ({totalDuration} min)
+              </span>
+            </div>
+            <span className="text-xl font-bold text-gray-900">
+              ${totalPrice}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Saved Card Display */}
+      {/* Payment Method */}
       {savedCard && (
         <div className="border border-gray-200 rounded-xl p-4">
           <div className="flex items-center justify-between">
@@ -227,101 +248,101 @@ export function BookingSummary({
                   {getCardBrandDisplay(savedCard.brand)} •••• {savedCard.last4}
                 </p>
                 <p className="text-sm text-gray-500">
-                  Expires {savedCard.exp_month.toString().padStart(2, '0')}/
-                  {savedCard.exp_year}
+                  Expires {savedCard.exp_month}/{savedCard.exp_year}
                 </p>
               </div>
             </div>
-            {onChangeCard && (
-              <button
-                type="button"
-                onClick={onChangeCard}
-                className="flex items-center gap-1 text-sm text-[#6C5CE7] hover:text-[#5b4bc4] font-medium"
-              >
-                <Pencil className="h-4 w-4" />
-                Change
-              </button>
-            )}
+            <button
+              onClick={onChangeCard}
+              className="text-sm text-[#6C5CE7] hover:underline"
+            >
+              Change
+            </button>
           </div>
-          <div className="flex items-center gap-2 mt-3 text-sm text-gray-500">
-            <Shield className="h-4 w-4 text-green-600" />
-            <span>Your card won&apos;t be charged today</span>
-          </div>
-        </div>
-      )}
-
-      {/* No Card Warning */}
-      {!savedCard && (
-        <div className="border border-amber-200 bg-amber-50 rounded-xl p-4">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
-            <div>
-              <p className="font-medium text-amber-800">No payment method</p>
-              <p className="text-sm text-amber-700 mt-1">
-                Please go back and add a payment method to secure your booking.
-              </p>
-            </div>
-          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            Your card will only be charged if you cancel within the cancellation
+            period or don&apos;t show up for your appointment.
+          </p>
         </div>
       )}
 
       {/* Cancellation Policy */}
       {cancellationPolicy && (
-        <div className="border border-gray-200 rounded-xl p-4 space-y-3">
-          <div className="flex items-start gap-3">
-            <Clock className="h-5 w-5 text-amber-600 mt-0.5" />
-            <div>
-              <p className="font-medium text-gray-900">Cancellation Policy</p>
-              <p className="text-sm text-gray-600 mt-1">
-                Cancel at least {cancellationPolicy.notice_hours} hours before
-                your appointment to avoid a {getCancellationFee()} fee.
-              </p>
-            </div>
-          </div>
-
-          <label className="flex items-start gap-3 cursor-pointer">
+        <div className="border border-amber-200 bg-amber-50 rounded-xl p-4">
+          <h4 className="font-medium text-amber-800 mb-2">
+            Cancellation Policy
+          </h4>
+          <p className="text-sm text-amber-700 mb-3">
+            Free cancellation up to {cancellationPolicy.notice_hours} hours
+            before your appointment. Late cancellations or no-shows will be
+            charged{' '}
+            {cancellationPolicy.fee_fixed_amount
+              ? `$${cancellationPolicy.fee_fixed_amount}`
+              : `${cancellationPolicy.fee_percentage}% of the booking total`}
+            .
+          </p>
+          <label className="flex items-start gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={agreedToPolicy}
               onChange={(e) => setAgreedToPolicy(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#6C5CE7] focus:ring-[#6C5CE7]"
+              className="mt-1 rounded border-amber-300 text-[#6C5CE7] focus:ring-[#6C5CE7]"
             />
-            <span className="text-sm text-gray-700">
-              I understand and agree to the cancellation policy. I authorize the
-              salon to charge my saved card if I cancel late or don&apos;t show
-              up.
+            <span className="text-sm text-amber-800">
+              I understand and agree to the cancellation policy
             </span>
           </label>
         </div>
       )}
 
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
-          {error}
+      {/* Contact Info Summary */}
+      <div className="border border-gray-200 rounded-xl p-4">
+        <h4 className="font-medium text-gray-900 mb-2">Contact Information</h4>
+        <div className="text-sm text-gray-600 space-y-1">
+          <p>
+            {bookingData.guestFirstName} {bookingData.guestLastName}
+          </p>
+          <p>{bookingData.guestEmail}</p>
+          {bookingData.guestPhone && <p>{bookingData.guestPhone}</p>}
         </div>
-      )}
+      </div>
+
+      {/* Confirmation Note */}
+      <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
+        <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+        <div className="text-sm text-green-800">
+          <p className="font-medium">Confirmation will be sent to your email</p>
+          <p className="mt-1">
+            You&apos;ll receive a booking confirmation at{' '}
+            {bookingData.guestEmail}
+          </p>
+        </div>
+      </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3 pt-4">
+      <div className="flex gap-4">
         <button
-          type="button"
           onClick={onBack}
           disabled={loading}
-          className="px-6 py-3 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          className="flex-1 py-3 border border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
         >
           Back
         </button>
         <button
           onClick={handleConfirm}
-          disabled={
-            loading || !savedCard || (!!cancellationPolicy && !agreedToPolicy)
-          }
-          className="flex-1 bg-[#6C5CE7] text-white py-3 rounded-lg font-medium hover:bg-[#5b4bc4] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          disabled={loading || (!!cancellationPolicy && !agreedToPolicy)}
+          className={`
+            flex-1 py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2
+            ${
+              loading || (!!cancellationPolicy && !agreedToPolicy)
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-[#6C5CE7] text-white hover:bg-[#5b4bc4]'
+            }
+          `}
         >
           {loading ? (
             <>
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
               Confirming...
             </>
           ) : (

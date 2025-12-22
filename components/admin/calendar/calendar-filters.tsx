@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Calendar as CalendarIcon,
   MapPin,
+  Settings2,
 } from 'lucide-react';
 import {
   getLocalStartOfWeek,
@@ -22,6 +23,7 @@ import type {
   AssignedTeamMember,
 } from './calendar-client';
 import { TeamFilterDropdown } from './team-filter-dropdown';
+import { TeamMemberReorderModal } from './team-member-reorder-modal';
 import { Calendar } from '@/components/ui/calendar';
 import {
   Popover,
@@ -31,7 +33,7 @@ import {
 import { cn } from '@/lib/utils';
 
 interface CalendarFiltersProps {
-  venues: Array<{ id: string; name: string }>; // ✅ Receive venues as prop
+  venues: Array<{ id: string; name: string }>;
   viewType: CalendarViewType;
   onViewTypeChange: (type: CalendarViewType) => void;
   selectedVenue: string;
@@ -43,13 +45,15 @@ interface CalendarFiltersProps {
   teamFilterMode: TeamFilterMode;
   onTeamFilterModeChange: (mode: TeamFilterMode) => void;
   assignedTeamMembers: AssignedTeamMember[];
+  allAssignedTeamMembers: AssignedTeamMember[]; // ✅ NEW: All team members for reorder modal
   scheduledTeamMemberIds: string[];
   selectedTeamMemberIds: string[];
   onTeamMemberIdsChange: (ids: string[]) => void;
+  onTeamOrderChange: () => void;
 }
 
 export function CalendarFilters({
-  venues, // ✅ Use prop instead of state
+  venues,
   viewType,
   onViewTypeChange,
   selectedVenue,
@@ -61,11 +65,17 @@ export function CalendarFilters({
   teamFilterMode,
   onTeamFilterModeChange,
   assignedTeamMembers,
-
+  allAssignedTeamMembers, // ✅ NEW
   selectedTeamMemberIds,
   onTeamMemberIdsChange,
+  onTeamOrderChange,
 }: CalendarFiltersProps) {
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [showReorderModal, setShowReorderModal] = useState(false); // ✅ NEW
+
+  // Get current venue name for the modal
+  const currentVenueName =
+    venues.find((v) => v.id === selectedVenue)?.name || 'Venue';
 
   // Navigation handlers
   const handlePrevious = () => {
@@ -188,26 +198,37 @@ export function CalendarFilters({
             <ChevronRight className="h-5 w-5 text-gray-600" />
           </button>
 
-          {/* Venue Filter */}
-          <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-            <select
-              value={selectedVenue}
-              onChange={(e) => onVenueChange(e.target.value)}
-              className="h-9 pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors appearance-none cursor-pointer min-w-[180px]"
+          {/* Venue Filter + Reorder Button */}
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              <select
+                value={selectedVenue}
+                onChange={(e) => onVenueChange(e.target.value)}
+                className="h-9 pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors appearance-none cursor-pointer min-w-[180px]"
+              >
+                {venues.length === 0 && (
+                  <option value="">No venues available</option>
+                )}
+                {venues.map((venue) => (
+                  <option key={venue.id} value={venue.id}>
+                    {venue.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* ✅ NEW: Reorder Team Members Button */}
+            <button
+              onClick={() => setShowReorderModal(true)}
+              className="flex items-center justify-center h-9 w-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+              title="Reorder team members"
             >
-              {venues.length === 0 && (
-                <option value="">No venues available</option>
-              )}
-              {venues.map((venue) => (
-                <option key={venue.id} value={venue.id}>
-                  {venue.name}
-                </option>
-              ))}
-            </select>
+              <Settings2 className="h-4 w-4 text-gray-600" />
+            </button>
           </div>
 
-          {/* Team Filter Dropdown - ✅ FIXED: Correct prop names */}
+          {/* Team Filter Dropdown */}
           <TeamFilterDropdown
             teamFilterMode={teamFilterMode}
             onTeamFilterModeChange={onTeamFilterModeChange}
@@ -243,6 +264,16 @@ export function CalendarFilters({
           </button>
         </div>
       </div>
+
+      {/* ✅ NEW: Team Member Reorder Modal - Uses ALL team members */}
+      <TeamMemberReorderModal
+        isOpen={showReorderModal}
+        onClose={() => setShowReorderModal(false)}
+        venueId={selectedVenue}
+        venueName={currentVenueName}
+        teamMembers={allAssignedTeamMembers}
+        onSuccess={onTeamOrderChange}
+      />
     </div>
   );
 }

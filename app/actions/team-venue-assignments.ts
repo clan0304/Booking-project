@@ -6,6 +6,7 @@ import { supabaseAdmin } from '@/lib/supabase/server';
 
 /**
  * Get all team members assigned to a specific venue
+ * Ordered by display_order (custom order)
  */
 export async function getTeamMembersByVenue(venueId: string) {
   try {
@@ -17,6 +18,7 @@ export async function getTeamMembersByVenue(venueId: string) {
         `
         id,
         is_active,
+        display_order,
         users!team_member_venues_team_member_id_fkey (
           id,
           first_name,
@@ -28,7 +30,7 @@ export async function getTeamMembersByVenue(venueId: string) {
       )
       .eq('venue_id', venueId)
       .eq('is_active', true)
-      .order('users(first_name)', { ascending: true });
+      .order('display_order', { ascending: true }); // ✅ Order by display_order
 
     if (error) {
       console.error('Error fetching team members by venue:', error);
@@ -87,7 +89,24 @@ export async function getUnassignedTeamMembers(venueId: string) {
 }
 
 /**
+ * Get next display_order for a venue (max + 1)
+ */
+async function getNextDisplayOrder(venueId: string): Promise<number> {
+  const { data } = await supabaseAdmin
+    .from('team_member_venues')
+    .select('display_order')
+    .eq('venue_id', venueId)
+    .eq('is_active', true)
+    .order('display_order', { ascending: false })
+    .limit(1)
+    .single();
+
+  return (data?.display_order ?? 0) + 1;
+}
+
+/**
  * Bulk assign team members to a venue
+ * New members are added at the END (max display_order + 1)
  */
 export async function bulkAssignTeamMembers(
   teamMemberIds: string[],
@@ -98,38 +117,47 @@ export async function bulkAssignTeamMembers(
       return { success: false, error: 'No team members provided' };
     }
 
+    // Get current max display_order
+    let nextOrder = await getNextDisplayOrder(venueId);
+
     // Check for existing assignments
     const { data: existing } = await supabaseAdmin
       .from('team_member_venues')
-      .select('team_member_id, is_active')
+      .select('team_member_id, is_active, display_order')
       .eq('venue_id', venueId)
       .in('team_member_id', teamMemberIds);
 
     const existingMap = new Map(
-      existing?.map((e) => [e.team_member_id, e.is_active]) || []
+      existing?.map((e) => [
+        e.team_member_id,
+        { is_active: e.is_active, display_order: e.display_order },
+      ]) || []
     );
 
     const toInsert: Array<{
       team_member_id: string;
       venue_id: string;
       is_active: boolean;
+      display_order: number;
     }> = [];
     const toReactivate: string[] = [];
 
     teamMemberIds.forEach((memberId) => {
-      const existingStatus = existingMap.get(memberId);
-      if (existingStatus === undefined) {
-        // New assignment
+      const existingData = existingMap.get(memberId);
+
+      if (!existingData) {
+        // New assignment - add at the end
         toInsert.push({
           team_member_id: memberId,
           venue_id: venueId,
           is_active: true,
+          display_order: nextOrder++,
         });
-      } else if (existingStatus === false) {
-        // Reactivate existing but inactive assignment
+      } else if (!existingData.is_active) {
+        // Reactivate existing - keep their old position or put at end
         toReactivate.push(memberId);
       }
-      // If existingStatus === true, already assigned and active, skip
+      // Already active - skip
     });
 
     // Insert new assignments
@@ -139,22 +167,25 @@ export async function bulkAssignTeamMembers(
         .insert(toInsert);
 
       if (insertError) {
-        console.error('Error inserting team member assignments:', insertError);
+        console.error('Error inserting team members:', insertError);
         return { success: false, error: 'Failed to assign team members' };
       }
     }
 
-    // Reactivate existing assignments
+    // Reactivate existing assignments (put at end if display_order is 0)
     if (toReactivate.length > 0) {
-      const { error: updateError } = await supabaseAdmin
-        .from('team_member_venues')
-        .update({ is_active: true })
-        .eq('venue_id', venueId)
-        .in('team_member_id', toReactivate);
+      for (const memberId of toReactivate) {
+        const existingData = existingMap.get(memberId);
+        const newOrder =
+          existingData?.display_order && existingData.display_order > 0
+            ? existingData.display_order
+            : nextOrder++;
 
-      if (updateError) {
-        console.error('Error reactivating team members:', updateError);
-        return { success: false, error: 'Failed to reactivate team members' };
+        await supabaseAdmin
+          .from('team_member_venues')
+          .update({ is_active: true, display_order: newOrder })
+          .eq('venue_id', venueId)
+          .eq('team_member_id', memberId);
       }
     }
 
@@ -167,7 +198,6 @@ export async function bulkAssignTeamMembers(
 
 /**
  * Bulk unassign team members from a venue
- * Sets is_active to false instead of deleting records
  */
 export async function bulkUnassignTeamMembers(
   teamMemberIds: string[],
@@ -235,6 +265,39 @@ export async function isTeamMemberAssignedToVenue(
     return { success: true, isAssigned: !!data };
   } catch (error) {
     console.error('Error in isTeamMemberAssignedToVenue:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Update team member display order for a venue
+ * Used for drag-and-drop reordering in admin UI
+ */
+export async function updateTeamMemberOrder(
+  venueId: string,
+  orderedTeamMemberIds: string[]
+) {
+  try {
+    await requireStaff();
+
+    // Update each team member's display_order based on array position
+    for (let i = 0; i < orderedTeamMemberIds.length; i++) {
+      const { error } = await supabaseAdmin
+        .from('team_member_venues')
+        .update({ display_order: i + 1 })
+        .eq('venue_id', venueId)
+        .eq('team_member_id', orderedTeamMemberIds[i])
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('Error updating team member order:', error);
+        return { success: false, error: 'Failed to update order' };
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error in updateTeamMemberOrder:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }

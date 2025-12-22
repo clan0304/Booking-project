@@ -8,6 +8,7 @@ import { TeamMemberSelection } from './team-member-selection';
 import { DateTimeSelection } from './date-time-selection';
 import { PaymentDetails } from './payment-details';
 import { BookingSummary } from './booking-summary';
+import { useBookingHold } from '@/hooks/use-booking-hold';
 import {
   CheckCircle,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   X,
   Lock,
   Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { getPublicPaymentInfo } from '@/app/actions/stripe';
 import type {
@@ -111,6 +113,19 @@ function getInternalStepForDisplay(displayStep: DisplayStep): BookingStep {
     default:
       return 'service';
   }
+}
+
+// =====================================================
+// HELPER: Calculate duration from start/end time
+// =====================================================
+function calculateDurationMinutes(startTime: string, endTime: string): number {
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
+
+  const startMinutes = startHour * 60 + startMin;
+  const endMinutes = endHour * 60 + endMin;
+
+  return endMinutes - startMinutes;
 }
 
 // =====================================================
@@ -222,6 +237,37 @@ function BookingProgress({
 }
 
 // =====================================================
+// HOLD ERROR BANNER COMPONENT
+// =====================================================
+
+interface HoldErrorBannerProps {
+  error: string;
+  onDismiss: () => void;
+}
+
+function HoldErrorBanner({ error, onDismiss }: HoldErrorBannerProps) {
+  return (
+    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-red-800">{error}</p>
+          <p className="text-sm text-red-600 mt-1">
+            Please select a different time slot.
+          </p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="text-red-400 hover:text-red-600 transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================
 // MAIN BOOKING FLOW COMPONENT
 // =====================================================
 
@@ -244,6 +290,17 @@ export function BookingFlow({
       guestPhone: authenticatedUser.phone_number || '',
     }),
   });
+
+  // Booking hold state
+  const [holdErrorVisible, setHoldErrorVisible] = useState(false);
+  const { isHolding, holdError, createHold, releaseHold, deleteHold } =
+    useBookingHold({
+      venueId: venue.id,
+      onHoldError: (error) => {
+        console.error('Hold error:', error);
+        setHoldErrorVisible(true);
+      },
+    });
 
   // Payment-related state
   const [paymentInfo, setPaymentInfo] = useState<{
@@ -343,6 +400,13 @@ export function BookingFlow({
   };
 
   const goToStep = (step: BookingStep) => {
+    // If going back to time selection from confirm steps, release the hold
+    if (
+      step === 'date-time' &&
+      (currentStep === 'payment' || currentStep === 'review')
+    ) {
+      releaseHold();
+    }
     setCurrentStep(step);
   };
 
@@ -374,12 +438,23 @@ export function BookingFlow({
     const stepOrder = getStepOrder();
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex > 0) {
-      setCurrentStep(stepOrder[currentIndex - 1]);
+      const previousStep = stepOrder[currentIndex - 1];
+
+      // If going back to time selection from confirm steps, release the hold
+      if (
+        previousStep === 'date-time' &&
+        (currentStep === 'payment' || currentStep === 'review')
+      ) {
+        releaseHold();
+      }
+
+      setCurrentStep(previousStep);
     }
   };
 
   // Handler to close booking and go back to venue page
   const handleClose = () => {
+    // Hold will be released automatically by the hook on unmount
     router.push(`/${venue.slug}`);
   };
 
@@ -396,6 +471,45 @@ export function BookingFlow({
     // Refresh payment info to get the new card details
     fetchPaymentInfo();
 
+    goToNextStep();
+  };
+
+  // Handler for date/time selection with hold creation
+  const handleDateTimeSelect = async (
+    date: string,
+    appointments: SelectedAppointment[]
+  ) => {
+    updateBookingData({ appointments, bookingDate: date });
+    setHoldErrorVisible(false);
+
+    // Create booking hold for the selected time slots
+    const holdCreated = await createHold(
+      date,
+      appointments.map((appt) => ({
+        teamMemberId: appt.teamMemberId,
+        startTime: appt.startTime,
+        endTime: appt.endTime,
+        serviceId: appt.serviceId,
+        serviceName: appt.serviceName,
+        // Calculate duration from start/end time
+        duration: calculateDurationMinutes(appt.startTime, appt.endTime),
+        price: appt.price,
+      }))
+    );
+
+    if (holdCreated) {
+      // Hold created successfully, proceed to next step
+      goToNextStep();
+    } else {
+      // Hold failed - error will be shown via onHoldError callback
+      setHoldErrorVisible(true);
+    }
+  };
+
+  // Handler for booking confirmation - delete hold after successful booking
+  const handleBookingConfirmed = async () => {
+    // Delete the hold after successful booking
+    await deleteHold();
     goToNextStep();
   };
 
@@ -438,6 +552,14 @@ export function BookingFlow({
 
       {/* Step Content */}
       <div className="p-6">
+        {/* Hold Error Banner */}
+        {holdErrorVisible && holdError && (
+          <HoldErrorBanner
+            error={holdError}
+            onDismiss={() => setHoldErrorVisible(false)}
+          />
+        )}
+
         {currentStep === 'service' && (
           <ServiceSelection
             services={services}
@@ -464,16 +586,25 @@ export function BookingFlow({
         )}
 
         {currentStep === 'date-time' && (
-          <DateTimeSelection
-            venueId={venue.id}
-            appointments={bookingData.appointments || []}
-            onSelect={(date: string, appointments: SelectedAppointment[]) => {
-              updateBookingData({ appointments, bookingDate: date });
-              // Skip guest-info, go to next step (payment or review)
-              goToNextStep();
-            }}
-            onBack={goToPreviousStep}
-          />
+          <>
+            {/* Show loading overlay while creating hold */}
+            {isHolding && (
+              <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg p-6 shadow-xl flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-[#6C5CE7]" />
+                  <span className="text-gray-700">
+                    Reserving your time slot...
+                  </span>
+                </div>
+              </div>
+            )}
+            <DateTimeSelection
+              venueId={venue.id}
+              appointments={bookingData.appointments || []}
+              onSelect={handleDateTimeSelect}
+              onBack={goToPreviousStep}
+            />
+          </>
         )}
 
         {currentStep === 'payment' && (
@@ -496,7 +627,7 @@ export function BookingFlow({
             savedCard={paymentInfo.existingCard}
             cancellationPolicy={paymentInfo.cancellationPolicy}
             onChangeCard={handleChangeCard}
-            onConfirm={goToNextStep}
+            onConfirm={handleBookingConfirmed}
             onBack={goToPreviousStep}
           />
         )}

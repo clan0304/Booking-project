@@ -10,6 +10,7 @@ import type {
   Transaction,
   CheckoutItem,
   PaymentMethodType,
+  TransactionItem,
 } from '@/types/payments';
 
 /**
@@ -551,5 +552,31 @@ export async function chargeSavedCard(
       paymentIntentId: null,
       error: 'Failed to process payment',
     };
+  }
+}
+
+/**
+ * Get all items for a transaction
+ */
+export async function getTransactionItems(
+  transactionId: string
+): Promise<{ items: TransactionItem[]; error: string | null }> {
+  try {
+    await requireStaff();
+
+    const { data, error } = await supabaseAdmin
+      .from('transaction_items')
+      .select('*')
+      .eq('transaction_id', transactionId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return { items: [], error: 'Failed to fetch transaction items' };
+    }
+
+    return { items: data || [], error: null };
+  } catch (error) {
+    console.error('Error fetching transaction items:', error);
+    return { items: [], error: 'Failed to fetch transaction items' };
   }
 }

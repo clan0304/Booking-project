@@ -2,55 +2,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Loader2 } from 'lucide-react';
 import type { SelectedAppointment } from '@/types/bookings';
-
-// LOCAL HELPER: Format date using LOCAL timezone (not UTC)
-function formatLocalDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-// Calculate minimum bookable datetime (24 hours from now)
-function getMinimumBookableDateTime(): Date {
-  const now = new Date();
-  const twentyFourHoursFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  return twentyFourHoursFromNow;
-}
-
-// Check if a date is bookable (not within 24 hours)
-function isDateBookable(date: Date): boolean {
-  const minBookableDate = getMinimumBookableDateTime();
-  minBookableDate.setHours(0, 0, 0, 0);
-
-  const checkDate = new Date(date);
-  checkDate.setHours(0, 0, 0, 0);
-
-  return checkDate >= minBookableDate;
-}
-
-// Filter time slots to exclude those within 24 hours
-function filterSlotsBy24HourRule(dateStr: string, slots: string[]): string[] {
-  const minBookableDateTime = getMinimumBookableDateTime();
-  const slotDate = new Date(dateStr);
-
-  return slots.filter((timeSlot) => {
-    const [hours, minutes] = timeSlot.split(':').map(Number);
-    const slotDateTime = new Date(slotDate);
-    slotDateTime.setHours(hours, minutes, 0, 0);
-
-    return slotDateTime >= minBookableDateTime;
-  });
-}
-
-// Add days to a date
-function addDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
 
 interface DateTimeSelectionProps {
   venueId: string;
@@ -59,13 +12,57 @@ interface DateTimeSelectionProps {
   onBack: () => void;
 }
 
+// Team member info (internal use only - not displayed to user)
+interface TeamMemberInfo {
+  id: string;
+  first_name: string;
+  last_name: string | null;
+  photo_url: string | null;
+}
+
+// Helper function to add days to a date
+function addDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+// Helper function to format date to YYYY-MM-DD in local timezone
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Format time to 12-hour format
+function formatTime(time: string): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  const period = hours >= 12 ? 'pm' : 'am';
+  const displayHours = hours % 12 || 12;
+  return `${displayHours}:${minutes.toString().padStart(2, '0')}${period}`;
+}
+
+// Filter slots to only show times 24+ hours from now
+function filterSlotsBy24HourRule(date: string, slots: string[]): string[] {
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+  return slots.filter((slot) => {
+    const [hours, minutes] = slot.split(':').map(Number);
+    const slotDateTime = new Date(date + 'T00:00:00');
+    slotDateTime.setHours(hours, minutes, 0, 0);
+    return slotDateTime >= tomorrow;
+  });
+}
+
 export function DateTimeSelection({
   venueId,
   appointments,
   onSelect,
   onBack,
 }: DateTimeSelectionProps) {
-  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedTimes, setSelectedTimes] = useState<Record<string, string>>(
     {}
   );
@@ -77,8 +74,22 @@ export function DateTimeSelection({
   >({});
   const [checkingAvailability, setCheckingAvailability] = useState(false);
 
+  // Internal: Store slot-to-team-member mapping (not shown to user)
+  const [slotToTeamMember, setSlotToTeamMember] = useState<
+    Record<string, string>
+  >({});
+  const [teamMemberInfo, setTeamMemberInfo] = useState<
+    Record<string, TeamMemberInfo>
+  >({});
+
   // Track if we've already fetched the 30-day availability
   const availabilityFetchedRef = useRef(false);
+
+  // Check if using "Any Professional"
+  const hasAnyProfessional = useMemo(
+    () => appointments.some((appt) => appt.teamMemberId === 'any'),
+    [appointments]
+  );
 
   // Generate calendar days (memoized)
   const getDaysInMonth = (date: Date) => {
@@ -111,7 +122,7 @@ export function DateTimeSelection({
     return date;
   }, []);
 
-  // ✅ Calculate 30-day window: today → today + 30 days
+  // Calculate 30-day window: today → today + 30 days
   const dateRange = useMemo(() => {
     const startDate = new Date(today);
     const endDate = addDays(today, 30);
@@ -121,40 +132,49 @@ export function DateTimeSelection({
     };
   }, [today]);
 
-  // ✅ FIXED: Fetch 30-day availability using /combined endpoint for BOTH cases
+  // Fetch 30-day availability in ONE request (only once on mount)
   useEffect(() => {
     const fetchAvailability = async () => {
       if (appointments.length === 0) return;
-      if (availabilityFetchedRef.current) return; // Already fetched
+      if (availabilityFetchedRef.current) return;
 
       setCheckingAvailability(true);
       availabilityFetchedRef.current = true;
 
       try {
-        const hasAnyProfessional = appointments.some(
-          (appt) => appt.teamMemberId === 'any'
-        );
+        if (hasAnyProfessional) {
+          // ONE REQUEST for 30-day range
+          const response = await fetch(
+            `/api/public/bookings/availability/combined?start_date=${dateRange.start}&end_date=${dateRange.end}&venue_id=${venueId}`
+          );
+          const data = await response.json();
 
-        // ✅ Build URL - use /combined endpoint for BOTH cases
-        let url = `/api/public/bookings/availability/combined?start_date=${dateRange.start}&end_date=${dateRange.end}&venue_id=${venueId}`;
-
-        // ✅ Add team_member_id filter for specific designer
-        if (!hasAnyProfessional) {
-          const appointment = appointments[0];
-          url += `&team_member_id=${appointment.teamMemberId}`;
-        }
-
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (data.availability) {
-          const availability: Record<string, boolean> = {};
-          for (const [date, info] of Object.entries(data.availability)) {
-            const dateInfo = info as { available: boolean; slots: string[] };
-            availability[date] =
-              dateInfo.available && dateInfo.slots.length > 0;
+          if (data.availability) {
+            const availability: Record<string, boolean> = {};
+            for (const [date, info] of Object.entries(data.availability)) {
+              const dateInfo = info as { available: boolean; slots: string[] };
+              availability[date] =
+                dateInfo.available && dateInfo.slots.length > 0;
+            }
+            setDayAvailability(availability);
           }
-          setDayAvailability(availability);
+        } else {
+          // For specific team member
+          const appointment = appointments[0];
+          const response = await fetch(
+            `/api/public/bookings/availability?team_member_id=${appointment.teamMemberId}&start_date=${dateRange.start}&end_date=${dateRange.end}&venue_id=${venueId}`
+          );
+          const data = await response.json();
+
+          if (data.availability) {
+            const availability: Record<string, boolean> = {};
+            for (const [date, info] of Object.entries(data.availability)) {
+              const dateInfo = info as { available: boolean; slots: string[] };
+              availability[date] =
+                dateInfo.available && dateInfo.slots.length > 0;
+            }
+            setDayAvailability(availability);
+          }
         }
       } catch (error) {
         console.error('Error checking availability:', error);
@@ -165,39 +185,60 @@ export function DateTimeSelection({
     };
 
     fetchAvailability();
-  }, [appointments, venueId, dateRange]);
+  }, [appointments, venueId, dateRange, hasAnyProfessional]);
 
-  // ✅ FIXED: Fetch available time slots using /combined endpoint for BOTH cases
+  // Fetch available time slots when date is selected (single date)
   useEffect(() => {
     if (!selectedDate || appointments.length === 0) return;
 
     const fetchAvailableSlots = async () => {
       setLoading(true);
+
       try {
-        const hasAnyProfessional = appointments.some(
-          (appt) => appt.teamMemberId === 'any'
-        );
-
-        // ✅ Build URL - use /combined endpoint for BOTH cases
-        let url = `/api/public/bookings/availability/combined?date=${selectedDate}&venue_id=${venueId}`;
-
-        // ✅ Add team_member_id filter for specific designer
-        if (!hasAnyProfessional) {
-          const appointment = appointments[0];
-          url += `&team_member_id=${appointment.teamMemberId}`;
-        }
-
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (data.available && data.slots) {
-          const filteredSlots = filterSlotsBy24HourRule(
-            selectedDate,
-            data.slots
+        if (hasAnyProfessional) {
+          const response = await fetch(
+            `/api/public/bookings/availability/combined?date=${selectedDate}&venue_id=${venueId}`
           );
-          setAvailableSlots(filteredSlots);
+
+          const data = await response.json();
+
+          if (data.available && data.slots) {
+            const filteredSlots = filterSlotsBy24HourRule(
+              selectedDate,
+              data.slots
+            );
+            setAvailableSlots(filteredSlots);
+
+            // Store the slot-to-team-member mapping (internal - not shown to user)
+            setSlotToTeamMember(data.slotToTeamMember || {});
+            setTeamMemberInfo(data.teamMemberInfo || {});
+          } else {
+            setAvailableSlots([]);
+            setSlotToTeamMember({});
+            setTeamMemberInfo({});
+          }
         } else {
-          setAvailableSlots([]);
+          const allSlots: Record<string, string[]> = {};
+
+          for (const appointment of appointments) {
+            const response = await fetch(
+              `/api/public/bookings/availability?team_member_id=${appointment.teamMemberId}&date=${selectedDate}&venue_id=${venueId}`
+            );
+
+            const data = await response.json();
+
+            if (data.available && data.slots) {
+              allSlots[appointment.serviceId] = data.slots;
+            } else {
+              allSlots[appointment.serviceId] = [];
+            }
+          }
+
+          const firstServiceId = appointments[0].serviceId;
+          const slots = allSlots[firstServiceId] || [];
+
+          const filteredSlots = filterSlotsBy24HourRule(selectedDate, slots);
+          setAvailableSlots(filteredSlots);
         }
       } catch (error) {
         console.error('Error fetching slots:', error);
@@ -208,7 +249,7 @@ export function DateTimeSelection({
     };
 
     fetchAvailableSlots();
-  }, [selectedDate, appointments, venueId]);
+  }, [selectedDate, appointments, venueId, hasAnyProfessional]);
 
   const handleDateSelect = (date: Date) => {
     const dateStr = formatLocalDate(date);
@@ -227,6 +268,10 @@ export function DateTimeSelection({
   const handleContinue = () => {
     if (!selectedDate || Object.keys(selectedTimes).length === 0) return;
 
+    // Get the selected time
+    const selectedTime = Object.values(selectedTimes)[0];
+
+    // Build updated appointments with real team member ID if "Any Professional" was selected
     const updatedAppointments = appointments.map((appt) => {
       const startTime = selectedTimes[appt.serviceId];
       const [hours, minutes] = startTime.split(':').map(Number);
@@ -236,6 +281,23 @@ export function DateTimeSelection({
       const endTime = `${String(endHours).padStart(2, '0')}:${String(
         endMins
       ).padStart(2, '0')}`;
+
+      // If this appointment has "any" team member, replace with actual team member (internally)
+      if (appt.teamMemberId === 'any' && slotToTeamMember[selectedTime]) {
+        const teamMemberId = slotToTeamMember[selectedTime];
+        const member = teamMemberInfo[teamMemberId];
+        const teamMemberName = member
+          ? `${member.first_name} ${member.last_name || ''}`.trim()
+          : 'Professional';
+
+        return {
+          ...appt,
+          startTime,
+          endTime,
+          teamMemberId, // Replace "any" with actual team member ID
+          teamMemberName, // Keep name for internal use (confirmation email, etc.)
+        };
+      }
 
       return {
         ...appt,
@@ -260,20 +322,10 @@ export function DateTimeSelection({
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2">
-          Choose when you&apos;d like your appointment
+          Select Date & Time
         </h2>
-        <p className="text-sm text-gray-500">
-          Bookings available from{' '}
-          {new Date(dateRange.start + 'T00:00:00').toLocaleDateString('en-AU', {
-            day: 'numeric',
-            month: 'short',
-          })}{' '}
-          to{' '}
-          {new Date(dateRange.end + 'T00:00:00').toLocaleDateString('en-AU', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-          })}
+        <p className="text-gray-600">
+          Choose when you&apos;d like your appointment
         </p>
       </div>
 
@@ -316,12 +368,12 @@ export function DateTimeSelection({
             </button>
           </div>
 
-          {/* Weekday Headers */}
+          {/* Day Headers */}
           <div className="grid grid-cols-7 gap-1 mb-2">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
               <div
                 key={day}
-                className="text-center text-sm font-medium text-gray-500 py-2"
+                className="text-center text-xs font-medium text-gray-500 py-2"
               >
                 {day}
               </div>
@@ -330,61 +382,65 @@ export function DateTimeSelection({
 
           {/* Calendar Grid */}
           <div className="grid grid-cols-7 gap-1">
-            {days.map((date, idx) => {
+            {days.map((date, index) => {
               const dateStr = formatLocalDate(date);
               const isCurrentMonth =
                 date.getMonth() === currentMonth.getMonth();
-              const isToday = dateStr === formatLocalDate(today);
-              const isSelected = dateStr === selectedDate;
               const isPast = date < today;
+              const isSelected = selectedDate === dateStr;
               const isWithinWindow = isWithinBookableWindow(date);
-
-              // Check availability from fetched data
-              const hasAvailability = dayAvailability[dateStr] === true;
-              const isBookable =
-                isWithinWindow && !isPast && isDateBookable(date);
-              const isDisabled =
-                !isCurrentMonth ||
-                isPast ||
-                !isWithinWindow ||
-                !hasAvailability ||
-                !isBookable;
+              const hasAvailability = dayAvailability[dateStr];
+              const isAvailable =
+                isWithinWindow && !isPast && hasAvailability !== false;
 
               return (
                 <button
-                  key={idx}
-                  onClick={() => !isDisabled && handleDateSelect(date)}
-                  disabled={isDisabled}
+                  key={index}
+                  onClick={() => isAvailable && handleDateSelect(date)}
+                  disabled={!isAvailable || checkingAvailability}
                   className={`
-                    relative aspect-square flex items-center justify-center text-sm rounded-lg transition-all
+                    aspect-square p-2 rounded-lg text-sm font-medium
+                    transition-colors relative
                     ${!isCurrentMonth ? 'text-gray-300' : ''}
-                    ${isSelected ? 'bg-[#6C5CE7] text-white font-semibold' : ''}
+                    ${isPast ? 'text-gray-300 cursor-not-allowed' : ''}
                     ${
-                      isToday && !isSelected
-                        ? 'border-2 border-[#6C5CE7] text-[#6C5CE7] font-semibold'
-                        : ''
-                    }
-                    ${
-                      isDisabled && isCurrentMonth
+                      !isWithinWindow && !isPast
                         ? 'text-gray-300 cursor-not-allowed'
                         : ''
                     }
                     ${
-                      !isDisabled && !isSelected
-                        ? 'hover:bg-gray-100 text-gray-700 cursor-pointer'
+                      isAvailable && !isSelected
+                        ? 'text-gray-900 hover:bg-gray-100'
+                        : ''
+                    }
+                    ${
+                      isSelected
+                        ? 'bg-[#6C5CE7] text-white hover:bg-[#5b4bc4]'
+                        : ''
+                    }
+                    ${
+                      hasAvailability === false && isWithinWindow && !isPast
+                        ? 'text-gray-400 cursor-not-allowed'
                         : ''
                     }
                   `}
                 >
                   {date.getDate()}
+                  {/* Availability indicator */}
+                  {isWithinWindow &&
+                    !isPast &&
+                    hasAvailability === true &&
+                    !isSelected && (
+                      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 bg-green-500 rounded-full" />
+                    )}
                 </button>
               );
             })}
           </div>
 
-          {/* Loading indicator */}
           {checkingAvailability && (
-            <div className="mt-4 text-center text-sm text-gray-500">
+            <div className="flex items-center justify-center gap-2 mt-4 text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
               Checking availability...
             </div>
           )}
@@ -392,35 +448,43 @@ export function DateTimeSelection({
 
         {/* Time Slots */}
         <div className="border border-gray-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <Clock className="h-5 w-5 text-gray-400" />
-            <h3 className="font-semibold text-gray-900">Available Times</h3>
-          </div>
+          <h3 className="font-semibold text-gray-900 mb-4">
+            {selectedDate
+              ? new Date(selectedDate + 'T00:00:00').toLocaleDateString(
+                  'en-AU',
+                  {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                  }
+                )
+              : 'Select a date'}
+          </h3>
 
           {!selectedDate ? (
             <p className="text-gray-500 text-center py-8">
-              Please select a date first
+              Please select a date to see available times
             </p>
           ) : loading ? (
-            <div className="text-center py-8">
-              <div className="animate-spin h-8 w-8 border-4 border-[#6C5CE7] border-t-transparent rounded-full mx-auto"></div>
-              <p className="text-gray-500 mt-2">Loading available times...</p>
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-[#6C5CE7]" />
             </div>
           ) : availableSlots.length === 0 ? (
             <p className="text-gray-500 text-center py-8">
               No available times on this date
             </p>
           ) : (
-            <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
-              {availableSlots.map((slot) => {
-                const isSelected = Object.values(selectedTimes).includes(slot);
+            <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+              {availableSlots.map((time) => {
+                const isSelected = Object.values(selectedTimes).includes(time);
 
                 return (
                   <button
-                    key={slot}
-                    onClick={() => handleTimeSelect(slot)}
+                    key={time}
+                    onClick={() => handleTimeSelect(time)}
                     className={`
-                      py-2 px-3 text-sm font-medium rounded-lg border transition-colors
+                      py-2 px-3 rounded-lg text-sm font-medium
+                      transition-colors border
                       ${
                         isSelected
                           ? 'bg-[#6C5CE7] text-white border-[#6C5CE7]'
@@ -428,7 +492,7 @@ export function DateTimeSelection({
                       }
                     `}
                   >
-                    {slot}
+                    {formatTime(time)}
                   </button>
                 );
               })}
@@ -437,40 +501,56 @@ export function DateTimeSelection({
         </div>
       </div>
 
-      {/* Selected Summary */}
-      {selectedDate && Object.keys(selectedTimes).length > 0 && (
-        <div className="bg-gray-50 rounded-lg p-4">
-          <p className="text-sm text-gray-600">
-            Selected:{' '}
-            <span className="font-medium text-gray-900">
-              {new Date(selectedDate + 'T00:00:00').toLocaleDateString(
-                'en-AU',
-                {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                }
-              )}{' '}
-              at {Object.values(selectedTimes)[0]}
-            </span>
-          </p>
+      {/* Selected Services Summary */}
+      <div className="border border-gray-200 rounded-xl p-4">
+        <h3 className="font-semibold text-gray-900 mb-3">Your Services</h3>
+        <div className="space-y-2">
+          {appointments.map((appt) => (
+            <div
+              key={appt.serviceId}
+              className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0"
+            >
+              <div className="flex items-center gap-3">
+                <Clock className="h-4 w-4 text-gray-400" />
+                <div>
+                  <p className="font-medium text-gray-900">
+                    {appt.serviceName}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {appt.durationMinutes} min
+                    {selectedTimes[appt.serviceId] && (
+                      <span className="ml-2 text-[#6C5CE7]">
+                        at {formatTime(selectedTimes[appt.serviceId])}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <span className="font-medium text-gray-900">${appt.price}</span>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3 pt-4">
+      <div className="flex gap-4">
         <button
-          type="button"
           onClick={onBack}
-          className="px-6 py-3 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+          className="flex-1 py-3 border border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         >
           Back
         </button>
         <button
           onClick={handleContinue}
           disabled={!canContinue}
-          className="flex-1 bg-[#6C5CE7] text-white py-3 rounded-lg font-medium hover:bg-[#5b4bc4] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`
+            flex-1 py-3 rounded-lg font-medium transition-colors
+            ${
+              canContinue
+                ? 'bg-[#6C5CE7] text-white hover:bg-[#5b4bc4]'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }
+          `}
         >
           Continue
         </button>

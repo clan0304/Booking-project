@@ -13,7 +13,6 @@ import {
 } from '@/lib/shift-helpers';
 import type {
   CalendarBooking,
-  CalendarTeamMember,
   AppointmentWithBooking,
   AppointmentsByMemberAndDate,
   WeekDay,
@@ -23,6 +22,8 @@ import { EditAppointmentModal } from './appointment/edit-appointment-modal';
 import Image from 'next/image';
 import { getBookingByAppointmentId } from '@/app/actions/calendar-appointments';
 import type { BookingGroupWithAppointments } from '@/types/calendar';
+import { BookingHoldBlock } from './booking-hold-block';
+import type { BookingHold } from './calendar-client';
 
 interface WeekViewProps {
   weekStart: string;
@@ -46,6 +47,7 @@ interface WeekViewProps {
     photo_url: string | null;
   }>;
   blockedTimes: BlockedTime[];
+  bookingHolds: BookingHold[];
   venueId: string;
   onRefresh: () => void;
 }
@@ -56,6 +58,7 @@ export function WeekView({
   shifts,
   assignedTeamMembers,
   blockedTimes,
+  bookingHolds,
   venueId,
   onRefresh,
 }: WeekViewProps) {
@@ -120,12 +123,10 @@ export function WeekView({
   // Group appointments by team member and date
   const appointmentsByMemberAndDate =
     useMemo((): AppointmentsByMemberAndDate[] => {
-      const grouped = new Map<
+      // First, create a map of appointments by team member ID and date
+      const appointmentsMap = new Map<
         string,
-        {
-          member: CalendarTeamMember;
-          appointmentsByDate: Map<string, AppointmentWithBooking[]>;
-        }
+        Map<string, AppointmentWithBooking[]>
       >();
 
       bookings.forEach((booking) => {
@@ -133,40 +134,50 @@ export function WeekView({
 
         booking.appointments?.forEach((appointment) => {
           const memberId = appointment.team_member_id;
-          const member = appointment.team_member;
 
-          if (!member) return;
-
-          if (!grouped.has(memberId)) {
-            grouped.set(memberId, {
-              member,
-              appointmentsByDate: new Map(),
-            });
+          if (!appointmentsMap.has(memberId)) {
+            appointmentsMap.set(memberId, new Map());
           }
 
-          const memberData = grouped.get(memberId)!;
-          if (!memberData.appointmentsByDate.has(bookingDate)) {
-            memberData.appointmentsByDate.set(bookingDate, []);
+          const memberMap = appointmentsMap.get(memberId)!;
+          if (!memberMap.has(bookingDate)) {
+            memberMap.set(bookingDate, []);
           }
 
-          memberData.appointmentsByDate.get(bookingDate)!.push({
+          memberMap.get(bookingDate)!.push({
             ...appointment,
             booking,
           });
         });
       });
 
-      // Add team members from assignedTeamMembers who don't have bookings
-      assignedTeamMembers.forEach((member) => {
-        if (!grouped.has(member.id)) {
-          grouped.set(member.id, {
-            member,
-            appointmentsByDate: new Map(),
-          });
+      // ✅ Use assignedTeamMembers as the source of truth for ordering
+      // This preserves the custom display_order from the database
+      const result: AppointmentsByMemberAndDate[] = assignedTeamMembers.map(
+        (member) => ({
+          member,
+          appointmentsByDate: appointmentsMap.get(member.id) || new Map(),
+        })
+      );
+
+      // Handle edge case: appointments for team members not in assignedTeamMembers
+      appointmentsMap.forEach((appointmentsByDate, memberId) => {
+        const alreadyIncluded = result.some((r) => r.member.id === memberId);
+        if (!alreadyIncluded) {
+          // Try to get member info from first appointment
+          const firstDateAppointments = Array.from(
+            appointmentsByDate.values()
+          )[0];
+          if (firstDateAppointments && firstDateAppointments[0]?.team_member) {
+            result.push({
+              member: firstDateAppointments[0].team_member,
+              appointmentsByDate,
+            });
+          }
         }
       });
 
-      return Array.from(grouped.values());
+      return result;
     }, [bookings, assignedTeamMembers]);
 
   // Group blocked times by team member and date
@@ -184,6 +195,38 @@ export function WeekView({
     });
     return grouped;
   }, [blockedTimes]);
+
+  // =====================================================
+  // Group booking holds by team member and date
+  // =====================================================
+  const holdsByMemberAndDate = useMemo(() => {
+    const grouped = new Map<string, Map<string, BookingHold[]>>();
+
+    bookingHolds.forEach((hold) => {
+      if (!grouped.has(hold.team_member_id)) {
+        grouped.set(hold.team_member_id, new Map());
+      }
+      const memberMap = grouped.get(hold.team_member_id)!;
+      if (!memberMap.has(hold.hold_date)) {
+        memberMap.set(hold.hold_date, []);
+      }
+      memberMap.get(hold.hold_date)!.push(hold);
+    });
+
+    return grouped;
+  }, [bookingHolds]);
+
+  // =====================================================
+  // Helper to get holds for a member on a specific date
+  // =====================================================
+  const getHoldsForMemberAndDate = (
+    memberId: string,
+    date: string
+  ): BookingHold[] => {
+    const memberMap = holdsByMemberAndDate.get(memberId);
+    if (!memberMap) return [];
+    return memberMap.get(date) || [];
+  };
 
   const formatTime12Hour = (time: string): string => {
     const [hour, min] = time.split(':');
@@ -210,6 +253,23 @@ export function WeekView({
     const height = ((endMinutes - startMinutes) / 15) * 20;
 
     return { top, height };
+  };
+
+  // =====================================================
+  // Helper function for hold positioning
+  // =====================================================
+  const getHoldStyle = (hold: BookingHold): { top: number; height: number } => {
+    const [startHour, startMin] = hold.start_time.split(':').map(Number);
+    const [endHour, endMin] = hold.end_time.split(':').map(Number);
+
+    const startMinutes = startHour * 60 + startMin;
+    const endMinutes = endHour * 60 + endMin;
+
+    const baseMinutes = 0; // 12 AM (midnight)
+    const top = ((startMinutes - baseMinutes) / 15) * 20; // 20px per 15min slot
+    const height = ((endMinutes - startMinutes) / 15) * 20;
+
+    return { top, height: Math.max(height, 40) }; // Minimum 40px height
   };
 
   // Handle empty slot click
@@ -476,6 +536,14 @@ export function WeekView({
                               const dayBlockedTimes =
                                 memberBlockedTimes.get(day.date) || [];
 
+                              // =====================================================
+                              // Get holds for this day
+                              // =====================================================
+                              const dayHolds = getHoldsForMemberAndDate(
+                                member.id,
+                                day.date
+                              );
+
                               // Check if time is blocked
                               const isBlocked = isTimeBlocked(
                                 time,
@@ -494,8 +562,21 @@ export function WeekView({
                                 }
                               );
 
-                              // Determine if slot is clickable (not booked, not blocked)
-                              const isClickable = !hasAppointment && !isBlocked;
+                              // =====================================================
+                              // Check if time has a booking hold
+                              // =====================================================
+                              const hasHold = dayHolds.some((hold) => {
+                                const holdStart = hold.start_time.substring(
+                                  0,
+                                  5
+                                );
+                                const holdEnd = hold.end_time.substring(0, 5);
+                                return time >= holdStart && time < holdEnd;
+                              });
+
+                              // Determine if slot is clickable (not booked, not blocked, not held)
+                              const isClickable =
+                                !hasAppointment && !isBlocked && !hasHold;
 
                               // Determine background color based on state
                               let bgColorClass = '';
@@ -513,6 +594,11 @@ export function WeekView({
                                 bgColorClass = 'bg-gray-400';
                                 cursorClass = 'cursor-not-allowed';
                                 titleText = 'Time blocked';
+                              } else if (hasHold) {
+                                // Has shift but held = light blue, not clickable
+                                bgColorClass = 'bg-sky-100';
+                                cursorClass = 'cursor-not-allowed';
+                                titleText = 'Online booking in progress';
                               } else if (hasAppointment) {
                                 // Has shift with appointment = gray, not clickable
                                 bgColorClass = 'bg-gray-200';
@@ -560,7 +646,7 @@ export function WeekView({
                         );
                       })}
 
-                      {/* Appointments & Blocked Times Overlay */}
+                      {/* Appointments, Blocked Times & Holds Overlay */}
                       <div className="absolute inset-0 pointer-events-none">
                         <div
                           className="relative h-full grid"
@@ -576,6 +662,13 @@ export function WeekView({
                             );
                             const dayBlockedTimes =
                               memberBlockedTimes.get(day.date) || [];
+                            // =====================================================
+                            // Get holds for this day
+                            // =====================================================
+                            const dayHolds = getHoldsForMemberAndDate(
+                              member.id,
+                              day.date
+                            );
 
                             return (
                               <div key={day.date} className="relative">
@@ -654,6 +747,21 @@ export function WeekView({
                                     );
                                   }
                                 )}
+
+                                {/* =====================================================
+                                    Booking Holds
+                                    ===================================================== */}
+                                {dayHolds.map((hold) => {
+                                  const { top, height } = getHoldStyle(hold);
+                                  return (
+                                    <BookingHoldBlock
+                                      key={hold.id}
+                                      hold={hold}
+                                      topPosition={top}
+                                      height={height}
+                                    />
+                                  );
+                                })}
                               </div>
                             );
                           })}

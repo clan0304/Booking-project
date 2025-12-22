@@ -1421,7 +1421,6 @@ export async function getCalendarBookings(filters: {
       );
     }
 
-    // Fetch ALL team members assigned to the venue (regardless of shifts)
     let assignedTeamMembers: AssignedTeamMember[] = [];
     if (filters.venueId) {
       const { data: assignments, error: assignError } = await supabaseAdmin
@@ -1429,6 +1428,7 @@ export async function getCalendarBookings(filters: {
         .select(
           `
           team_member_id,
+          display_order,
           users!team_member_venues_team_member_id_fkey (
             id,
             first_name,
@@ -1438,7 +1438,8 @@ export async function getCalendarBookings(filters: {
         `
         )
         .eq('venue_id', filters.venueId)
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .order('display_order', { ascending: true }); // ✅ Order by display_order
 
       if (assignError) {
         console.error('Error fetching assigned team members:', assignError);

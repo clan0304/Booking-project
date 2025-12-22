@@ -343,15 +343,7 @@ export function AppointmentCard({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-        >
-          {isHovered && !isInteracting && (
-            <div className="flex gap-1">
-              <div className="w-1 h-1 rounded-full bg-purple-600" />
-              <div className="w-1 h-1 rounded-full bg-purple-600" />
-              <div className="w-1 h-1 rounded-full bg-purple-600" />
-            </div>
-          )}
-        </div>
+        ></div>
 
         {/* MAIN APPOINTMENT CARD BODY (DRAGGABLE) */}
         <div
@@ -435,15 +427,7 @@ export function AppointmentCard({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-        >
-          {isHovered && !isInteracting && (
-            <div className="flex gap-1">
-              <div className="w-1 h-1 rounded-full bg-purple-600" />
-              <div className="w-1 h-1 rounded-full bg-purple-600" />
-              <div className="w-1 h-1 rounded-full bg-purple-600" />
-            </div>
-          )}
-        </div>
+        ></div>
 
         {/* Active interaction indicators */}
         {interactionMode === 'resize-top' && (

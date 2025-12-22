@@ -1334,17 +1334,18 @@ export function EditAppointmentModal({
                 ) : (
                   'Delete'
                 )}
-
-                <SaleDetailsModal
-                  isOpen={showSaleModal}
-                  onClose={() => setShowSaleModal(false)}
-                  booking={booking}
-                />
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ✅ Sale Details Modal - Correctly placed at root level */}
+      <SaleDetailsModal
+        isOpen={showSaleModal}
+        onClose={() => setShowSaleModal(false)}
+        booking={booking}
+      />
     </>
   );
 }
