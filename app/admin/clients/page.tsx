@@ -2,6 +2,7 @@
 import { requireAdmin } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { ClientListClient } from '@/components/admin/clients';
+import { PageWrapper } from '@/components/admin';
 
 export default async function ClientsPage() {
   await requireAdmin();
@@ -46,5 +47,9 @@ export default async function ClientsPage() {
     })
   );
 
-  return <ClientListClient initialClients={clientsWithNoteCounts} />;
+  return (
+    <PageWrapper>
+      <ClientListClient initialClients={clientsWithNoteCounts} />
+    </PageWrapper>
+  );
 }

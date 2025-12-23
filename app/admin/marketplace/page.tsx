@@ -2,6 +2,7 @@
 import { requireAdmin } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { MarketplaceClient } from '@/components/admin/marketplace/marketplace-client';
+import { PageWrapper } from '@/components/admin';
 import type { Venue } from '@/types/database';
 
 export default async function MarketplacePage() {
@@ -17,5 +18,9 @@ export default async function MarketplacePage() {
     console.error('Error fetching venues:', error);
   }
 
-  return <MarketplaceClient initialVenues={(venues as Venue[]) || []} />;
+  return (
+    <PageWrapper>
+      <MarketplaceClient initialVenues={(venues as Venue[]) || []} />
+    </PageWrapper>
+  );
 }

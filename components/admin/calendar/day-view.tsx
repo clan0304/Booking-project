@@ -798,16 +798,6 @@ export function DayView({
     return { top, height: Math.max(height, 40) };
   };
 
-  // Format time label
-  const formatTimeLabel = (time: string): string => {
-    const [hour] = time.split(':');
-    const hourNum = parseInt(hour);
-    if (hourNum === 0) return '12am';
-    if (hourNum === 12) return '12pm';
-    if (hourNum > 12) return `${hourNum - 12}pm`;
-    return `${hourNum}am`;
-  };
-
   return (
     <>
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -828,22 +818,19 @@ export function DayView({
             >
               {/* Team Member Headers */}
               <div className="flex border-b border-gray-200 bg-gray-50">
-                <div className="flex-shrink-0 w-16" />
+                <div className="flex-shrink-0 w-14" />
 
                 {appointmentsByMember.map(({ member }) => (
                   <div
                     key={member.id}
-                    className={`border-r border-gray-200 p-4 transition-colors ${
-                      highlightedTeamMemberId === member.id
-                        ? 'bg-purple-100 ring-2 ring-inset ring-purple-400'
-                        : ''
-                    }`}
+                    className="border-r border-gray-200 py-3 px-2"
                     style={{
                       width: useFixedWidth ? '200px' : columnWidth,
                       minWidth: useFixedWidth ? '200px' : 'auto',
                     }}
                   >
-                    <div className="flex flex-col items-center gap-3">
+                    <div className="flex flex-col items-center gap-2">
+                      {/* Photo - Smaller */}
                       <div className="flex-shrink-0">
                         {member.photo_url ? (
                           <Image
@@ -852,10 +839,11 @@ export function DayView({
                             width={48}
                             height={48}
                             className="rounded-full object-cover"
+                            style={{ width: '48px', height: '48px' }}
                           />
                         ) : (
-                          <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
-                            <span className="text-purple-600 font-semibold">
+                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center">
+                            <span className="text-sm font-semibold text-white">
                               {member.first_name[0]}
                               {member.last_name[0]}
                             </span>
@@ -863,11 +851,10 @@ export function DayView({
                         )}
                       </div>
 
-                      <div className="text-center min-w-0">
-                        <h3 className="font-semibold text-sm text-gray-900 truncate">
-                          {member.first_name} {member.last_name}
-                        </h3>
-                      </div>
+                      {/* Name */}
+                      <p className="text-sm font-semibold text-gray-900 truncate text-center w-full px-1">
+                        {member.first_name} {member.last_name}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -876,21 +863,32 @@ export function DayView({
               {/* Time Grid */}
               <div className="flex">
                 {/* Time Labels Column */}
-                <div className="flex-shrink-0 w-16 bg-gray-50 border-r border-gray-200">
+                <div className="flex-shrink-0 w-14 border-r border-gray-200 bg-gray-50">
                   {timeSlots.map((time) => {
                     const isHourMark = time.endsWith(':00');
                     const showLabel = hourLabels.includes(time);
+                    const hour = parseInt(time.split(':')[0]);
+                    const isPM = hour >= 12;
+                    const displayHour =
+                      hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
 
                     return (
                       <div
                         key={time}
-                        className={`h-5 px-2 text-xs text-right ${
-                          showLabel
-                            ? 'text-gray-600 font-medium'
-                            : 'text-transparent'
-                        } ${isHourMark ? 'border-t-2 border-t-gray-300' : ''}`}
+                        className={`h-5 flex items-start justify-end pr-2 ${
+                          isHourMark ? 'border-t border-gray-200' : ''
+                        }`}
                       >
-                        {showLabel ? formatTimeLabel(time) : '·'}
+                        {showLabel && (
+                          <div className="flex flex-col items-end leading-none -mt-0.5">
+                            <span className="text-xs font-medium text-gray-700">
+                              {displayHour}:00
+                            </span>
+                            <span className="text-[10px] text-gray-400">
+                              {isPM ? 'pm' : 'am'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

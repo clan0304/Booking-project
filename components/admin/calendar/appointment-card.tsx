@@ -66,6 +66,12 @@ export function AppointmentCard({
     ? COMPLETED_COLOR
     : appointment.category_color || DEFAULT_COLOR;
 
+  // Determine layout based on duration
+  const duration = appointment.duration_minutes;
+  const isVeryShort = duration <= 15; // 15min - single row
+  const isShort = duration <= 30; // 30min or less - compact layout
+  const isMedium = duration <= 45; // 45min - medium layout
+
   // Ensure component is mounted (for portal)
   useEffect(() => {
     setMounted(true);
@@ -321,6 +327,81 @@ export function AppointmentCard({
   );
 
   // ============================================
+  // RENDER CONTENT BASED ON HEIGHT
+  // ============================================
+
+  const renderContent = () => {
+    // Very short (15min) - single row: "10:00 · John"
+    if (isVeryShort || compact) {
+      return (
+        <div className="h-full flex items-center p-1 overflow-hidden">
+          <p className="text-[10px] text-white truncate leading-tight">
+            <span className="font-medium">{startTime}</span>
+            <span className="mx-1">·</span>
+            <span className="font-bold">{clientName || 'Walk-in'}</span>
+          </p>
+        </div>
+      );
+    }
+
+    // Short (30min) - two rows: "10:00-10:30 · John" + "Service"
+    if (isShort) {
+      return (
+        <div className="h-full flex flex-col justify-center p-1.5 overflow-hidden">
+          <p className="text-[11px] text-white truncate leading-tight">
+            <span className="font-medium">{timeRange}</span>
+            <span className="mx-1">·</span>
+            <span className="font-bold">{clientName || 'Walk-in'}</span>
+          </p>
+          <p className="text-[10px] text-white/80 truncate leading-tight mt-0.5">
+            {appointment.service_name}
+          </p>
+        </div>
+      );
+    }
+
+    // Medium (45min) - three rows with time range on first row
+    if (isMedium) {
+      return (
+        <div className="h-full flex flex-col p-1.5 overflow-hidden">
+          <p className="text-[11px] text-white/90 truncate leading-tight">
+            {timeRange}
+          </p>
+          <p className="text-xs font-bold text-white truncate leading-tight mt-0.5">
+            {clientName || 'Walk-in'}
+          </p>
+          <p className="text-[10px] text-white/80 truncate leading-tight mt-0.5">
+            {appointment.service_name}
+          </p>
+        </div>
+      );
+    }
+
+    // Long (60min+) - full layout with more spacing
+    return (
+      <div className="h-full flex flex-col p-1.5 overflow-hidden">
+        <p className="text-xs text-white/90 truncate leading-tight">
+          {timeRange}
+        </p>
+        <p className="text-xs font-bold text-white truncate leading-tight mt-1">
+          {clientName || 'Walk-in'}
+        </p>
+        <p className="text-[11px] text-white/80 truncate leading-tight mt-1">
+          {appointment.service_name}
+        </p>
+        {/* Status badge for longer cards */}
+        {!isInteracting && appointment.status !== 'confirmed' && (
+          <div className="mt-auto pt-1">
+            <span className="inline-block px-1.5 py-0.5 text-[9px] font-medium rounded-full bg-white/30 truncate">
+              {appointment.status}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================
   // RENDER
   // ============================================
 
@@ -375,25 +456,8 @@ export function AppointmentCard({
           onPointerDown={handleTopPointerDown}
         />
 
-        {/* Content */}
-        <div className="h-full flex flex-col p-1.5 overflow-hidden">
-          {/* Time */}
-          <p className="text-xs text-white/90 truncate leading-tight">
-            {startTime}
-          </p>
-
-          {/* Client name (bold) or Walk-in */}
-          <p className="text-xs font-bold text-white truncate leading-tight mt-0.5">
-            {clientName || 'Walk-in'}
-          </p>
-
-          {/* Service name */}
-          {!compact && (
-            <p className="text-xs text-white/80 truncate leading-tight mt-0.5">
-              {appointment.service_name}
-            </p>
-          )}
-        </div>
+        {/* Content - Height responsive */}
+        {renderContent()}
 
         {/* Bottom resize handle */}
         <div

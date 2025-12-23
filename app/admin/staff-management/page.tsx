@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { currentUser } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { StaffManagementClient } from '@/components/admin/staff-management';
+import { PageWrapper } from '@/components/admin';
 
 // =====================================================
 // PAGE COMPONENT
@@ -56,14 +57,16 @@ export default async function StaffManagementPage() {
     }));
 
   return (
-    <StaffManagementClient
-      currentUser={{
-        id: user.id,
-        isAdmin,
-        isTeamMember,
-      }}
-      teamMembers={teamMembers}
-      venues={venues || []}
-    />
+    <PageWrapper>
+      <StaffManagementClient
+        currentUser={{
+          id: user.id,
+          isAdmin,
+          isTeamMember,
+        }}
+        teamMembers={teamMembers}
+        venues={venues || []}
+      />
+    </PageWrapper>
   );
 }

@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/auth';
 import { getServices, getCategories } from '@/app/actions/services';
 import { getServiceGroups } from '@/app/actions/service-groups';
 import { ServiceListClient } from '@/components/admin/services';
+import { PageWrapper } from '@/components/admin';
 
 // ✅ Force dynamic rendering - always fetch fresh data
 export const dynamic = 'force-dynamic';
@@ -18,10 +19,12 @@ export default async function ServicesPage() {
   ]);
 
   return (
-    <ServiceListClient
-      initialServices={services}
-      initialCategories={categories}
-      initialServiceGroups={serviceGroups}
-    />
+    <PageWrapper>
+      <ServiceListClient
+        initialServices={services}
+        initialCategories={categories}
+        initialServiceGroups={serviceGroups}
+      />
+    </PageWrapper>
   );
 }

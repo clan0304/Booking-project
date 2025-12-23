@@ -1,11 +1,10 @@
 // components/admin/calendar/calendar-client.tsx
 // =====================================================
-// UPDATED WITH BOOKING HOLDS INTEGRATION
+// UPDATED WITH BOOKING HOLDS INTEGRATION + FULL-WIDTH LAYOUT
 // =====================================================
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { PageHeader } from '@/components/admin';
 import { CalendarFilters } from './calendar-filters';
 import { DayView } from './day-view';
 import { WeekView } from './week-view';
@@ -315,31 +314,40 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
   }, [bookingHolds, selectedTeamMemberIds]);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Calendar"
-        description="Manage appointments and schedules"
-      />
+    <div className="bg-white min-h-[calc(100vh-64px)]">
+      {/* Header with Title and Filters */}
+      <div className="border-b border-gray-200 sticky top-0 bg-white z-20">
+        {/* Title Row */}
+        <div className="px-6 pt-4 pb-3">
+          <h1 className="text-2xl font-bold text-gray-900">Calendar</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Manage appointments and schedules
+          </p>
+        </div>
 
-      <CalendarFilters
-        venues={initialVenues}
-        viewType={viewType}
-        onViewTypeChange={setViewType}
-        selectedVenue={selectedVenue}
-        onVenueChange={setSelectedVenue}
-        currentDate={currentDate}
-        onDateChange={setCurrentDate}
-        currentWeekStart={currentWeekStart}
-        onWeekChange={setCurrentWeekStart}
-        teamFilterMode={teamFilterMode}
-        onTeamFilterModeChange={setTeamFilterMode}
-        allAssignedTeamMembers={assignedTeamMembers}
-        assignedTeamMembers={filteredAssignedTeamMembers}
-        scheduledTeamMemberIds={scheduledTeamMemberIds}
-        selectedTeamMemberIds={selectedTeamMemberIds}
-        onTeamOrderChange={fetchData}
-        onTeamMemberIdsChange={setSelectedTeamMemberIds}
-      />
+        {/* Filters Row */}
+        <div className="px-6 pb-3">
+          <CalendarFilters
+            venues={initialVenues}
+            viewType={viewType}
+            onViewTypeChange={setViewType}
+            selectedVenue={selectedVenue}
+            onVenueChange={setSelectedVenue}
+            currentDate={currentDate}
+            onDateChange={setCurrentDate}
+            currentWeekStart={currentWeekStart}
+            onWeekChange={setCurrentWeekStart}
+            teamFilterMode={teamFilterMode}
+            onTeamFilterModeChange={setTeamFilterMode}
+            allAssignedTeamMembers={assignedTeamMembers}
+            assignedTeamMembers={filteredAssignedTeamMembers}
+            scheduledTeamMemberIds={scheduledTeamMemberIds}
+            selectedTeamMemberIds={selectedTeamMemberIds}
+            onTeamOrderChange={fetchData}
+            onTeamMemberIdsChange={setSelectedTeamMemberIds}
+          />
+        </div>
+      </div>
 
       {/* Subtle loading indicator (doesn't block view) */}
       {loading && (
@@ -351,16 +359,17 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
         </div>
       )}
 
+      {/* Full-width Calendar Grid */}
       <div>
         {!selectedVenue ? (
-          <div className="flex items-center justify-center h-96 border-2 border-dashed border-gray-200 rounded-lg">
-            <p className="text-gray-600">
+          <div className="flex items-center justify-center h-96 bg-gray-50">
+            <p className="text-gray-500">
               Please select a venue to view the calendar
             </p>
           </div>
         ) : selectedTeamMemberIds.length === 0 ? (
-          <div className="flex items-center justify-center h-96 border-2 border-dashed border-gray-200 rounded-lg">
-            <p className="text-gray-600">
+          <div className="flex items-center justify-center h-96 bg-gray-50">
+            <p className="text-gray-500">
               No team members scheduled for this{' '}
               {viewType === 'day' ? 'day' : 'week'}
             </p>

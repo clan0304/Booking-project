@@ -12,10 +12,8 @@ export function AdminLayout({ children }: AdminLayoutProps) {
       <AdminSidebar />
       <AdminNavbar />
 
-      {/* Main Content */}
-      <main className="ml-20 pt-16">
-        <div className="mx-auto max-w-7xl px-6 py-8">{children}</div>
-      </main>
+      {/* Main Content - No padding, children control their own layout */}
+      <main className="ml-20 pt-16">{children}</main>
     </div>
   );
 }

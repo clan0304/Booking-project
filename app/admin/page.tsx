@@ -2,6 +2,7 @@
 import { requireStaff } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { Calendar, Users, TrendingUp, Clock } from 'lucide-react';
+import { PageWrapper } from '@/components/admin';
 import type { UserRole } from '@/types/database';
 
 export default async function AdminDashboardPage() {
@@ -50,7 +51,7 @@ export default async function AdminDashboardPage() {
   ];
 
   return (
-    <div>
+    <PageWrapper>
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
@@ -139,6 +140,6 @@ export default async function AdminDashboardPage() {
           immediately!
         </p>
       </div>
-    </div>
+    </PageWrapper>
   );
 }

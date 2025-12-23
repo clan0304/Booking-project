@@ -6,6 +6,7 @@ import {
   TeamTabs,
   ScheduledShiftsClient,
 } from '@/components/admin/team';
+import { PageWrapper } from '@/components/admin';
 
 export default async function TeamPage() {
   await requireAdmin();
@@ -58,18 +59,20 @@ export default async function TeamPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Tabs */}
-      <div className="flex-1 overflow-hidden">
-        <TeamTabs
-          teamMembersContent={
-            <TeamListClient initialTeamMembers={transformedTeamMembers} />
-          }
-          scheduledShiftsContent={
-            <ScheduledShiftsClient initialVenues={venues || []} />
-          }
-        />
+    <PageWrapper>
+      <div className="flex flex-col h-full">
+        {/* Tabs */}
+        <div className="flex-1 overflow-hidden">
+          <TeamTabs
+            teamMembersContent={
+              <TeamListClient initialTeamMembers={transformedTeamMembers} />
+            }
+            scheduledShiftsContent={
+              <ScheduledShiftsClient initialVenues={venues || []} />
+            }
+          />
+        </div>
       </div>
-    </div>
+    </PageWrapper>
   );
 }
