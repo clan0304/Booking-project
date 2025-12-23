@@ -12,13 +12,7 @@ import {
 import Image from 'next/image';
 import { getCalendarBookings } from '@/app/actions/bookings';
 import { getBlockedTimes } from '@/app/actions/blocked-times';
-import {
-  getLocalToday,
-  addDays,
-  isTimeInShift,
-  getShiftsForMemberAndDate,
-  isTimeBlocked,
-} from '@/lib/shift-helpers';
+import { getLocalToday, addDays } from '@/lib/shift-helpers';
 import { RebookConfirmModal } from './rebook-confirm-modal';
 import type { CalendarBooking, BlockedTime } from '@/types/calendar';
 
@@ -68,19 +62,6 @@ interface RebookOverlayProps {
     services: RebookService[];
     client: RebookClient;
   }) => Promise<void>;
-}
-
-interface ShiftWithTeamMember {
-  team_member_id: string;
-  shift_date: string;
-  start_time: string;
-  end_time: string;
-  team_member: {
-    id: string;
-    first_name: string;
-    last_name: string;
-    photo_url: string | null;
-  };
 }
 
 interface AssignedTeamMember {
@@ -170,7 +151,6 @@ export function RebookOverlay({
   const [currentDate, setCurrentDate] = useState(getLocalToday());
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState<CalendarBooking[]>([]);
-  const [shifts, setShifts] = useState<ShiftWithTeamMember[]>([]);
   const [assignedTeamMembers, setAssignedTeamMembers] = useState<
     AssignedTeamMember[]
   >([]);
@@ -223,7 +203,6 @@ export function RebookOverlay({
 
         if (bookingsResult.success) {
           setBookings(bookingsResult.data || []);
-          setShifts(bookingsResult.shifts || []);
           setAssignedTeamMembers(bookingsResult.assignedTeamMembers || []);
         }
 
@@ -263,53 +242,6 @@ export function RebookOverlay({
     });
     return grouped;
   }, [blockedTimes]);
-
-  // Group existing appointments by team member
-  const appointmentsByMember = useMemo(() => {
-    const grouped = new Map<string, Array<{ start: number; end: number }>>();
-
-    bookings.forEach((booking) => {
-      booking.appointments?.forEach((apt) => {
-        if (!grouped.has(apt.team_member_id)) {
-          grouped.set(apt.team_member_id, []);
-        }
-        grouped.get(apt.team_member_id)!.push({
-          start: timeToMinutes(apt.start_time),
-          end: timeToMinutes(apt.end_time),
-        });
-      });
-    });
-
-    return grouped;
-  }, [bookings]);
-
-  // Check if a time slot is available
-  const isSlotAvailable = (time: string, memberId: string): boolean => {
-    const memberShifts = getShiftsForMemberAndDate(
-      memberId,
-      currentDate,
-      shifts
-    );
-    const inShift = isTimeInShift(time, memberShifts);
-    if (!inShift) return false;
-
-    const memberBlocked = blockedTimesByMember.get(memberId) || [];
-    if (isTimeBlocked(time, memberBlocked)) return false;
-
-    // Check if there's enough time for all services
-    const slotStart = timeToMinutes(time);
-    const slotEnd = slotStart + totalDuration;
-
-    const memberAppointments = appointmentsByMember.get(memberId) || [];
-    for (const apt of memberAppointments) {
-      // Check for overlap
-      if (slotStart < apt.end && slotEnd > apt.start) {
-        return false;
-      }
-    }
-
-    return true;
-  };
 
   // Navigate dates
   const goToPreviousDay = () => {
@@ -364,8 +296,6 @@ export function RebookOverlay({
 
   // Handle slot click - open confirm modal
   const handleSlotClick = (time: string, member: AssignedTeamMember) => {
-    if (!isSlotAvailable(time, member.id)) return;
-
     const slot: SelectedSlot = {
       teamMemberId: member.id,
       teamMemberName: `${member.first_name} ${member.last_name}`,
@@ -731,6 +661,36 @@ export function RebookOverlay({
                     const isColumnSelected =
                       selectedSlot?.teamMemberId === member.id;
 
+                    // Get existing appointments for this team member
+                    const memberAppointments: Array<{
+                      id: string;
+                      startTime: string;
+                      endTime: string;
+                      serviceName: string;
+                      clientName: string;
+                      categoryColor: string | null;
+                    }> = [];
+
+                    bookings.forEach((booking) => {
+                      booking.appointments?.forEach((apt) => {
+                        if (apt.team_member_id === member.id) {
+                          const clientDisplayName = booking.guest_first_name
+                            ? `${booking.guest_first_name} ${
+                                booking.guest_last_name || ''
+                              }`.trim()
+                            : 'Walk-in';
+                          memberAppointments.push({
+                            id: apt.id,
+                            startTime: apt.start_time,
+                            endTime: apt.end_time,
+                            serviceName: apt.service_name,
+                            clientName: clientDisplayName,
+                            categoryColor: apt.category_color || null,
+                          });
+                        }
+                      });
+                    });
+
                     return (
                       <div
                         key={member.id}
@@ -744,7 +704,6 @@ export function RebookOverlay({
                       >
                         {timeSlots.map((time) => {
                           const isHourMark = time.endsWith(':00');
-                          const available = isSlotAvailable(time, member.id);
                           const isHovered =
                             hoveredSlot?.time === time &&
                             hoveredSlot?.memberId === member.id;
@@ -762,20 +721,17 @@ export function RebookOverlay({
                               } ${
                                 isSelected
                                   ? 'bg-purple-500'
-                                  : available
-                                  ? isHovered
-                                    ? 'bg-purple-100 cursor-pointer'
-                                    : 'bg-white hover:bg-purple-50 cursor-pointer'
-                                  : 'bg-gray-100 cursor-not-allowed'
+                                  : isHovered
+                                  ? 'bg-purple-100 cursor-pointer'
+                                  : 'bg-white hover:bg-purple-50 cursor-pointer'
                               }`}
                               onClick={() => handleSlotClick(time, member)}
                               onMouseEnter={() =>
-                                available &&
                                 setHoveredSlot({ time, memberId: member.id })
                               }
                               onMouseLeave={() => setHoveredSlot(null)}
                             >
-                              {available && isHovered && !isSelected && (
+                              {isHovered && !isSelected && (
                                 <div className="h-full flex items-center justify-center">
                                   <span className="text-xs font-medium text-purple-700">
                                     {formatTime12Hour(time)}
@@ -786,10 +742,86 @@ export function RebookOverlay({
                           );
                         })}
 
+                        {/* Existing Appointments */}
+                        {memberAppointments.map((apt) => {
+                          const startMinutes = timeToMinutes(apt.startTime);
+                          const endMinutes = timeToMinutes(apt.endTime);
+                          const durationMinutes = endMinutes - startMinutes;
+                          const topOffset = ((startMinutes - 6 * 60) / 15) * 20;
+                          const height = (durationMinutes / 15) * 20;
+                          const bgColor = apt.categoryColor || '#8B5CF6';
+
+                          return (
+                            <div
+                              key={apt.id}
+                              className="absolute rounded-lg shadow-sm pointer-events-none z-10 overflow-hidden"
+                              style={{
+                                top: `${topOffset}px`,
+                                height: `${height}px`,
+                                backgroundColor: bgColor,
+                                left: '2.5%',
+                                width: '95%',
+                              }}
+                            >
+                              <div className="p-1.5 text-white text-xs h-full">
+                                <div className="font-medium truncate text-[10px]">
+                                  {formatTime12Hour(apt.startTime)}
+                                </div>
+                                <div className="font-semibold truncate">
+                                  {apt.clientName}
+                                </div>
+                                {height > 40 && (
+                                  <div className="opacity-90 truncate text-[10px]">
+                                    {apt.serviceName}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {/* Blocked Times */}
+                        {(blockedTimesByMember.get(member.id) || []).map(
+                          (blocked) => {
+                            const startMinutes = timeToMinutes(
+                              blocked.start_time
+                            );
+                            const endMinutes = timeToMinutes(blocked.end_time);
+                            const durationMinutes = endMinutes - startMinutes;
+                            const topOffset =
+                              ((startMinutes - 6 * 60) / 15) * 20;
+                            const height = (durationMinutes / 15) * 20;
+
+                            return (
+                              <div
+                                key={blocked.id}
+                                className="absolute rounded-lg pointer-events-none z-10 overflow-hidden bg-gray-300"
+                                style={{
+                                  top: `${topOffset}px`,
+                                  height: `${height}px`,
+                                  left: '2.5%',
+                                  width: '95%',
+                                  backgroundImage:
+                                    'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.3) 4px, rgba(255,255,255,0.3) 8px)',
+                                }}
+                              >
+                                <div className="p-1.5 text-gray-600 text-xs h-full">
+                                  <div className="font-medium truncate text-[10px]">
+                                    {formatTime12Hour(blocked.start_time)}
+                                  </div>
+                                  <div className="font-semibold truncate">
+                                    {blocked.reason || 'Blocked'}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+                        )}
+
                         {/* Selected Slot Preview */}
                         {selectedSlot?.teamMemberId === member.id && (
                           <div
-                            className="absolute left-1 right-1 bg-purple-500 rounded-lg shadow-lg pointer-events-none z-20"
+                            className="absolute bg-purple-500 rounded-lg shadow-lg pointer-events-none z-20"
                             style={{
                               top: `${
                                 ((timeToMinutes(selectedSlot.startTime) -
@@ -798,6 +830,8 @@ export function RebookOverlay({
                                 20
                               }px`,
                               height: `${(totalDuration / 15) * 20}px`,
+                              left: '2.5%',
+                              width: '95%',
                             }}
                           >
                             <div className="p-2 text-white text-xs">

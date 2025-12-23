@@ -1088,11 +1088,7 @@ export function DayView({
                                 zIndex: isInteracting ? 100 : layout.zIndex,
                               }}
                             >
-                              <div
-                                className={`relative h-full w-full transition-all duration-200 ${
-                                  !isInteracting ? 'group-hover:w-[90%]' : ''
-                                }`}
-                              >
+                              <div className="relative h-full w-[98%]">
                                 <div className="h-full w-full pointer-events-auto relative hover:z-[100]">
                                   <AppointmentCard
                                     appointment={{
