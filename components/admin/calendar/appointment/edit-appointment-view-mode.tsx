@@ -57,6 +57,7 @@ export function ViewMode({
   onDeleteAppointment,
   onRebook,
   onClose,
+
   formatDate,
   formatTime,
   getPriceDisplay,

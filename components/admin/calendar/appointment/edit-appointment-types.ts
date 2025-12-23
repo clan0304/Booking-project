@@ -111,8 +111,8 @@ export interface ViewModeProps {
   onEditAppointment: (appointmentId: string) => void; // ✅ NEW: Edit specific appointment
   onDeleteBooking: () => void;
   onDeleteAppointment: (appointmentId: string) => Promise<void>;
+  onRebook: () => void; // ✅ NEW: Trigger rebook flow
   onClose: () => void;
-  onRebook: () => void;
 
   // Helper functions
   formatDate: (dateStr: string) => string;
@@ -157,7 +157,7 @@ export interface EditModeProps {
   ) => Promise<void>;
   onDeleteAppointment: (id: string) => Promise<void>;
   onSaveAll: () => Promise<void>;
-  onDeleteBooking: () => Promise<void>;
+  onDeleteBooking: () => void;
   onShowServicePicker: (appointmentId: string | 'add-new') => void;
   onBack: () => void;
   onClose: () => void;
@@ -170,7 +170,7 @@ export interface EditModeProps {
   setInternalNotes: (notes: string) => void;
 
   // Helpers
-  getTeamMember: (id: string) => TeamMember | undefined;
+  getTeamMember: (teamMemberId: string) => TeamMember | undefined;
   getService: (teamMemberId: string, serviceId: string) => Service | undefined;
   formatTime: (time: string) => string;
   getDurationDisplay: (minutes: number) => string;
@@ -235,9 +235,7 @@ export interface PaymentModeProps {
   // Handlers
   onBack: () => void;
   onClose: () => void;
-
-  // Helpers
-  getPriceDisplay: (price: number) => string;
+  onSuccess: () => void;
 }
 
 // =====================================================

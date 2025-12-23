@@ -15,6 +15,14 @@ import { ViewMode } from './edit-appointment-view-mode';
 import { EditMode } from './edit-appointment-edit-mode';
 import { SingleEditMode } from './edit-appointment-single-mode';
 import { PaymentMode } from './edit-appointment-payment-mode';
+// ✅ NEW: Rebook imports
+import { RebookOverlay } from '../rebook-overlay';
+import type {
+  RebookService,
+  RebookClient,
+  RebookData,
+} from '../rebook-overlay';
+import { createRebooking } from '@/app/actions/rebook';
 import type {
   EditAppointmentModalProps,
   ModalStep,
@@ -59,6 +67,9 @@ export function EditAppointmentModal({
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showSaleModal, setShowSaleModal] = useState(false);
+
+  // ✅ NEW: Rebook state
+  const [showRebookOverlay, setShowRebookOverlay] = useState(false);
 
   // Team members data
   const [availableTeamMembers, setAvailableTeamMembers] = useState<
@@ -272,7 +283,7 @@ export function EditAppointmentModal({
   };
 
   const handleViewSale = () => {
-    console.log('handleViewSale called'); // ← Add this
+    console.log('handleViewSale called');
     setShowSaleModal(true);
   };
 
@@ -783,6 +794,71 @@ export function EditAppointmentModal({
   };
 
   // =====================================================
+  // ✅ NEW: REBOOK HANDLERS
+  // =====================================================
+
+  const handleRebook = () => {
+    setShowMoreMenu(false);
+    setShowRebookOverlay(true);
+  };
+
+  const handleRebookConfirm = async (data: {
+    teamMemberId: string;
+    teamMemberName: string;
+    date: string;
+    startTime: string;
+    services: RebookService[];
+    client: RebookClient;
+  }) => {
+    const result = await createRebooking({
+      venueId: booking.venue_id,
+      teamMemberId: data.teamMemberId,
+      date: data.date,
+      startTime: data.startTime,
+      services: data.services,
+      client: data.client,
+    });
+
+    if (result.success) {
+      setShowRebookOverlay(false);
+      onSuccess();
+      onClose();
+    } else {
+      // Handle error
+      console.error('Rebook failed:', result.error);
+      setError(result.error || 'Failed to create rebooking');
+    }
+  };
+
+  // Build rebook data from current booking
+  const getRebookData = (): RebookData => {
+    const services: RebookService[] = Array.from(editingAppointments.values())
+      .filter((appt) => !pendingDeletions.has(appt.id))
+      .map((appt) => ({
+        serviceId: appt.serviceId,
+        serviceName: appt.serviceName,
+        duration: appt.duration,
+        price: appt.price,
+        categoryColor: appt.categoryColor,
+      }));
+
+    const client: RebookClient = {
+      clientId: booking.client_id,
+      firstName: booking.guest_first_name || '',
+      lastName: booking.guest_last_name,
+      email: booking.guest_email,
+      phone: booking.guest_phone,
+    };
+
+    return {
+      client,
+      services,
+      originalBookingId: booking.id,
+      venueId: booking.venue_id,
+    };
+  };
+
+  // =====================================================
   // SERVICE SELECTION HANDLER
   // =====================================================
 
@@ -1157,6 +1233,7 @@ export function EditAppointmentModal({
             onEditAppointment={handleEditAppointment}
             onDeleteBooking={handleDeleteBooking}
             onDeleteAppointment={handleDeleteAppointment}
+            onRebook={handleRebook}
             onClose={onClose}
             formatDate={formatDate}
             formatTime={formatTime}
@@ -1271,7 +1348,7 @@ export function EditAppointmentModal({
             totalPrice={getTotalPrice()}
             onBack={() => setCurrentStep('view')}
             onClose={onClose}
-            onSuccess={onSuccess} // ← Add this line
+            onSuccess={onSuccess}
           />
         );
 
@@ -1340,12 +1417,22 @@ export function EditAppointmentModal({
         </div>
       )}
 
-      {/* ✅ Sale Details Modal - Correctly placed at root level */}
+      {/* ✅ Sale Details Modal */}
       <SaleDetailsModal
         isOpen={showSaleModal}
         onClose={() => setShowSaleModal(false)}
         booking={booking}
       />
+
+      {/* ✅ NEW: Rebook Overlay */}
+      {showRebookOverlay && (
+        <RebookOverlay
+          isOpen={showRebookOverlay}
+          onClose={() => setShowRebookOverlay(false)}
+          rebookData={getRebookData()}
+          onConfirm={handleRebookConfirm}
+        />
+      )}
     </>
   );
 }
