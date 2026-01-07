@@ -1,3 +1,4 @@
+// components/admin/staff-management/staff-management-client.tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -24,6 +25,7 @@ import {
   DollarSign,
   Calendar,
   FileText,
+  TrendingUp,
 } from 'lucide-react';
 import {
   TimeClockPanel,
@@ -33,6 +35,7 @@ import {
   PayRatesTab,
   PublicHolidaysManager,
   PayrollReportsTab,
+  CommissionReportsTab,
 } from '@/components/admin/staff-management';
 import {
   getActiveShift,
@@ -80,6 +83,7 @@ interface TimeEntry {
   shift_date: string;
   clock_in_time: string;
   clock_out_time: string | null;
+  breaks: Array<{ start: string; end: string | null }>;
   status: 'clocked_in' | 'on_break' | 'completed';
   total_hours: number | null;
   total_paid_hours: number | null;
@@ -184,7 +188,7 @@ export function StaffManagementClient({
       <div>
         <h1 className="text-3xl font-bold">Staff Management</h1>
         <p className="text-muted-foreground mt-1">
-          Manage time tracking, pay rates, and payroll
+          Manage time tracking, pay rates, commission, and payroll
         </p>
       </div>
 
@@ -192,7 +196,7 @@ export function StaffManagementClient({
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList
           className={`grid w-full ${
-            currentUser.isAdmin ? 'grid-cols-4' : 'grid-cols-1'
+            currentUser.isAdmin ? 'grid-cols-5' : 'grid-cols-1'
           }`}
         >
           <TabsTrigger
@@ -215,6 +219,13 @@ export function StaffManagementClient({
               <TabsTrigger value="holidays" className="flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
                 Public Holidays
+              </TabsTrigger>
+              <TabsTrigger
+                value="commission"
+                className="flex items-center gap-2"
+              >
+                <TrendingUp className="h-4 w-4" />
+                Commission
               </TabsTrigger>
               <TabsTrigger value="payroll" className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
@@ -254,16 +265,16 @@ export function StaffManagementClient({
                             <Image
                               src={member.photo_url}
                               alt={member.first_name}
-                              className="w-6 h-6 rounded-full"
-                              width={6}
-                              height={6}
+                              width={24}
+                              height={24}
+                              className="rounded-full object-cover"
                             />
                           ) : (
                             <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
                               {member.first_name[0]}
                             </div>
                           )}
-                          <span className="font-medium">
+                          <span>
                             {member.first_name} {member.last_name || ''}
                           </span>
                         </div>
@@ -275,62 +286,55 @@ export function StaffManagementClient({
             </Card>
           )}
 
-          {/* Show content only if staff member is selected */}
+          {/* Long Running Shifts Alert */}
+          {currentUser.isAdmin && longRunningShifts.length > 0 && (
+            <LongRunningAlert shifts={longRunningShifts} />
+          )}
+
           {!selectedStaffId ? (
-            <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                <User className="h-16 w-16 mx-auto mb-4 opacity-20" />
-                <p className="text-lg font-medium">
-                  Please select a team member to continue
-                </p>
-                <p className="text-sm mt-2">
-                  Choose your name from the dropdown above
+            <Card className="bg-gray-50 border-dashed">
+              <CardContent className="py-12 text-center">
+                <User className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg text-gray-500">
+                  Select a team member to manage their time
                 </p>
               </CardContent>
             </Card>
           ) : loading ? (
-            <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                <Loader2 className="h-16 w-16 mx-auto mb-4 animate-spin" />
-                <p className="text-lg font-medium">Loading shift data...</p>
-              </CardContent>
-            </Card>
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+            </div>
           ) : (
             <>
-              {/* Selected Staff Display */}
+              {/* Selected Staff Info */}
               {selectedStaff && (
-                <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
                   {selectedStaff.photo_url ? (
                     <Image
                       src={selectedStaff.photo_url}
                       alt={selectedStaff.first_name}
-                      className="w-12 h-12 rounded-full"
-                      width={12}
-                      height={12}
+                      width={48}
+                      height={48}
+                      className="rounded-full object-cover"
                     />
                   ) : (
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-lg font-bold">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-xl font-bold">
                       {selectedStaff.first_name[0]}
                     </div>
                   )}
                   <div>
-                    <p className="font-semibold text-lg">
+                    <p className="text-lg font-semibold">
                       {selectedStaff.first_name} {selectedStaff.last_name || ''}
                     </p>
-                    <p className="text-sm text-muted-foreground">
-                      Currently selected for time tracking
+                    <p className="text-sm text-gray-500">
+                      {activeShift ? 'Currently working' : 'Not clocked in'}
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Long Running Shifts Alert (Admin Only) */}
-              {currentUser.isAdmin && longRunningShifts.length > 0 && (
-                <LongRunningAlert shifts={longRunningShifts} />
-              )}
-
-              {/* Time Clock Section */}
-              <div className="grid gap-6 md:grid-cols-2">
+              {/* Clock In/Out Panel */}
+              <div>
                 {activeShift ? (
                   <ActiveShiftDisplay
                     shift={activeShift}
@@ -351,6 +355,7 @@ export function StaffManagementClient({
                 entries={timeEntries}
                 isAdmin={currentUser.isAdmin}
                 currentUserId={selectedStaffId}
+                onRefresh={handleRefresh}
               />
             </>
           )}
@@ -364,6 +369,11 @@ export function StaffManagementClient({
         {/* PUBLIC HOLIDAYS TAB */}
         <TabsContent value="holidays" className="space-y-6 mt-6">
           <PublicHolidaysManager />
+        </TabsContent>
+
+        {/* COMMISSION TAB */}
+        <TabsContent value="commission" className="space-y-6 mt-6">
+          <CommissionReportsTab teamMembers={teamMembers} />
         </TabsContent>
 
         {/* PAYROLL REPORTS TAB */}

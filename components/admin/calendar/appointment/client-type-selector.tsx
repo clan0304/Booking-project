@@ -1,7 +1,7 @@
 // components/admin/calendar/appointment/client-type-selector.tsx
 'use client';
 
-import { CLIENT_TYPE_CONFIG, type ClientType } from '@/lib/client-type-helpers';
+import { CLIENT_TYPE_CONFIG, type ClientType } from '@/lib/client-type-config';
 
 interface ClientTypeSelectorProps {
   value: ClientType | null;

@@ -17,5 +17,9 @@ export { PublicHolidaysManager } from './public-holidays-manager';
 // Payroll Reports Components (Admin Only)
 export { PayrollReportsTab } from './payroll-reports-tab';
 
+// Commission Reports Components (Admin Only)
+export { CommissionReportsTab } from './commission-reports-tab';
+export { CommissionReportModal } from './commission-report-modal';
+
 // Main Client Component
 export { StaffManagementClient } from './staff-management-client';

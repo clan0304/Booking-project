@@ -1,52 +1,107 @@
 // components/admin/navbar.tsx
 'use client';
 
+import { useState, useEffect } from 'react';
 import { Search, Bell, ShoppingBag, MessageSquare } from 'lucide-react';
 import { UserButton } from '@clerk/nextjs';
 import Link from 'next/link';
+import { NotificationModal } from './notifications';
+import { getNotificationCounts } from '@/app/actions/notifications';
 
 export function AdminNavbar() {
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Fetch unread count on mount and periodically
+  useEffect(() => {
+    const fetchUnreadCount = async () => {
+      try {
+        const result = await getNotificationCounts();
+        if (result.success && result.data) {
+          setUnreadCount(result.data.unread);
+        }
+      } catch (error) {
+        console.error('Error fetching unread count:', error);
+      }
+    };
+
+    fetchUnreadCount();
+
+    // Poll every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Refetch count when modal closes
+  const handleModalClose = async () => {
+    setIsNotificationOpen(false);
+    try {
+      const result = await getNotificationCounts();
+      if (result.success && result.data) {
+        setUnreadCount(result.data.unread);
+      }
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
+    }
+  };
+
   return (
-    <nav className="fixed top-0 right-0 left-20 z-30 h-16 bg-white border-b border-gray-200">
-      <div className="flex h-full items-center justify-between px-6">
-        {/* Logo */}
-        <Link href="/admin" className="flex items-center">
-          <span className="text-2xl font-bold text-gray-900">
-            Hair by hongshop
-          </span>
-        </Link>
-
-        {/* Right Actions */}
-        <div className="flex items-center gap-4">
-          {/* Search */}
-          <button className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100">
-            <Search className="h-5 w-5" />
-          </button>
-
-          {/* Notifications */}
-          <button className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-              1
+    <>
+      <nav className="fixed top-0 right-0 left-20 z-30 h-16 bg-white border-b border-gray-200">
+        <div className="flex h-full items-center justify-between px-6">
+          {/* Logo */}
+          <Link href="/admin" className="flex items-center">
+            <span className="text-2xl font-bold text-gray-900">
+              Hair by hongshop
             </span>
-          </button>
+          </Link>
 
-          {/* Shopping Bag */}
-          <button className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100">
-            <ShoppingBag className="h-5 w-5" />
-          </button>
+          {/* Right Actions */}
+          <div className="flex items-center gap-4">
+            {/* Search - Links to search page */}
+            <Link
+              href="/admin/search"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100"
+            >
+              <Search className="h-5 w-5" />
+            </Link>
 
-          {/* Messages */}
-          <button className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100">
-            <MessageSquare className="h-5 w-5" />
-          </button>
+            {/* Notifications */}
+            <button
+              onClick={() => setIsNotificationOpen(true)}
+              className="relative flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100"
+            >
+              <Bell className="h-5 w-5" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
 
-          {/* User Profile */}
-          <div className="ml-2">
-            <UserButton afterSignOutUrl="/" />
+            {/* Shopping Bag */}
+            <button className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100">
+              <ShoppingBag className="h-5 w-5" />
+            </button>
+
+            {/* Messages */}
+            <button className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100">
+              <MessageSquare className="h-5 w-5" />
+            </button>
+
+            {/* User Profile */}
+            <div className="ml-2">
+              <UserButton afterSignOutUrl="/" />
+            </div>
           </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+
+      {/* Notification Modal */}
+      <NotificationModal
+        isOpen={isNotificationOpen}
+        onClose={handleModalClose}
+      />
+    </>
   );
 }

@@ -80,12 +80,9 @@ interface LongRunningShift {
 // =====================================================
 export async function clockIn(venueId: string, teamMemberId?: string) {
   try {
-    // ✅ FIX: Support kiosk mode - admin can clock in for any team member
     const { supabaseUserId, roles } = await requireAuth();
     const isAdmin = roles.includes('admin');
 
-    // Admin can clock in for any team member (kiosk mode)
-    // Non-admin can only clock in for themselves
     const targetUserId =
       isAdmin && teamMemberId ? teamMemberId : supabaseUserId;
 
@@ -114,7 +111,7 @@ export async function clockIn(venueId: string, teamMemberId?: string) {
         shift_date: shiftDate,
         clock_in_time: now,
         status: 'clocked_in',
-        created_by: supabaseUserId, // Track who created it (admin)
+        created_by: supabaseUserId,
       })
       .select()
       .single();
@@ -137,11 +134,9 @@ export async function clockIn(venueId: string, teamMemberId?: string) {
 // =====================================================
 export async function clockOut(entryId: string, teamMemberId?: string) {
   try {
-    // ✅ FIX: Support kiosk mode
     const { supabaseUserId, roles } = await requireAuth();
     const isAdmin = roles.includes('admin');
 
-    // Build query - admin can clock out anyone, non-admin only themselves
     let query = supabaseAdmin
       .from('staff_time_entries')
       .select('*')
@@ -209,11 +204,9 @@ export async function clockOut(entryId: string, teamMemberId?: string) {
 // =====================================================
 export async function startBreak(entryId: string, teamMemberId?: string) {
   try {
-    // ✅ FIX: Support kiosk mode
     const { supabaseUserId, roles } = await requireAuth();
     const isAdmin = roles.includes('admin');
 
-    // Build query - admin can start break for anyone, non-admin only themselves
     let query = supabaseAdmin
       .from('staff_time_entries')
       .select('*')
@@ -263,11 +256,9 @@ export async function startBreak(entryId: string, teamMemberId?: string) {
 // =====================================================
 export async function endBreak(entryId: string, teamMemberId?: string) {
   try {
-    // ✅ FIX: Support kiosk mode
     const { supabaseUserId, roles } = await requireAuth();
     const isAdmin = roles.includes('admin');
 
-    // Build query - admin can end break for anyone, non-admin only themselves
     let query = supabaseAdmin
       .from('staff_time_entries')
       .select('*')
@@ -323,12 +314,9 @@ export async function getActiveShift(teamMemberId?: string): Promise<{
   error?: string;
 }> {
   try {
-    // ✅ FIX: Use provided teamMemberId for kiosk mode, otherwise use logged-in user
     const { supabaseUserId, roles } = await requireAuth();
     const isAdmin = roles.includes('admin');
 
-    // Admin can check any team member's shift (kiosk mode)
-    // Non-admin can only check their own shift
     const targetUserId =
       isAdmin && teamMemberId ? teamMemberId : supabaseUserId;
 
@@ -388,11 +376,9 @@ export async function getTimeEntries(filters?: {
   error?: string;
 }> {
   try {
-    // ✅ FIX: Use supabaseUserId
     const { supabaseUserId, roles } = await requireAuth();
     const isAdmin = roles.includes('admin');
 
-    // ✅ FIX: Specify which users relationship to use with hint syntax
     let query = supabaseAdmin
       .from('staff_time_entries')
       .select(
@@ -468,7 +454,6 @@ export async function adminClockOut(
   notes?: string
 ) {
   try {
-    // ✅ FIX: Use supabaseUserId
     const { supabaseUserId } = await requireAdmin();
 
     const { data: entry } = await supabaseAdmin
@@ -539,18 +524,18 @@ export async function adminClockOut(
 }
 
 // =====================================================
-// UPDATE TIME ENTRY (ADMIN)
+// UPDATE TIME ENTRY (ADMIN) - WITH BREAKS SUPPORT
 // =====================================================
 export async function updateTimeEntry(
   entryId: string,
   updates: {
     clock_in_time?: string;
     clock_out_time?: string;
+    breaks?: Break[];
     notes?: string;
   }
 ) {
   try {
-    // ✅ FIX: Use supabaseUserId
     const { supabaseUserId } = await requireAdmin();
 
     const { data: entry } = await supabaseAdmin
@@ -561,37 +546,61 @@ export async function updateTimeEntry(
 
     if (!entry) return { success: false, error: 'Time entry not found' };
 
-    const finalUpdates: Record<string, unknown> = { ...updates };
+    const finalUpdates: Record<string, unknown> = {};
 
-    if (updates.clock_in_time || updates.clock_out_time) {
-      const clockIn = updates.clock_in_time || entry.clock_in_time;
-      const clockOut = updates.clock_out_time || entry.clock_out_time;
+    // Handle clock times
+    if (updates.clock_in_time !== undefined) {
+      finalUpdates.clock_in_time = updates.clock_in_time;
+    }
+    if (updates.clock_out_time !== undefined) {
+      finalUpdates.clock_out_time = updates.clock_out_time;
+    }
 
-      if (clockOut) {
-        const { data: payRate } = await supabaseAdmin.rpc(
-          'get_effective_pay_rate',
-          {
-            p_team_member_id: entry.team_member_id,
-            p_date: entry.shift_date,
-          }
-        );
+    // Handle breaks update
+    if (updates.breaks !== undefined) {
+      finalUpdates.breaks = updates.breaks;
+    }
 
-        const { data: hours } = await supabaseAdmin.rpc(
-          'calculate_shift_hours',
-          {
-            p_clock_in: clockIn,
-            p_clock_out: clockOut,
-            p_breaks: entry.breaks,
-            p_paid_break_minutes: payRate?.[0]?.paid_break_minutes || 30,
-          }
-        );
+    // Handle notes
+    if (updates.notes !== undefined) {
+      finalUpdates.notes = updates.notes || null;
+    }
 
-        if (hours?.[0]) {
-          finalUpdates.total_hours = hours[0].total_hours;
-          finalUpdates.total_paid_hours = hours[0].total_paid_hours;
-          finalUpdates.total_break_minutes = hours[0].total_break_minutes;
+    // Recalculate hours if any time-related fields changed
+    const clockIn = updates.clock_in_time || entry.clock_in_time;
+    const clockOut =
+      updates.clock_out_time !== undefined
+        ? updates.clock_out_time
+        : entry.clock_out_time;
+    const breaks = updates.breaks !== undefined ? updates.breaks : entry.breaks;
+
+    if (clockOut) {
+      const { data: payRate } = await supabaseAdmin.rpc(
+        'get_effective_pay_rate',
+        {
+          p_team_member_id: entry.team_member_id,
+          p_date: entry.shift_date,
         }
+      );
+
+      const { data: hours } = await supabaseAdmin.rpc('calculate_shift_hours', {
+        p_clock_in: clockIn,
+        p_clock_out: clockOut,
+        p_breaks: breaks || [],
+        p_paid_break_minutes: payRate?.[0]?.paid_break_minutes || 30,
+      });
+
+      if (hours?.[0]) {
+        finalUpdates.total_hours = hours[0].total_hours;
+        finalUpdates.total_paid_hours = hours[0].total_paid_hours;
+        finalUpdates.total_break_minutes = hours[0].total_break_minutes;
       }
+    }
+
+    // Mark status as completed if we now have clock out time
+    if (clockOut && entry.status !== 'completed') {
+      finalUpdates.status = 'completed';
+      finalUpdates.current_break_start = null;
     }
 
     finalUpdates.updated_by = supabaseUserId;
@@ -650,10 +659,10 @@ export async function createManualEntry(data: {
   shift_date: string;
   clock_in_time: string;
   clock_out_time: string;
+  breaks?: Break[];
   notes?: string;
 }) {
   try {
-    // ✅ FIX: Use supabaseUserId
     const { supabaseUserId } = await requireAdmin();
 
     const clockIn = new Date(data.clock_in_time);
@@ -677,7 +686,7 @@ export async function createManualEntry(data: {
     const { data: hours } = await supabaseAdmin.rpc('calculate_shift_hours', {
       p_clock_in: data.clock_in_time,
       p_clock_out: data.clock_out_time,
-      p_breaks: [],
+      p_breaks: data.breaks || [],
       p_paid_break_minutes: payRate?.[0]?.paid_break_minutes || 30,
     });
 
@@ -687,11 +696,12 @@ export async function createManualEntry(data: {
       shift_date: data.shift_date,
       clock_in_time: data.clock_in_time,
       clock_out_time: data.clock_out_time,
+      breaks: data.breaks || [],
       status: 'completed',
       notes: data.notes,
       total_hours: hours?.[0]?.total_hours || 0,
       total_paid_hours: hours?.[0]?.total_paid_hours || 0,
-      total_break_minutes: 0,
+      total_break_minutes: hours?.[0]?.total_break_minutes || 0,
       created_by: supabaseUserId,
     });
 

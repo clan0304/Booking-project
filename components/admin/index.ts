@@ -4,3 +4,4 @@ export { AdminNavbar } from './navbar';
 export { AdminLayout } from './admin-layout';
 export { PageHeader } from './page-header';
 export { PageWrapper } from './page-wrapper';
+export { NotificationModal } from './notifications';

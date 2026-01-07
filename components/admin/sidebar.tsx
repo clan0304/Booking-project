@@ -10,6 +10,7 @@ import {
   Smile,
   User,
   Megaphone,
+  DollarSign,
   Users,
   LayoutGrid,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { href: '/admin', icon: Home, label: 'Home', exact: true },
   { href: '/admin/calendar', icon: Calendar, label: 'Calendar' },
+  { href: '/admin/sales', icon: DollarSign, label: 'Sales' },
   { href: '/admin/services', icon: Tag, label: 'Services' },
   { href: '/admin/clients', icon: Smile, label: 'Clients' },
   // { href: '/admin/bookings', icon: BookOpen, label: 'Bookings' },

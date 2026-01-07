@@ -4,57 +4,13 @@
 import { auth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 
-// Phone validation regex patterns by country
-const PHONE_PATTERNS: Record<string, { pattern: RegExp; description: string }> =
-  {
-    '+61': {
-      pattern: /^\+614\d{8}$/,
-      description: 'Australian mobile number (+614XXXXXXXX)',
-    },
-    '+1': {
-      pattern: /^\+1\d{10}$/,
-      description: 'US/Canada number (+1XXXXXXXXXX)',
-    },
-    '+44': {
-      pattern: /^\+44\d{10}$/,
-      description: 'UK number (+44XXXXXXXXXX)',
-    },
-    '+64': {
-      pattern: /^\+64\d{8,9}$/,
-      description: 'New Zealand number (+64XXXXXXXX)',
-    },
-    '+65': {
-      pattern: /^\+65\d{8}$/,
-      description: 'Singapore number (+65XXXXXXXX)',
-    },
-  };
-
-function validatePhoneNumber(phone: string): {
-  valid: boolean;
-  error?: string;
-} {
-  if (!phone) {
-    return { valid: false, error: 'Phone number is required' };
-  }
-
-  // Extract country code
-  const countryCode = Object.keys(PHONE_PATTERNS).find((code) =>
-    phone.startsWith(code)
-  );
-
-  if (!countryCode) {
-    return { valid: false, error: 'Invalid country code' };
-  }
-
-  const pattern = PHONE_PATTERNS[countryCode];
-  if (!pattern.pattern.test(phone)) {
-    return {
-      valid: false,
-      error: `Invalid phone format. Expected: ${pattern.description}`,
-    };
-  }
-
-  return { valid: true };
+/**
+ * Basic phone validation - checks E.164 format
+ * More detailed validation is done client-side
+ */
+function isValidE164Phone(phone: string): boolean {
+  // E.164 format: + followed by 1-15 digits
+  return /^\+[1-9]\d{6,14}$/.test(phone);
 }
 
 export async function completeOnboarding(formData: FormData) {
@@ -109,9 +65,8 @@ export async function completeOnboarding(formData: FormData) {
 
     // Validate and add phone number if provided
     if (phoneNumber !== null) {
-      const phoneValidation = validatePhoneNumber(phoneNumber);
-      if (!phoneValidation.valid) {
-        return { success: false, error: phoneValidation.error };
+      if (!isValidE164Phone(phoneNumber)) {
+        return { success: false, error: 'Invalid phone number format' };
       }
       updateData.phone_number = phoneNumber;
     }

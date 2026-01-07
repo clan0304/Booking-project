@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { detectClientTypeForPublicBooking } from '@/lib/client-type-helpers';
+import { createBookingNotification } from '@/app/actions/notifications';
 
 interface CreateBookingRequest {
   venue_id: string;
@@ -60,6 +61,20 @@ export async function POST(request: NextRequest) {
         { error: 'At least one appointment is required' },
         { status: 400 }
       );
+    }
+
+    // =====================================================
+    // FETCH VENUE NAME FOR NOTIFICATION
+    // =====================================================
+    const { data: venue, error: venueError } = await supabaseAdmin
+      .from('venues')
+      .select('id, name')
+      .eq('id', body.venue_id)
+      .single();
+
+    if (venueError || !venue) {
+      console.error('Error fetching venue:', venueError);
+      return NextResponse.json({ error: 'Invalid venue' }, { status: 400 });
     }
 
     // =====================================================
@@ -261,6 +276,57 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('Booking created successfully:', bookingGroup.id);
+
+    // =====================================================
+    // CREATE NOTIFICATION FOR ADMIN
+    // =====================================================
+    try {
+      // Get team member name for notification
+      const firstTeamMemberId = processedAppointments[0]?.team_member_id;
+      let teamMemberName: string | undefined;
+
+      if (firstTeamMemberId) {
+        const { data: teamMember } = await supabaseAdmin
+          .from('users')
+          .select('first_name, last_name')
+          .eq('id', firstTeamMemberId)
+          .single();
+
+        if (teamMember) {
+          teamMemberName = `${teamMember.first_name}${
+            teamMember.last_name ? ' ' + teamMember.last_name : ''
+          }`;
+        }
+      }
+
+      // Create service names list for notification
+      const serviceNames = processedAppointments
+        .map((appt) => appt.service_name)
+        .join(', ');
+
+      await createBookingNotification({
+        type: 'booking_created',
+        bookingGroupId: bookingGroup.id,
+        clientId: body.client_id || undefined,
+        clientName: `${body.guest_first_name}${
+          body.guest_last_name ? ' ' + body.guest_last_name : ''
+        }`,
+        venueId: body.venue_id,
+        venueName: venue.name,
+        teamMemberId: firstTeamMemberId || undefined,
+        teamMemberName: teamMemberName,
+        serviceName: serviceNames,
+        bookingDate: body.booking_date,
+        bookingTime: processedAppointments[0]?.start_time || '00:00',
+        price: total_price,
+        bookingSource: 'online',
+      });
+
+      console.log('Notification created for booking:', bookingGroup.id);
+    } catch (notificationError) {
+      // Don't fail the booking if notification fails
+      console.error('Error creating notification:', notificationError);
+    }
 
     // TODO: Send confirmation email to guest
 

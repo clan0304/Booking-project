@@ -1,8 +1,18 @@
+// app/actions/profile.ts
 'use server';
 
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+
+/**
+ * Basic phone validation - checks E.164 format
+ * More detailed validation is done client-side
+ */
+function isValidE164Phone(phone: string): boolean {
+  // E.164 format: + followed by 1-15 digits
+  return /^\+[1-9]\d{6,14}$/.test(phone);
+}
 
 export async function updateProfile(formData: FormData) {
   try {
@@ -22,6 +32,17 @@ export async function updateProfile(formData: FormData) {
     // Validate required fields
     if (!firstName || !firstName.trim()) {
       return { success: false, error: 'First name is required' };
+    }
+
+    if (!lastName || !lastName.trim()) {
+      return { success: false, error: 'Last name is required' };
+    }
+
+    // Validate phone number if provided
+    if (phoneNumber && phoneNumber.trim()) {
+      if (!isValidE164Phone(phoneNumber)) {
+        return { success: false, error: 'Invalid phone number format' };
+      }
     }
 
     // Get user from database
@@ -95,7 +116,7 @@ export async function updateProfile(formData: FormData) {
       .from('users')
       .update({
         first_name: firstName.trim(),
-        last_name: lastName?.trim() || null,
+        last_name: lastName.trim(),
         phone_number: phoneNumber?.trim() || null,
         birthday: birthday || null,
         photo_url: photoUrl,
@@ -113,7 +134,7 @@ export async function updateProfile(formData: FormData) {
       const client = await clerkClient();
       await client.users.updateUser(userId, {
         firstName: firstName.trim(),
-        lastName: lastName?.trim() || '',
+        lastName: lastName.trim(),
         ...(photoUrl && { publicMetadata: { photo_url: photoUrl } }),
       });
 
@@ -164,17 +185,27 @@ export async function deleteProfilePhoto() {
       return { success: false, error: 'User not found' };
     }
 
-    // Delete photo from storage if exists
-    if (user.photo_url) {
-      const photoPath = user.photo_url.split(
-        '/storage/v1/object/public/user-photos/'
-      )[1];
-      if (photoPath) {
-        await supabaseAdmin.storage.from('user-photos').remove([photoPath]);
+    if (!user.photo_url) {
+      return { success: true }; // No photo to delete
+    }
+
+    // Delete from Supabase Storage
+    const photoPath = user.photo_url.split(
+      '/storage/v1/object/public/user-photos/'
+    )[1];
+
+    if (photoPath) {
+      const { error: deleteError } = await supabaseAdmin.storage
+        .from('user-photos')
+        .remove([photoPath]);
+
+      if (deleteError) {
+        console.error('Error deleting photo from storage:', deleteError);
+        // Continue anyway - update database
       }
     }
 
-    // Update Supabase
+    // Update user in database
     const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({
@@ -184,26 +215,23 @@ export async function deleteProfilePhoto() {
       .eq('id', user.id);
 
     if (updateError) {
-      console.error('Error removing photo from Supabase:', updateError);
+      console.error('Error updating user:', updateError);
       return { success: false, error: 'Failed to remove photo' };
     }
 
-    // Update Clerk
+    // Update Clerk - remove photo_url from metadata
     try {
       const client = await clerkClient();
       const currentUser = await client.users.getUser(userId);
-      const currentMetadata = currentUser.publicMetadata || {};
+      const updatedMetadata = { ...(currentUser.publicMetadata || {}) };
+      delete (updatedMetadata as Record<string, unknown>).photo_url;
 
       await client.users.updateUser(userId, {
-        publicMetadata: {
-          ...currentMetadata,
-          photo_url: null,
-        },
+        publicMetadata: updatedMetadata,
       });
-
-      console.log('✅ Photo removal synced to Clerk');
     } catch (clerkError) {
       console.error('Error updating Clerk:', clerkError);
+      // Don't fail if Clerk sync fails
     }
 
     revalidatePath('/dashboard');
@@ -211,7 +239,7 @@ export async function deleteProfilePhoto() {
 
     return { success: true };
   } catch (error) {
-    console.error('Photo deletion error:', error);
+    console.error('Delete photo error:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }

@@ -5,45 +5,15 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { completeOnboarding } from '@/app/actions/onboarding';
 import Image from 'next/image';
-
-// Country codes with phone format info
-const COUNTRY_CODES = [
-  {
-    code: '+61',
-    country: 'AU',
-    label: '🇦🇺 +61',
-    placeholder: '412 345 678',
-    maxLength: 9,
-  },
-  {
-    code: '+1',
-    country: 'US',
-    label: '🇺🇸 +1',
-    placeholder: '555 123 4567',
-    maxLength: 10,
-  },
-  {
-    code: '+44',
-    country: 'UK',
-    label: '🇬🇧 +44',
-    placeholder: '7911 123456',
-    maxLength: 10,
-  },
-  {
-    code: '+64',
-    country: 'NZ',
-    label: '🇳🇿 +64',
-    placeholder: '21 123 4567',
-    maxLength: 9,
-  },
-  {
-    code: '+65',
-    country: 'SG',
-    label: '🇸🇬 +65',
-    placeholder: '9123 4567',
-    maxLength: 8,
-  },
-] as const;
+import {
+  COUNTRY_CODES,
+  DEFAULT_COUNTRY_CODE,
+  formatPhoneNumber,
+  validatePhoneNumber,
+  getPhonePlaceholder,
+  getPhoneMaxLength,
+  toE164,
+} from '@/lib/phone-utils';
 
 interface MissingFields {
   firstName: boolean;
@@ -72,7 +42,7 @@ export function OnboardingForm({
   // Form state
   const [firstName, setFirstName] = useState(userData.firstName || '');
   const [lastName, setLastName] = useState(userData.lastName || '');
-  const [countryCode, setCountryCode] = useState('+61'); // Default to Australia
+  const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(
@@ -85,80 +55,8 @@ export function OnboardingForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Get current country config
-  const currentCountry =
-    COUNTRY_CODES.find((c) => c.code === countryCode) || COUNTRY_CODES[0];
-
-  // Format phone number as user types (add spaces for readability)
-  const formatPhoneNumber = (value: string, countryCode: string): string => {
-    // Remove all non-digits
-    const digits = value.replace(/\D/g, '');
-
-    // Remove leading 0 if present (common in AU numbers)
-    const cleanDigits = digits.startsWith('0') ? digits.slice(1) : digits;
-
-    // Format based on country
-    if (countryCode === '+61') {
-      // Australian format: XXX XXX XXX
-      if (cleanDigits.length <= 3) return cleanDigits;
-      if (cleanDigits.length <= 6)
-        return `${cleanDigits.slice(0, 3)} ${cleanDigits.slice(3)}`;
-      return `${cleanDigits.slice(0, 3)} ${cleanDigits.slice(
-        3,
-        6
-      )} ${cleanDigits.slice(6, 9)}`;
-    } else if (countryCode === '+1') {
-      // US format: XXX XXX XXXX
-      if (cleanDigits.length <= 3) return cleanDigits;
-      if (cleanDigits.length <= 6)
-        return `${cleanDigits.slice(0, 3)} ${cleanDigits.slice(3)}`;
-      return `${cleanDigits.slice(0, 3)} ${cleanDigits.slice(
-        3,
-        6
-      )} ${cleanDigits.slice(6, 10)}`;
-    } else if (countryCode === '+44') {
-      // UK format: XXXX XXXXXX
-      if (cleanDigits.length <= 4) return cleanDigits;
-      return `${cleanDigits.slice(0, 4)} ${cleanDigits.slice(4, 10)}`;
-    } else if (countryCode === '+64') {
-      // NZ format: XX XXX XXXX
-      if (cleanDigits.length <= 2) return cleanDigits;
-      if (cleanDigits.length <= 5)
-        return `${cleanDigits.slice(0, 2)} ${cleanDigits.slice(2)}`;
-      return `${cleanDigits.slice(0, 2)} ${cleanDigits.slice(
-        2,
-        5
-      )} ${cleanDigits.slice(5, 9)}`;
-    } else if (countryCode === '+65') {
-      // Singapore format: XXXX XXXX
-      if (cleanDigits.length <= 4) return cleanDigits;
-      return `${cleanDigits.slice(0, 4)} ${cleanDigits.slice(4, 8)}`;
-    }
-
-    return cleanDigits;
-  };
-
-  // Validate phone number
-  const validatePhoneNumber = (
-    phone: string,
-    countryCode: string
-  ): string | null => {
-    const digits = phone.replace(/\D/g, '');
-    const cleanDigits = digits.startsWith('0') ? digits.slice(1) : digits;
-    const country = COUNTRY_CODES.find((c) => c.code === countryCode);
-
-    if (!country) return 'Invalid country code';
-    if (cleanDigits.length === 0) return 'Phone number is required';
-    if (cleanDigits.length < country.maxLength) {
-      return `Phone number must be ${country.maxLength} digits`;
-    }
-
-    // Additional validation for Australian mobile numbers
-    if (countryCode === '+61' && !cleanDigits.startsWith('4')) {
-      return 'Australian mobile numbers must start with 4';
-    }
-
-    return null;
-  };
+  const currentPlaceholder = getPhonePlaceholder(countryCode);
+  const currentMaxLength = getPhoneMaxLength(countryCode);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatPhoneNumber(e.target.value, countryCode);
@@ -226,9 +124,9 @@ export function OnboardingForm({
       errors.lastName = 'Last name is required';
     }
 
-    // Validate phone number (if missing)
+    // Validate phone number (if missing) - required in onboarding
     if (missingFields.phoneNumber) {
-      const phoneError = validatePhoneNumber(phoneNumber, countryCode);
+      const phoneError = validatePhoneNumber(phoneNumber, countryCode, true);
       if (phoneError) {
         errors.phoneNumber = phoneError;
       }
@@ -259,12 +157,8 @@ export function OnboardingForm({
         formData.append('lastName', lastName.trim());
       }
       if (missingFields.phoneNumber) {
-        // Store phone in E.164 format: +61412345678
-        const cleanPhone = phoneNumber.replace(/\D/g, '');
-        const normalizedPhone = cleanPhone.startsWith('0')
-          ? cleanPhone.slice(1)
-          : cleanPhone;
-        formData.append('phoneNumber', `${countryCode}${normalizedPhone}`);
+        // Store phone in E.164 format
+        formData.append('phoneNumber', toE164(phoneNumber, countryCode));
       }
 
       // Always allow photo upload
@@ -369,10 +263,13 @@ export function OnboardingForm({
               value={countryCode}
               onChange={handleCountryChange}
               disabled={isSubmitting}
-              className="rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
+              className="rounded-md border border-gray-300 px-2 py-2 shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black text-sm max-w-[180px]"
             >
-              {COUNTRY_CODES.map((country) => (
-                <option key={country.code} value={country.code}>
+              {COUNTRY_CODES.map((country, index) => (
+                <option
+                  key={`${country.code}-${country.country}-${index}`}
+                  value={country.code}
+                >
                   {country.label}
                 </option>
               ))}
@@ -382,8 +279,8 @@ export function OnboardingForm({
               id="phoneNumber"
               value={phoneNumber}
               onChange={handlePhoneChange}
-              placeholder={currentCountry.placeholder}
-              maxLength={currentCountry.maxLength + 2} // Account for spaces
+              placeholder={currentPlaceholder}
+              maxLength={currentMaxLength + 4} // Account for spaces
               className={`flex-1 rounded-md border px-3 py-2 shadow-sm focus:outline-none focus:ring-1 ${
                 fieldErrors.phoneNumber
                   ? 'border-red-300 focus:border-red-500 focus:ring-red-500'

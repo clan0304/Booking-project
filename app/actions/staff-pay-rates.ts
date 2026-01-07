@@ -35,14 +35,6 @@ interface CustomPayRates {
   };
 }
 
-interface EffectivePayRates {
-  weekday_rate: number;
-  saturday_rate: number;
-  sunday_rate: number;
-  public_holiday_rate: number;
-  paid_break_minutes: number;
-}
-
 interface PublicHoliday {
   id: string;
   date: string;
@@ -75,6 +67,29 @@ interface PayrollItem {
   total_pay: number;
   entries_count: number;
 }
+
+// Commission types
+interface CommissionSummary {
+  team_member_id: string;
+  team_member_name: string;
+  total_services: number;
+  total_sales: number;
+  total_commission: number;
+  by_client_type: {
+    typeA: { count: number; sales: number; commission: number };
+    typeB: { count: number; sales: number; commission: number };
+    typeBPlus: { count: number; sales: number; commission: number };
+    typeC: { count: number; sales: number; commission: number };
+  };
+}
+
+// Commission rates from client type config
+const COMMISSION_RATES = {
+  A: 0.3, // 30%
+  B: 0.4, // 40%
+  'B+': 0.4, // 40%
+  C: 0.3, // 30%
+};
 
 // =====================================================
 // GET DEFAULT PAY RATES
@@ -117,7 +132,6 @@ export async function updateDefaultPayRates(updates: {
   paid_break_minutes?: number;
 }) {
   try {
-    // ✅ FIX: Use supabaseUserId
     const { supabaseUserId } = await requireAdmin();
 
     const rates = [
@@ -167,7 +181,6 @@ export async function getCustomPayRates(teamMemberId?: string): Promise<{
   try {
     await requireAdmin();
 
-    // ✅ FIX: Specify the team_member_id relationship explicitly
     let query = supabaseAdmin
       .from('staff_pay_rates')
       .select(
@@ -214,7 +227,6 @@ export async function upsertCustomPayRates(
   }
 ) {
   try {
-    // ✅ FIX: Use supabaseUserId
     const { supabaseUserId } = await requireAdmin();
 
     const rateValues = [
@@ -246,13 +258,11 @@ export async function upsertCustomPayRates(
         .eq('team_member_id', teamMemberId);
       if (error) throw error;
     } else {
-      const { error } = await supabaseAdmin
-        .from('staff_pay_rates')
-        .insert({
-          team_member_id: teamMemberId,
-          ...rates,
-          updated_by: supabaseUserId,
-        });
+      const { error } = await supabaseAdmin.from('staff_pay_rates').insert({
+        team_member_id: teamMemberId,
+        ...rates,
+        updated_by: supabaseUserId,
+      });
       if (error) throw error;
     }
 
@@ -299,42 +309,9 @@ export async function deleteCustomPayRates(teamMemberId: string) {
 }
 
 // =====================================================
-// GET EFFECTIVE PAY RATES
-// =====================================================
-export async function getEffectivePayRates(
-  teamMemberId: string,
-  date: string
-): Promise<{
-  success: boolean;
-  data?: EffectivePayRates;
-  error?: string;
-}> {
-  try {
-    await requireAuth();
-
-    const { data, error } = await supabaseAdmin.rpc('get_effective_pay_rate', {
-      p_team_member_id: teamMemberId,
-      p_date: date,
-    });
-
-    if (error) throw error;
-    return { success: true, data: data?.[0] };
-  } catch (error) {
-    console.error('Get effective pay rates error:', error);
-    return {
-      success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to get effective pay rates',
-    };
-  }
-}
-
-// =====================================================
 // GET PUBLIC HOLIDAYS
 // =====================================================
-export async function getPublicHolidays(year?: number): Promise<{
+export async function getPublicHolidays(): Promise<{
   success: boolean;
   data?: PublicHoliday[];
   error?: string;
@@ -342,20 +319,12 @@ export async function getPublicHolidays(year?: number): Promise<{
   try {
     await requireAuth();
 
-    let query = supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('public_holidays')
       .select('*')
       .order('date', { ascending: true });
 
-    if (year) {
-      const startDate = `${year}-01-01`;
-      const endDate = `${year}-12-31`;
-      query = query.gte('date', startDate).lte('date', endDate);
-    }
-
-    const { data, error } = await query;
     if (error) throw error;
-
     return { success: true, data: data || [] };
   } catch (error) {
     console.error('Get public holidays error:', error);
@@ -378,30 +347,16 @@ export async function addPublicHoliday(holiday: {
   is_recurring?: boolean;
 }) {
   try {
-    // ✅ FIX: Use supabaseUserId
     const { supabaseUserId } = await requireAdmin();
-
-    const date = new Date(holiday.date);
-    if (isNaN(date.getTime()))
-      return { success: false, error: 'Invalid date format' };
-    if (!holiday.name.trim())
-      return { success: false, error: 'Holiday name is required' };
 
     const { error } = await supabaseAdmin.from('public_holidays').insert({
       date: holiday.date,
-      name: holiday.name.trim(),
+      name: holiday.name,
       is_recurring: holiday.is_recurring || false,
       created_by: supabaseUserId,
     });
 
-    if (error) {
-      if (error.code === '23505')
-        return {
-          success: false,
-          error: 'A holiday already exists on this date',
-        };
-      throw error;
-    }
+    if (error) throw error;
 
     revalidatePath('/admin/staff-management');
     return { success: true };
@@ -421,26 +376,17 @@ export async function addPublicHoliday(holiday: {
 export async function updatePublicHoliday(
   holidayId: string,
   updates: {
+    date?: string;
     name?: string;
     is_recurring?: boolean;
   }
 ) {
   try {
-    await requireAdmin();
-
-    if (updates.name && !updates.name.trim())
-      return { success: false, error: 'Holiday name cannot be empty' };
-
-    const finalUpdates = {
-      ...(updates.name && { name: updates.name.trim() }),
-      ...(updates.is_recurring !== undefined && {
-        is_recurring: updates.is_recurring,
-      }),
-    };
+    const { supabaseUserId } = await requireAdmin();
 
     const { error } = await supabaseAdmin
       .from('public_holidays')
-      .update(finalUpdates)
+      .update({ ...updates, updated_by: supabaseUserId })
       .eq('id', holidayId);
 
     if (error) throw error;
@@ -623,6 +569,138 @@ export async function calculatePayroll(
       success: false,
       error:
         error instanceof Error ? error.message : 'Failed to calculate payroll',
+    };
+  }
+}
+
+// =====================================================
+// CALCULATE COMMISSION FOR PAYROLL
+// =====================================================
+export async function calculateCommissionForPayroll(
+  startDate: string,
+  endDate: string,
+  teamMemberId?: string
+): Promise<{
+  success: boolean;
+  data?: CommissionSummary[];
+  error?: string;
+}> {
+  try {
+    await requireAdmin();
+
+    // Build query to get appointments with team member info
+    let query = supabaseAdmin
+      .from('appointments')
+      .select(
+        `
+        id,
+        team_member_id,
+        price,
+        status,
+        booking_group:booking_groups!inner (
+          id,
+          booking_date,
+          client_type,
+          status
+        )
+      `
+      )
+      .gte('booking_group.booking_date', startDate)
+      .lte('booking_group.booking_date', endDate)
+      .in('status', ['confirmed', 'completed'])
+      .in('booking_group.status', ['confirmed', 'completed']);
+
+    if (teamMemberId) {
+      query = query.eq('team_member_id', teamMemberId);
+    }
+
+    const { data: appointments, error } = await query;
+    if (error) throw error;
+
+    // Get team member names
+    const teamMemberIds = [
+      ...new Set((appointments || []).map((a) => a.team_member_id)),
+    ];
+
+    const teamMemberNames: Record<string, string> = {};
+
+    if (teamMemberIds.length > 0) {
+      const { data: members } = await supabaseAdmin
+        .from('users')
+        .select('id, first_name, last_name')
+        .in('id', teamMemberIds);
+
+      for (const m of members || []) {
+        teamMemberNames[m.id] = `${m.first_name} ${m.last_name || ''}`.trim();
+      }
+    }
+
+    // Process appointments into commission summaries
+    const commissionMap = new Map<string, CommissionSummary>();
+
+    for (const appt of appointments || []) {
+      const key = appt.team_member_id;
+      const booking = Array.isArray(appt.booking_group)
+        ? appt.booking_group[0]
+        : appt.booking_group;
+      const clientType = booking?.client_type as 'A' | 'B' | 'B+' | 'C' | null;
+      const price = appt.price || 0;
+
+      if (!commissionMap.has(key)) {
+        commissionMap.set(key, {
+          team_member_id: key,
+          team_member_name: teamMemberNames[key] || 'Unknown',
+          total_services: 0,
+          total_sales: 0,
+          total_commission: 0,
+          by_client_type: {
+            typeA: { count: 0, sales: 0, commission: 0 },
+            typeB: { count: 0, sales: 0, commission: 0 },
+            typeBPlus: { count: 0, sales: 0, commission: 0 },
+            typeC: { count: 0, sales: 0, commission: 0 },
+          },
+        });
+      }
+
+      const summary = commissionMap.get(key)!;
+      summary.total_services++;
+      summary.total_sales += price;
+
+      // Calculate commission based on client type
+      const rate = clientType ? COMMISSION_RATES[clientType] : 0;
+      const commission = price * rate;
+      summary.total_commission += commission;
+
+      // Update client type breakdown
+      if (clientType === 'A') {
+        summary.by_client_type.typeA.count++;
+        summary.by_client_type.typeA.sales += price;
+        summary.by_client_type.typeA.commission += commission;
+      } else if (clientType === 'B') {
+        summary.by_client_type.typeB.count++;
+        summary.by_client_type.typeB.sales += price;
+        summary.by_client_type.typeB.commission += commission;
+      } else if (clientType === 'B+') {
+        summary.by_client_type.typeBPlus.count++;
+        summary.by_client_type.typeBPlus.sales += price;
+        summary.by_client_type.typeBPlus.commission += commission;
+      } else if (clientType === 'C') {
+        summary.by_client_type.typeC.count++;
+        summary.by_client_type.typeC.sales += price;
+        summary.by_client_type.typeC.commission += commission;
+      }
+    }
+
+    const commissionData = Array.from(commissionMap.values());
+    return { success: true, data: commissionData };
+  } catch (error) {
+    console.error('Calculate commission error:', error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Failed to calculate commission',
     };
   }
 }

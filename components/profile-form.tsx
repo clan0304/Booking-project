@@ -1,11 +1,21 @@
+// components/profile-form.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateProfile, deleteProfilePhoto } from '@/app/actions/profile';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { User } from '@/types/database';
+import {
+  COUNTRY_CODES,
+  parsePhoneNumber,
+  formatPhoneNumber,
+  validatePhoneNumber,
+  getPhonePlaceholder,
+  getPhoneMaxLength,
+  toE164,
+} from '@/lib/phone-utils';
 
 interface ProfileFormProps {
   user: User;
@@ -14,9 +24,13 @@ interface ProfileFormProps {
 export default function ProfileForm({ user }: ProfileFormProps) {
   const router = useRouter();
 
+  // Parse existing phone number
+  const parsedPhone = parsePhoneNumber(user.phone_number);
+
   const [firstName, setFirstName] = useState(user.first_name || '');
   const [lastName, setLastName] = useState(user.last_name || '');
-  const [phoneNumber, setPhoneNumber] = useState(user.phone_number || '');
+  const [countryCode, setCountryCode] = useState(parsedPhone.countryCode);
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [birthday, setBirthday] = useState(user.birthday || '');
   const [currentPhotoUrl, setCurrentPhotoUrl] = useState<string | null>(
     user.photo_url
@@ -26,7 +40,39 @@ export default function ProfileForm({ user }: ProfileFormProps) {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState('');
+
+  // Get current country config
+  const currentPlaceholder = getPhonePlaceholder(countryCode);
+  const currentMaxLength = getPhoneMaxLength(countryCode);
+
+  // Format the existing phone number on mount
+  useEffect(() => {
+    if (parsedPhone.localNumber) {
+      const formatted = formatPhoneNumber(
+        parsedPhone.localNumber,
+        parsedPhone.countryCode
+      );
+      setPhoneNumber(formatted);
+    }
+  }, [parsedPhone.localNumber, parsedPhone.countryCode]);
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatPhoneNumber(e.target.value, countryCode);
+    setPhoneNumber(formatted);
+
+    // Clear phone error on change
+    if (fieldErrors.phoneNumber) {
+      setFieldErrors((prev) => ({ ...prev, phoneNumber: '' }));
+    }
+  };
+
+  const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setCountryCode(e.target.value);
+    // Reset phone number when country changes
+    setPhoneNumber('');
+  };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,23 +125,50 @@ export default function ProfileForm({ user }: ProfileFormProps) {
     setIsSubmitting(false);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
 
     if (!firstName.trim()) {
-      setError('First name is required');
+      errors.firstName = 'First name is required';
+    }
+
+    if (!lastName.trim()) {
+      errors.lastName = 'Last name is required';
+    }
+
+    // Validate phone if provided (optional in profile edit)
+    const phoneError = validatePhoneNumber(phoneNumber, countryCode, false);
+    if (phoneError) {
+      errors.phoneNumber = phoneError;
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+
+    if (!validateForm()) {
       return;
     }
 
     setIsSubmitting(true);
-    setError('');
-    setSuccessMessage('');
 
     try {
       const formData = new FormData();
-      formData.append('firstName', firstName);
-      formData.append('lastName', lastName);
-      formData.append('phoneNumber', phoneNumber);
+      formData.append('firstName', firstName.trim());
+      formData.append('lastName', lastName.trim());
+
+      // Format phone number in E.164 format
+      if (phoneNumber.trim()) {
+        formData.append('phoneNumber', toE164(phoneNumber, countryCode));
+      } else {
+        formData.append('phoneNumber', '');
+      }
+
       formData.append('birthday', birthday);
 
       if (newPhoto) {
@@ -210,11 +283,25 @@ export default function ProfileForm({ user }: ProfileFormProps) {
               type="text"
               id="firstName"
               value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
+              onChange={(e) => {
+                setFirstName(e.target.value);
+                if (fieldErrors.firstName) {
+                  setFieldErrors((prev) => ({ ...prev, firstName: '' }));
+                }
+              }}
+              className={`mt-1 block w-full rounded-md border px-3 py-2 shadow-sm focus:outline-none focus:ring-1 ${
+                fieldErrors.firstName
+                  ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                  : 'border-gray-300 focus:border-black focus:ring-black'
+              }`}
               required
               disabled={isSubmitting}
             />
+            {fieldErrors.firstName && (
+              <p className="mt-1 text-sm text-red-600">
+                {fieldErrors.firstName}
+              </p>
+            )}
           </div>
 
           {/* Last Name */}
@@ -223,19 +310,34 @@ export default function ProfileForm({ user }: ProfileFormProps) {
               htmlFor="lastName"
               className="block text-sm font-medium text-gray-700"
             >
-              Last Name
+              Last Name <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               id="lastName"
               value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
+              onChange={(e) => {
+                setLastName(e.target.value);
+                if (fieldErrors.lastName) {
+                  setFieldErrors((prev) => ({ ...prev, lastName: '' }));
+                }
+              }}
+              className={`mt-1 block w-full rounded-md border px-3 py-2 shadow-sm focus:outline-none focus:ring-1 ${
+                fieldErrors.lastName
+                  ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                  : 'border-gray-300 focus:border-black focus:ring-black'
+              }`}
+              required
               disabled={isSubmitting}
             />
+            {fieldErrors.lastName && (
+              <p className="mt-1 text-sm text-red-600">
+                {fieldErrors.lastName}
+              </p>
+            )}
           </div>
 
-          {/* Phone Number */}
+          {/* Phone Number with Country Code */}
           <div>
             <label
               htmlFor="phoneNumber"
@@ -243,15 +345,47 @@ export default function ProfileForm({ user }: ProfileFormProps) {
             >
               Phone Number
             </label>
-            <input
-              type="tel"
-              id="phoneNumber"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              placeholder="+1 (555) 000-0000"
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-              disabled={isSubmitting}
-            />
+            <div className="mt-1 flex gap-2">
+              <select
+                value={countryCode}
+                onChange={handleCountryChange}
+                disabled={isSubmitting}
+                className="rounded-md border border-gray-300 px-2 py-2 shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black text-sm max-w-[180px]"
+              >
+                {COUNTRY_CODES.map((country, index) => (
+                  <option
+                    key={`${country.code}-${country.country}-${index}`}
+                    value={country.code}
+                  >
+                    {country.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="tel"
+                id="phoneNumber"
+                value={phoneNumber}
+                onChange={handlePhoneChange}
+                placeholder={currentPlaceholder}
+                maxLength={currentMaxLength + 4} // Account for spaces
+                className={`flex-1 rounded-md border px-3 py-2 shadow-sm focus:outline-none focus:ring-1 ${
+                  fieldErrors.phoneNumber
+                    ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:border-black focus:ring-black'
+                }`}
+                disabled={isSubmitting}
+              />
+            </div>
+            {fieldErrors.phoneNumber ? (
+              <p className="mt-1 text-sm text-red-600">
+                {fieldErrors.phoneNumber}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-gray-500">
+                {countryCode === '+61' &&
+                  'Enter your mobile number without the leading 0'}
+              </p>
+            )}
           </div>
 
           {/* Birthday */}
@@ -297,7 +431,7 @@ export default function ProfileForm({ user }: ProfileFormProps) {
             </button>
             <Link
               href="/dashboard"
-              className="flex items-center rounded-md border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
+              className="flex items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </Link>

@@ -1,3 +1,4 @@
+// components/admin/staff-management/payroll-reports-tab.tsx
 'use client';
 
 import { useState, useCallback } from 'react';
@@ -18,18 +19,23 @@ import {
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   FileText,
   Download,
   ChevronDown,
   ChevronRight,
   Calendar,
-  DollarSign,
   Clock,
   Users,
   TrendingUp,
+  Percent,
+  Trophy,
 } from 'lucide-react';
-import { calculatePayroll } from '@/app/actions/staff-pay-rates';
+import {
+  calculatePayroll,
+  calculateCommissionForPayroll,
+} from '@/app/actions/staff-pay-rates';
 import { getTimeEntries } from '@/app/actions/staff-management';
 
 // =====================================================
@@ -140,6 +146,26 @@ interface PayrollItem {
   entries_count: number;
 }
 
+interface CommissionSummary {
+  team_member_id: string;
+  team_member_name: string;
+  total_services: number;
+  total_sales: number;
+  total_commission: number;
+  by_client_type: {
+    typeA: { count: number; sales: number; commission: number };
+    typeB: { count: number; sales: number; commission: number };
+    typeBPlus: { count: number; sales: number; commission: number };
+    typeC: { count: number; sales: number; commission: number };
+  };
+}
+
+interface CombinedPayrollItem extends PayrollItem {
+  commission?: CommissionSummary;
+  recommended_pay: 'hourly' | 'commission';
+  final_pay: number;
+}
+
 interface TimeEntry {
   id: string;
   team_member_id: string;
@@ -173,7 +199,7 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
     formatDate(getEndOfWeek(new Date()), 'yyyy-MM-dd')
   );
   const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
-  const [payrollData, setPayrollData] = useState<PayrollItem[]>([]);
+  const [combinedData, setCombinedData] = useState<CombinedPayrollItem[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [shiftDetails, setShiftDetails] = useState<{
     [key: string]: TimeEntry[];
@@ -230,14 +256,73 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
     setLoading(true);
     const memberId = selectedMemberId === 'all' ? undefined : selectedMemberId;
 
-    const result = await calculatePayroll(startDate, endDate, memberId);
+    // Fetch both payroll and commission data
+    const [payrollResult, commissionResult] = await Promise.all([
+      calculatePayroll(startDate, endDate, memberId),
+      calculateCommissionForPayroll(startDate, endDate, memberId),
+    ]);
 
-    if (result.success && result.data) {
-      setPayrollData(result.data);
+    if (payrollResult.success && payrollResult.data) {
+      // Create a map of commission data by team member ID
+      const commissionMap = new Map<string, CommissionSummary>();
+      if (commissionResult.success && commissionResult.data) {
+        for (const item of commissionResult.data) {
+          commissionMap.set(item.team_member_id, item);
+        }
+      }
+
+      // Combine payroll with commission data
+      const combined: CombinedPayrollItem[] = payrollResult.data.map(
+        (payroll) => {
+          const commission = commissionMap.get(payroll.team_member_id);
+          const commissionAmount = commission?.total_commission || 0;
+          const hourlyAmount = payroll.total_pay;
+
+          // Determine which is higher
+          const recommended =
+            commissionAmount > hourlyAmount ? 'commission' : 'hourly';
+          const finalPay = Math.max(commissionAmount, hourlyAmount);
+
+          return {
+            ...payroll,
+            commission,
+            recommended_pay: recommended,
+            final_pay: finalPay,
+          };
+        }
+      );
+
+      // Also add team members who have commission but no shifts
+      if (commissionResult.success && commissionResult.data) {
+        for (const comm of commissionResult.data) {
+          const exists = combined.some(
+            (c) => c.team_member_id === comm.team_member_id
+          );
+          if (!exists) {
+            combined.push({
+              team_member_id: comm.team_member_id,
+              team_member_name: comm.team_member_name,
+              total_hours: 0,
+              total_paid_hours: 0,
+              weekday_hours: 0,
+              saturday_hours: 0,
+              sunday_hours: 0,
+              public_holiday_hours: 0,
+              total_pay: 0,
+              entries_count: 0,
+              commission: comm,
+              recommended_pay: 'commission',
+              final_pay: comm.total_commission,
+            });
+          }
+        }
+      }
+
+      setCombinedData(combined);
       setHasGenerated(true);
     } else {
-      alert(result.error || 'Failed to generate report');
-      setPayrollData([]);
+      alert(payrollResult.error || 'Failed to generate report');
+      setCombinedData([]);
     }
 
     setLoading(false);
@@ -274,7 +359,7 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
 
   // Export to CSV
   const handleExportCSV = () => {
-    if (payrollData.length === 0) return;
+    if (combinedData.length === 0) return;
 
     const headers = [
       'Staff Member',
@@ -283,11 +368,15 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
       'Sunday Hours',
       'Holiday Hours',
       'Total Paid Hours',
-      'Total Pay',
-      'Shifts Count',
+      'Hourly Pay',
+      'Services',
+      'Sales',
+      'Commission',
+      'Recommended',
+      'Final Pay',
     ];
 
-    const rows = payrollData.map((item) => [
+    const rows = combinedData.map((item) => [
       item.team_member_name,
       item.weekday_hours.toFixed(2),
       item.saturday_hours.toFixed(2),
@@ -295,7 +384,11 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
       item.public_holiday_hours.toFixed(2),
       item.total_paid_hours.toFixed(2),
       `$${item.total_pay.toFixed(2)}`,
-      item.entries_count,
+      item.commission?.total_services || 0,
+      `$${(item.commission?.total_sales || 0).toFixed(2)}`,
+      `$${(item.commission?.total_commission || 0).toFixed(2)}`,
+      item.recommended_pay === 'commission' ? 'Commission' : 'Hourly',
+      `$${item.final_pay.toFixed(2)}`,
     ]);
 
     const csv = [headers.join(','), ...rows.map((row) => row.join(','))].join(
@@ -311,16 +404,23 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
   };
 
   // Calculate summary stats
-  const totalPayroll = payrollData.reduce(
+  const totalHourlyPay = combinedData.reduce(
     (sum, item) => sum + item.total_pay,
     0
   );
-  const totalHours = payrollData.reduce(
+  const totalCommission = combinedData.reduce(
+    (sum, item) => sum + (item.commission?.total_commission || 0),
+    0
+  );
+  const totalFinalPay = combinedData.reduce(
+    (sum, item) => sum + item.final_pay,
+    0
+  );
+  const totalHours = combinedData.reduce(
     (sum, item) => sum + item.total_paid_hours,
     0
   );
-  const staffCount = payrollData.length;
-  const avgHours = staffCount > 0 ? totalHours / staffCount : 0;
+  const staffCount = combinedData.length;
 
   return (
     <div className="space-y-6">
@@ -332,7 +432,7 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
             Payroll Reports
           </CardTitle>
           <CardDescription>
-            Generate detailed payroll reports by pay period
+            Compare hourly pay vs commission - pay the higher amount
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -479,31 +579,64 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
       {/* Results */}
       {hasGenerated && (
         <>
-          {payrollData.length === 0 ? (
+          {combinedData.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 <Calendar className="h-16 w-16 mx-auto mb-4 opacity-20" />
                 <p className="text-lg font-medium">No data for this period</p>
                 <p className="text-sm mt-2">
-                  There are no completed shifts in the selected date range
+                  There are no completed shifts or appointments in the selected
+                  date range
                 </p>
               </CardContent>
             </Card>
           ) : (
             <>
               {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Total Payroll
+                      Total Hourly Pay
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center gap-2">
-                      <DollarSign className="h-5 w-5 text-green-600" />
+                      <Clock className="h-5 w-5 text-blue-600" />
                       <div className="text-2xl font-bold">
-                        ${totalPayroll.toFixed(2)}
+                        ${totalHourlyPay.toFixed(2)}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Total Commission
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-2">
+                      <Percent className="h-5 w-5 text-purple-600" />
+                      <div className="text-2xl font-bold">
+                        ${totalCommission.toFixed(2)}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-green-50 border-green-200">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium text-green-700">
+                      Final Payroll (Higher)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-2">
+                      <Trophy className="h-5 w-5 text-green-600" />
+                      <div className="text-2xl font-bold text-green-700">
+                        ${totalFinalPay.toFixed(2)}
                       </div>
                     </div>
                   </CardContent>
@@ -517,7 +650,7 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center gap-2">
-                      <Clock className="h-5 w-5 text-blue-600" />
+                      <TrendingUp className="h-5 w-5 text-orange-600" />
                       <div className="text-2xl font-bold">
                         {totalHours.toFixed(1)}h
                       </div>
@@ -533,24 +666,8 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-purple-600" />
+                      <Users className="h-5 w-5 text-indigo-600" />
                       <div className="text-2xl font-bold">{staffCount}</div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Avg Hours/Staff
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="h-5 w-5 text-orange-600" />
-                      <div className="text-2xl font-bold">
-                        {avgHours.toFixed(1)}h
-                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -569,12 +686,13 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
                 <CardHeader>
                   <CardTitle>Detailed Breakdown</CardTitle>
                   <CardDescription>
-                    Click on a row to see individual shift details
+                    Click on a row to see individual shift details. Green
+                    highlight = recommended pay method.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {payrollData.map((item) => (
+                    {combinedData.map((item) => (
                       <div
                         key={item.team_member_id}
                         className="border rounded-lg"
@@ -596,51 +714,110 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
                                   {item.team_member_name}
                                 </p>
                                 <p className="text-sm text-muted-foreground">
-                                  {item.entries_count} shifts
+                                  {item.entries_count} shifts •{' '}
+                                  {item.commission?.total_services || 0}{' '}
+                                  services
                                 </p>
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-5 gap-4 text-right">
-                              <div>
+                            <div className="grid grid-cols-4 gap-4 items-stretch">
+                              {/* Hourly Pay */}
+                              <div
+                                className={`p-3 rounded border flex flex-col justify-between ${
+                                  item.recommended_pay === 'hourly'
+                                    ? 'bg-green-50 border-green-200'
+                                    : 'bg-gray-50'
+                                }`}
+                              >
                                 <p className="text-xs text-muted-foreground">
-                                  Weekday
+                                  Hourly Pay
                                 </p>
-                                <p className="font-medium">
-                                  {item.weekday_hours.toFixed(1)}h
-                                </p>
+                                <div>
+                                  <p
+                                    className={`font-bold text-lg ${
+                                      item.recommended_pay === 'hourly'
+                                        ? 'text-green-700'
+                                        : ''
+                                    }`}
+                                  >
+                                    ${item.total_pay.toFixed(2)}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {item.total_paid_hours.toFixed(1)}h
+                                  </p>
+                                </div>
                               </div>
-                              <div>
+
+                              {/* Commission */}
+                              <div
+                                className={`p-3 rounded border flex flex-col justify-between ${
+                                  item.recommended_pay === 'commission'
+                                    ? 'bg-green-50 border-green-200'
+                                    : 'bg-gray-50'
+                                }`}
+                              >
                                 <p className="text-xs text-muted-foreground">
-                                  Saturday
+                                  Commission
                                 </p>
-                                <p className="font-medium">
-                                  {item.saturday_hours.toFixed(1)}h
-                                </p>
+                                <div>
+                                  <p
+                                    className={`font-bold text-lg ${
+                                      item.recommended_pay === 'commission'
+                                        ? 'text-green-700'
+                                        : ''
+                                    }`}
+                                  >
+                                    $
+                                    {(
+                                      item.commission?.total_commission || 0
+                                    ).toFixed(2)}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    $
+                                    {(
+                                      item.commission?.total_sales || 0
+                                    ).toFixed(0)}{' '}
+                                    sales
+                                  </p>
+                                </div>
                               </div>
-                              <div>
+
+                              {/* Recommended */}
+                              <div className="p-3 rounded border bg-gray-50 flex flex-col justify-between">
                                 <p className="text-xs text-muted-foreground">
-                                  Sunday
+                                  Recommended
                                 </p>
-                                <p className="font-medium">
-                                  {item.sunday_hours.toFixed(1)}h
-                                </p>
+                                <div>
+                                  <Badge
+                                    variant={
+                                      item.recommended_pay === 'commission'
+                                        ? 'default'
+                                        : 'secondary'
+                                    }
+                                    className={
+                                      item.recommended_pay === 'commission'
+                                        ? 'bg-purple-600'
+                                        : 'bg-blue-600 text-white'
+                                    }
+                                  >
+                                    {item.recommended_pay === 'commission'
+                                      ? 'Commission'
+                                      : 'Hourly'}
+                                  </Badge>
+                                </div>
                               </div>
-                              <div>
+
+                              {/* Final Pay */}
+                              <div className="p-3 rounded border bg-gray-50 flex flex-col justify-between">
                                 <p className="text-xs text-muted-foreground">
-                                  Holiday
+                                  Final Pay
                                 </p>
-                                <p className="font-medium">
-                                  {item.public_holiday_hours.toFixed(1)}h
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">
-                                  Total Pay
-                                </p>
-                                <p className="font-bold text-green-600">
-                                  ${item.total_pay.toFixed(2)}
-                                </p>
+                                <div>
+                                  <p className="font-bold text-green-600 text-xl">
+                                    ${item.final_pay.toFixed(2)}
+                                  </p>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -649,57 +826,192 @@ export function PayrollReportsTab({ teamMembers }: PayrollReportsTabProps) {
                         {/* Expanded Details */}
                         {expandedRows.has(item.team_member_id) && (
                           <div className="border-t bg-gray-50 p-4">
-                            <p className="font-semibold mb-3 text-sm">
-                              Individual Shifts
-                            </p>
-                            {shiftDetails[item.team_member_id] ? (
-                              <div className="space-y-2">
-                                {shiftDetails[item.team_member_id].map(
-                                  (shift) => (
-                                    <div
-                                      key={shift.id}
-                                      className="flex justify-between items-center bg-white p-3 rounded border text-sm"
-                                    >
-                                      <div>
-                                        <p className="font-medium">
-                                          {formatDate(
-                                            new Date(
-                                              shift.shift_date + 'T00:00:00'
-                                            ),
-                                            'EEE dd MMM yyyy'
-                                          )}
-                                        </p>
-                                        <p className="text-muted-foreground">
-                                          {shift.venues.name}
-                                        </p>
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="font-medium">
-                                          {shift.total_paid_hours?.toFixed(1)}h
-                                          paid
-                                        </p>
-                                        <p className="text-xs text-muted-foreground">
-                                          {formatDate(
-                                            new Date(shift.clock_in_time),
-                                            'HH:mm'
-                                          )}{' '}
-                                          -{' '}
-                                          {shift.clock_out_time &&
-                                            formatDate(
-                                              new Date(shift.clock_out_time),
-                                              'HH:mm'
-                                            )}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  )
-                                )}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              {/* Hours Breakdown */}
+                              <div>
+                                <p className="font-semibold mb-3 text-sm">
+                                  Hours Breakdown
+                                </p>
+                                <div className="grid grid-cols-4 gap-2 text-sm">
+                                  <div className="bg-white p-2 rounded border">
+                                    <p className="text-xs text-muted-foreground">
+                                      Weekday
+                                    </p>
+                                    <p className="font-medium">
+                                      {item.weekday_hours.toFixed(1)}h
+                                    </p>
+                                  </div>
+                                  <div className="bg-white p-2 rounded border">
+                                    <p className="text-xs text-muted-foreground">
+                                      Saturday
+                                    </p>
+                                    <p className="font-medium">
+                                      {item.saturday_hours.toFixed(1)}h
+                                    </p>
+                                  </div>
+                                  <div className="bg-white p-2 rounded border">
+                                    <p className="text-xs text-muted-foreground">
+                                      Sunday
+                                    </p>
+                                    <p className="font-medium">
+                                      {item.sunday_hours.toFixed(1)}h
+                                    </p>
+                                  </div>
+                                  <div className="bg-white p-2 rounded border">
+                                    <p className="text-xs text-muted-foreground">
+                                      Holiday
+                                    </p>
+                                    <p className="font-medium">
+                                      {item.public_holiday_hours.toFixed(1)}h
+                                    </p>
+                                  </div>
+                                </div>
                               </div>
-                            ) : (
-                              <p className="text-sm text-muted-foreground">
-                                Loading shifts...
+
+                              {/* Commission Breakdown */}
+                              {item.commission && (
+                                <div>
+                                  <p className="font-semibold mb-3 text-sm">
+                                    Commission Breakdown
+                                  </p>
+                                  <div className="grid grid-cols-4 gap-2 text-sm">
+                                    <div className="bg-white p-2 rounded border">
+                                      <p className="text-xs text-muted-foreground">
+                                        A (New) 30%
+                                      </p>
+                                      <p className="font-medium">
+                                        {
+                                          item.commission.by_client_type.typeA
+                                            .count
+                                        }
+                                      </p>
+                                      <p className="text-xs text-green-600">
+                                        $
+                                        {item.commission.by_client_type.typeA.commission.toFixed(
+                                          0
+                                        )}
+                                      </p>
+                                    </div>
+                                    <div className="bg-white p-2 rounded border">
+                                      <p className="text-xs text-muted-foreground">
+                                        B (Regular) 40%
+                                      </p>
+                                      <p className="font-medium">
+                                        {
+                                          item.commission.by_client_type.typeB
+                                            .count
+                                        }
+                                      </p>
+                                      <p className="text-xs text-green-600">
+                                        $
+                                        {item.commission.by_client_type.typeB.commission.toFixed(
+                                          0
+                                        )}
+                                      </p>
+                                    </div>
+                                    <div className="bg-white p-2 rounded border">
+                                      <p className="text-xs text-muted-foreground">
+                                        B+ (Request) 40%
+                                      </p>
+                                      <p className="font-medium">
+                                        {
+                                          item.commission.by_client_type
+                                            .typeBPlus.count
+                                        }
+                                      </p>
+                                      <p className="text-xs text-green-600">
+                                        $
+                                        {item.commission.by_client_type.typeBPlus.commission.toFixed(
+                                          0
+                                        )}
+                                      </p>
+                                    </div>
+                                    <div className="bg-white p-2 rounded border">
+                                      <p className="text-xs text-muted-foreground">
+                                        C (Salon) 30%
+                                      </p>
+                                      <p className="font-medium">
+                                        {
+                                          item.commission.by_client_type.typeC
+                                            .count
+                                        }
+                                      </p>
+                                      <p className="text-xs text-green-600">
+                                        $
+                                        {item.commission.by_client_type.typeC.commission.toFixed(
+                                          0
+                                        )}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Individual Shifts */}
+                            <div className="mt-4">
+                              <p className="font-semibold mb-3 text-sm">
+                                Individual Shifts
                               </p>
-                            )}
+                              {shiftDetails[item.team_member_id] ? (
+                                shiftDetails[item.team_member_id].length > 0 ? (
+                                  <div className="space-y-2">
+                                    {shiftDetails[item.team_member_id].map(
+                                      (shift) => (
+                                        <div
+                                          key={shift.id}
+                                          className="flex justify-between items-center bg-white p-3 rounded border text-sm"
+                                        >
+                                          <div>
+                                            <p className="font-medium">
+                                              {formatDate(
+                                                new Date(
+                                                  shift.shift_date + 'T00:00:00'
+                                                ),
+                                                'EEE dd MMM yyyy'
+                                              )}
+                                            </p>
+                                            <p className="text-muted-foreground">
+                                              {shift.venues.name}
+                                            </p>
+                                          </div>
+                                          <div className="text-right">
+                                            <p className="font-medium">
+                                              {shift.total_paid_hours?.toFixed(
+                                                1
+                                              )}
+                                              h paid
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                              {formatDate(
+                                                new Date(shift.clock_in_time),
+                                                'HH:mm'
+                                              )}{' '}
+                                              -{' '}
+                                              {shift.clock_out_time &&
+                                                formatDate(
+                                                  new Date(
+                                                    shift.clock_out_time
+                                                  ),
+                                                  'HH:mm'
+                                                )}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">
+                                    No shifts recorded
+                                  </p>
+                                )
+                              ) : (
+                                <p className="text-sm text-muted-foreground">
+                                  Loading shifts...
+                                </p>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
