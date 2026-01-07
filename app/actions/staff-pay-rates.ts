@@ -311,7 +311,7 @@ export async function deleteCustomPayRates(teamMemberId: string) {
 // =====================================================
 // GET PUBLIC HOLIDAYS
 // =====================================================
-export async function getPublicHolidays(): Promise<{
+export async function getPublicHolidays(year?: number): Promise<{
   success: boolean;
   data?: PublicHoliday[];
   error?: string;
@@ -319,10 +319,16 @@ export async function getPublicHolidays(): Promise<{
   try {
     await requireAuth();
 
-    const { data, error } = await supabaseAdmin
+    const baseQuery = supabaseAdmin
       .from('public_holidays')
       .select('*')
       .order('date', { ascending: true });
+
+    const { data, error } = year
+      ? await baseQuery
+          .gte('date', `${year}-01-01`)
+          .lte('date', `${year}-12-31`)
+      : await baseQuery;
 
     if (error) throw error;
     return { success: true, data: data || [] };
