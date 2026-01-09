@@ -14,15 +14,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { createCategory } from '@/app/actions/products';
-import type { Category } from '@/app/actions/products';
+import { Checkbox } from '@/components/ui/checkbox';
+import { createCategory, getCategoryById } from '@/app/actions/products';
+import type { CategoryWithVenues } from '@/app/actions/products';
 
 type Venue = {
   id: string;
@@ -33,7 +27,7 @@ type AddCategoryModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   venues: Venue[];
-  onCategoryAdded: (category: Category) => void;
+  onCategoryAdded: (category: CategoryWithVenues) => void;
 };
 
 // Predefined color palette
@@ -54,19 +48,49 @@ export default function AddCategoryModal({
   venues,
   onCategoryAdded,
 }: AddCategoryModalProps) {
-  const [venueId, setVenueId] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedColor, setSelectedColor] = useState(COLORS[0].value);
+  const [selectedVenues, setSelectedVenues] = useState<Record<string, boolean>>(
+    {}
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const handleVenueToggle = (venueId: string, checked: boolean) => {
+    setSelectedVenues((prev) => ({
+      ...prev,
+      [venueId]: checked,
+    }));
+  };
+
+  const handleSelectAllVenues = () => {
+    const allSelected = venues.every((v) => selectedVenues[v.id]);
+    const newSelection: Record<string, boolean> = {};
+    venues.forEach((v) => {
+      newSelection[v.id] = !allSelected;
+    });
+    setSelectedVenues(newSelection);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!venueId || !name || !selectedColor) {
+    if (!name || !selectedColor) {
       setError('Please fill in all required fields');
+      return;
+    }
+
+    const venueAssignments = Object.entries(selectedVenues)
+      .filter(([, isSelected]) => isSelected)
+      .map(([venueId]) => ({
+        venue_id: venueId,
+        is_active: true,
+      }));
+
+    if (venueAssignments.length === 0) {
+      setError('Please select at least one venue');
       return;
     }
 
@@ -74,16 +98,20 @@ export default function AddCategoryModal({
 
     try {
       const result = await createCategory({
-        venue_id: venueId,
         name,
         description: description || undefined,
         color: selectedColor,
+        venue_assignments: venueAssignments,
       });
 
       if (result.error) {
         setError(result.error);
       } else if (result.data) {
-        onCategoryAdded(result.data);
+        // Fetch the full category with venue assignments
+        const fullCategory = await getCategoryById(result.data.id);
+        if (fullCategory.data) {
+          onCategoryAdded(fullCategory.data);
+        }
         handleClose();
       }
     } catch (err) {
@@ -94,44 +122,27 @@ export default function AddCategoryModal({
   };
 
   const handleClose = () => {
-    setVenueId('');
     setName('');
     setDescription('');
     setSelectedColor(COLORS[0].value);
+    setSelectedVenues({});
     setError('');
     onOpenChange(false);
   };
 
+  const selectedCount = Object.values(selectedVenues).filter(Boolean).length;
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New Category</DialogTitle>
           <DialogDescription>
-            Create a category to organize your products
+            Create a new product category and assign it to venues
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Venue Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="venue">
-              Venue <span className="text-destructive">*</span>
-            </Label>
-            <Select value={venueId} onValueChange={setVenueId}>
-              <SelectTrigger id="venue">
-                <SelectValue placeholder="Select venue" />
-              </SelectTrigger>
-              <SelectContent>
-                {venues.map((venue) => (
-                  <SelectItem key={venue.id} value={venue.id}>
-                    {venue.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Category Name */}
           <div className="space-y-2">
             <Label htmlFor="name">
@@ -141,7 +152,7 @@ export default function AddCategoryModal({
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., Hair Care, Nail Polish"
+              placeholder="Enter category name"
             />
           </div>
 
@@ -162,15 +173,15 @@ export default function AddCategoryModal({
             <Label>
               Color <span className="text-destructive">*</span>
             </Label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="flex flex-wrap gap-2">
               {COLORS.map((color) => (
                 <button
                   key={color.value}
                   type="button"
                   onClick={() => setSelectedColor(color.value)}
-                  className={`h-12 rounded-lg border-2 transition-all ${
+                  className={`w-8 h-8 rounded-full border-2 transition-all ${
                     selectedColor === color.value
-                      ? 'border-primary scale-110 shadow-md'
+                      ? 'border-black scale-110'
                       : 'border-transparent hover:scale-105'
                   }`}
                   style={{ backgroundColor: color.value }}
@@ -178,8 +189,47 @@ export default function AddCategoryModal({
                 />
               ))}
             </div>
+          </div>
+
+          {/* Venue Selection */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>
+                Available at Venues <span className="text-destructive">*</span>
+              </Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleSelectAllVenues}
+                className="h-auto py-1 px-2 text-xs"
+              >
+                {venues.every((v) => selectedVenues[v.id])
+                  ? 'Deselect All'
+                  : 'Select All'}
+              </Button>
+            </div>
+            <div className="border rounded-lg p-3 space-y-2 max-h-40 overflow-y-auto">
+              {venues.map((venue) => (
+                <div key={venue.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`venue-${venue.id}`}
+                    checked={selectedVenues[venue.id] || false}
+                    onCheckedChange={(checked) =>
+                      handleVenueToggle(venue.id, checked as boolean)
+                    }
+                  />
+                  <label
+                    htmlFor={`venue-${venue.id}`}
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                  >
+                    {venue.name}
+                  </label>
+                </div>
+              ))}
+            </div>
             <p className="text-xs text-muted-foreground">
-              Selected color will be used for category badges
+              {selectedCount} venue{selectedCount !== 1 ? 's' : ''} selected
             </p>
           </div>
 
@@ -199,7 +249,7 @@ export default function AddCategoryModal({
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? 'Adding...' : 'Add Category'}
+              {isLoading ? 'Creating...' : 'Create Category'}
             </Button>
           </DialogFooter>
         </form>

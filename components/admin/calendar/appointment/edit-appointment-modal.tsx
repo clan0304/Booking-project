@@ -2,11 +2,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Plus } from 'lucide-react';
 import {
   updateCalendarAppointment,
   deleteCalendarAppointment,
   addAppointmentToBooking,
+  updateBookingStatus,
 } from '@/app/actions/calendar-appointments';
 import { SaleDetailsModal } from './sale-details-modal';
 import { getAvailableServices } from '@/app/actions/services';
@@ -15,7 +16,11 @@ import { ViewMode } from './edit-appointment-view-mode';
 import { EditMode } from './edit-appointment-edit-mode';
 import { SingleEditMode } from './edit-appointment-single-mode';
 import { PaymentMode } from './edit-appointment-payment-mode';
-// ✅ NEW: Rebook imports
+import {
+  ProductPicker,
+  ProductQuantityEditor,
+  type SelectedProduct,
+} from './product-picker';
 import { RebookOverlay } from '../rebook-overlay';
 import type {
   RebookService,
@@ -33,9 +38,6 @@ import type {
   EditingAppointment,
 } from './edit-appointment-types';
 
-// =====================================================
-// PENDING APPOINTMENT TYPE (for new additions)
-// =====================================================
 interface PendingAppointment {
   tempId: string;
   serviceId: string;
@@ -55,10 +57,6 @@ export function EditAppointmentModal({
   initialStep = 'view',
   allowEdit = true,
 }: EditAppointmentModalProps) {
-  // =====================================================
-  // STATE
-  // =====================================================
-
   // Step management
   const [currentStep, setCurrentStep] = useState<ModalStep>(initialStep);
   const [bookingStatus, setBookingStatus] = useState<BookingStatus>(
@@ -67,8 +65,6 @@ export function EditAppointmentModal({
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showSaleModal, setShowSaleModal] = useState(false);
-
-  // ✅ NEW: Rebook state
   const [showRebookOverlay, setShowRebookOverlay] = useState(false);
 
   // Team members data
@@ -92,18 +88,14 @@ export function EditAppointmentModal({
   const [expandedAppointmentId, setExpandedAppointmentId] = useState<
     string | null
   >(null);
-
-  // ✅ NEW: Track which single appointment is being edited
   const [editingAppointmentId, setEditingAppointmentId] = useState<
     string | null
   >(null);
 
-  // ✅ NEW: Pending deletions (local until save)
+  // Pending changes
   const [pendingDeletions, setPendingDeletions] = useState<Set<string>>(
     new Set()
   );
-
-  // ✅ NEW: Pending additions (local until save)
   const [pendingAdditions, setPendingAdditions] = useState<
     Map<string, PendingAppointment>
   >(new Map());
@@ -132,19 +124,20 @@ export function EditAppointmentModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
-
-  // ✅ NEW: Delete booking confirmation modal
   const [showDeleteBookingConfirm, setShowDeleteBookingConfirm] =
     useState(false);
 
-  // =====================================================
-  // EFFECTS
-  // =====================================================
+  // Products state
+  const [addedProducts, setAddedProducts] = useState<SelectedProduct[]>([]);
+  const [showProductPicker, setShowProductPicker] = useState(false);
 
+  // Effects
   useEffect(() => {
     if (isOpen) {
       setCurrentStep(initialStep);
       setError('');
+      setAddedProducts([]); // Reset products when modal opens
+      setShowProductPicker(false);
     }
   }, [isOpen, initialStep]);
 
@@ -202,18 +195,15 @@ export function EditAppointmentModal({
       setInternalNotes(booking.internal_notes || '');
       setError('');
       setExpandedAppointmentId(null);
-
-      // ✅ Reset pending changes
       setPendingDeletions(new Set());
       setPendingAdditions(new Map());
+      setAddedProducts([]);
 
-      // ✅ NEW: Load services for all team members to get category colors
       const teamMemberIds = new Set<string>();
       booking.appointments.forEach((appt) => {
         teamMemberIds.add(appt.team_member_id);
       });
 
-      // Load services for each team member
       teamMemberIds.forEach(async (teamMemberId) => {
         try {
           const result = await getAvailableServices(
@@ -234,11 +224,9 @@ export function EditAppointmentModal({
     }
   }, [isOpen, booking]);
 
-  // ✅ NEW: Update category colors when services are loaded
   useEffect(() => {
     if (availableServices.size === 0 || editingAppointments.size === 0) return;
 
-    // Check if any appointments are missing category colors
     const appointmentsMissingColors = Array.from(
       editingAppointments.values()
     ).filter((appt) => !appt.categoryColor);
@@ -249,7 +237,6 @@ export function EditAppointmentModal({
     const updatedAppointments = new Map(editingAppointments);
 
     appointmentsMissingColors.forEach((appt) => {
-      // Find the service in loaded services
       const services = availableServices.get(appt.teamMemberId);
       if (services) {
         const service = services.find((s) => s.id === appt.serviceId);
@@ -266,15 +253,10 @@ export function EditAppointmentModal({
     if (hasUpdates) {
       setEditingAppointments(updatedAppointments);
     }
-    // Only depend on availableServices changes, not editingAppointments
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableServices]);
 
-  // =====================================================
-  // COMPUTED VALUES
-  // =====================================================
-
-  // ✅ Get count of visible appointments (existing - deleted + added)
+  // Computed values
   const getVisibleAppointmentCount = (): number => {
     const existingNotDeleted = Array.from(editingAppointments.keys()).filter(
       (id) => !pendingDeletions.has(id)
@@ -283,24 +265,21 @@ export function EditAppointmentModal({
   };
 
   const handleViewSale = () => {
-    console.log('handleViewSale called');
     setShowSaleModal(true);
   };
 
-  // ✅ Check if booking would be empty after save
   const wouldBeEmpty = (): boolean => {
-    return getVisibleAppointmentCount() === 0;
+    return getVisibleAppointmentCount() === 0 && addedProducts.length === 0;
   };
 
-  // ✅ Check if there are any unsaved changes
   const hasUnsavedChanges = (): boolean => {
-    // Check for pending deletions
     if (pendingDeletions.size > 0) return true;
-
-    // Check for pending additions
     if (pendingAdditions.size > 0) return true;
+    if (addedProducts.length > 0) return true;
 
-    // Check for edits to existing appointments
+    // Check if status has changed
+    if (bookingStatus !== booking.status) return true;
+
     for (const [appointmentId, editedAppt] of editingAppointments) {
       const originalAppt = booking.appointments.find(
         (a) => a.id === appointmentId
@@ -317,17 +296,41 @@ export function EditAppointmentModal({
       if (hasChanges) return true;
     }
 
-    // Check for notes changes
     if (bookingNotes !== (booking.notes || '')) return true;
     if (internalNotes !== (booking.internal_notes || '')) return true;
 
     return false;
   };
 
-  // =====================================================
-  // HANDLERS
-  // =====================================================
+  // Product handlers
+  const handleAddProduct = (product: SelectedProduct) => {
+    const existing = addedProducts.find(
+      (p) => p.productId === product.productId
+    );
+    if (existing) {
+      setAddedProducts((prev) =>
+        prev.map((p) =>
+          p.productId === product.productId
+            ? { ...p, quantity: Math.min(p.quantity + 1, p.maxQuantity) }
+            : p
+        )
+      );
+    } else {
+      setAddedProducts((prev) => [...prev, product]);
+    }
+  };
 
+  const handleUpdateProductQuantity = (productId: string, quantity: number) => {
+    setAddedProducts((prev) =>
+      prev.map((p) => (p.id === productId ? { ...p, quantity } : p))
+    );
+  };
+
+  const handleRemoveProduct = (productId: string) => {
+    setAddedProducts((prev) => prev.filter((p) => p.id !== productId));
+  };
+
+  // Service handlers
   const loadServicesForTeamMember = async (
     teamMemberId: string
   ): Promise<void> => {
@@ -335,8 +338,6 @@ export function EditAppointmentModal({
     try {
       const result = await getAvailableServices(booking.venue_id, teamMemberId);
       if (result.success && result.services) {
-        // Services are already in correct format from getAvailableServices
-        // Just cast to our Service type (they match)
         setAvailableServices((prev) => {
           const newMap = new Map(prev);
           newMap.set(teamMemberId, result.services as Service[]);
@@ -363,7 +364,6 @@ export function EditAppointmentModal({
     field: K,
     value: EditingAppointment[K]
   ) => {
-    // ✅ Check if it's a pending addition
     if (pendingAdditions.has(id)) {
       setPendingAdditions((prev) => {
         const newMap = new Map(prev);
@@ -396,7 +396,6 @@ export function EditAppointmentModal({
 
     updateAppointmentField(appointmentId, 'teamMemberId', teamMemberId);
 
-    // Get current appointment data
     const currentAppt = pendingAdditions.has(appointmentId)
       ? pendingAdditions.get(appointmentId)
       : editingAppointments.get(appointmentId);
@@ -424,39 +423,28 @@ export function EditAppointmentModal({
     setShowTeamMemberDropdown(null);
   };
 
-  // ✅ MODIFIED: Delete appointment locally (no API call until save)
   const handleDeleteAppointment = async (
     appointmentId: string
   ): Promise<void> => {
-    const visibleCount = getVisibleAppointmentCount();
-
-    // If this is the last visible appointment, show delete booking confirm
-    if (visibleCount <= 1) {
-      setShowDeleteBookingConfirm(true);
-      return;
-    }
-
-    // ✅ Check if it's a pending addition (just remove from state)
+    // Always allow soft deletion - actual deletion happens on Save
     if (pendingAdditions.has(appointmentId)) {
+      // Remove from pending additions (not yet saved to DB)
       setPendingAdditions((prev) => {
         const newMap = new Map(prev);
         newMap.delete(appointmentId);
         return newMap;
       });
     } else {
-      // ✅ Mark existing appointment for deletion (local only)
+      // Add to pending deletions (will be deleted on Save)
       setPendingDeletions((prev) => new Set(prev).add(appointmentId));
     }
 
-    // Clear expanded state if this was expanded
     if (expandedAppointmentId === appointmentId) {
       setExpandedAppointmentId(null);
     }
   };
 
-  // ✅ MODIFIED: Save all changes at once
   const handleSaveAll = async (): Promise<void> => {
-    // Check if booking would be empty
     if (wouldBeEmpty()) {
       setShowDeleteBookingConfirm(true);
       return;
@@ -466,20 +454,8 @@ export function EditAppointmentModal({
     setError('');
 
     try {
-      // 1. Delete appointments marked for deletion
-      for (const appointmentId of pendingDeletions) {
-        const result = await deleteCalendarAppointment(
-          appointmentId,
-          booking.id
-        );
-        if (!result.success) {
-          setError(result.error || 'Failed to delete appointment');
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      // 2. Create new appointments (pending additions)
+      // IMPORTANT: Add new appointments FIRST, then delete old ones
+      // This prevents the booking_group from being deleted when all original appointments are removed
       for (const [, pending] of pendingAdditions) {
         const result = await addAppointmentToBooking({
           bookingId: booking.id,
@@ -497,9 +473,20 @@ export function EditAppointmentModal({
         }
       }
 
-      // 3. Update edited existing appointments
+      // Now safe to delete old appointments
+      for (const appointmentId of pendingDeletions) {
+        const result = await deleteCalendarAppointment(
+          appointmentId,
+          booking.id
+        );
+        if (!result.success) {
+          setError(result.error || 'Failed to delete appointment');
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       for (const [appointmentId, editedAppt] of editingAppointments) {
-        // Skip deleted appointments
         if (pendingDeletions.has(appointmentId)) continue;
 
         const originalAppt = booking.appointments.find(
@@ -536,7 +523,6 @@ export function EditAppointmentModal({
         }
       }
 
-      // 4. Update notes if changed (and no other updates handled it)
       const notesChanged =
         bookingNotes !== (booking.notes || '') ||
         internalNotes !== (booking.internal_notes || '');
@@ -558,7 +544,6 @@ export function EditAppointmentModal({
         });
 
       if (notesChanged && !hasOtherUpdates) {
-        // Find first non-deleted appointment to update notes
         const firstNonDeleted = Array.from(editingAppointments.entries()).find(
           ([id]) => !pendingDeletions.has(id)
         );
@@ -572,16 +557,22 @@ export function EditAppointmentModal({
         }
       }
 
-      // ✅ Clear pending states immediately (UI updates)
+      // Save status change if changed
+      if (bookingStatus !== booking.status) {
+        const statusResult = await updateBookingStatus(
+          booking.id,
+          bookingStatus
+        );
+        if (!statusResult.success) {
+          setError(statusResult.error || 'Failed to update booking status');
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       setPendingDeletions(new Set());
       setPendingAdditions(new Map());
-
-      // ✅ Call onSuccess to refresh parent data
-      // Parent will pass new booking prop, triggering useEffect to sync state
       onSuccess();
-
-      // ✅ DON'T close modal - stay in View Mode
-      // User can close manually or continue with Checkout
       setCurrentStep('view');
     } catch (err) {
       setError('An unexpected error occurred');
@@ -591,19 +582,16 @@ export function EditAppointmentModal({
     }
   };
 
-  // ✅ MODIFIED: Show confirmation instead of browser confirm
   const handleDeleteBooking = async (): Promise<void> => {
     setShowDeleteBookingConfirm(true);
   };
 
-  // ✅ NEW: Confirm delete booking
   const confirmDeleteBooking = async (): Promise<void> => {
     setShowDeleteBookingConfirm(false);
     setIsDeleting(true);
     setError('');
 
     try {
-      // Delete all existing appointments (not pending additions)
       for (const appointmentId of editingAppointments.keys()) {
         const result = await deleteCalendarAppointment(
           appointmentId,
@@ -627,7 +615,6 @@ export function EditAppointmentModal({
 
   const handleShowServicePicker = (appointmentId: string | 'add-new') => {
     if (appointmentId === 'add-new') {
-      // ✅ Use first visible appointment's team member
       const firstExisting = Array.from(editingAppointments.values()).find(
         (appt) => !pendingDeletions.has(appt.id)
       );
@@ -639,15 +626,22 @@ export function EditAppointmentModal({
         if (!availableServices.has(firstAppt.teamMemberId)) {
           loadServicesForTeamMember(firstAppt.teamMemberId);
         }
+      } else {
+        // Fallback: use the original booking's first appointment's team member
+        const originalTeamMemberId = booking.appointments[0]?.team_member_id;
+        if (originalTeamMemberId) {
+          setServicePickerTeamMemberId(originalTeamMemberId);
+          if (!availableServices.has(originalTeamMemberId)) {
+            loadServicesForTeamMember(originalTeamMemberId);
+          }
+        }
       }
     } else {
-      // ✅ FIXED: Also load services when editing existing appointment
       const appointment = pendingAdditions.has(appointmentId)
         ? pendingAdditions.get(appointmentId)
         : editingAppointments.get(appointmentId);
       if (appointment) {
         setServicePickerTeamMemberId(appointment.teamMemberId);
-        // Load services if not already loaded
         if (!availableServices.has(appointment.teamMemberId)) {
           loadServicesForTeamMember(appointment.teamMemberId);
         }
@@ -661,12 +655,27 @@ export function EditAppointmentModal({
     setShowStatusDropdown(false);
   };
 
-  // ✅ UPDATED: Checkout saves to DB first, then goes to payment
   const handleCheckout = async (): Promise<void> => {
-    // If there are unsaved changes, save them first
-    if (hasUnsavedChanges()) {
-      // Check if booking would be empty
-      if (wouldBeEmpty()) {
+    const hasServiceChanges =
+      pendingDeletions.size > 0 ||
+      pendingAdditions.size > 0 ||
+      Array.from(editingAppointments.entries()).some(([id, edited]) => {
+        if (pendingDeletions.has(id)) return false;
+        const orig = booking.appointments.find((a) => a.id === id);
+        if (!orig) return false;
+        return (
+          edited.serviceId !== orig.service_id ||
+          edited.teamMemberId !== orig.team_member_id ||
+          edited.startTime !== orig.start_time.substring(0, 5) ||
+          edited.duration !== orig.duration_minutes ||
+          edited.price !== orig.price
+        );
+      }) ||
+      bookingNotes !== (booking.notes || '') ||
+      internalNotes !== (booking.internal_notes || '');
+
+    if (hasServiceChanges) {
+      if (getVisibleAppointmentCount() === 0 && addedProducts.length === 0) {
         setShowDeleteBookingConfirm(true);
         return;
       }
@@ -675,20 +684,8 @@ export function EditAppointmentModal({
       setError('');
 
       try {
-        // 1. Delete appointments marked for deletion
-        for (const appointmentId of pendingDeletions) {
-          const result = await deleteCalendarAppointment(
-            appointmentId,
-            booking.id
-          );
-          if (!result.success) {
-            setError(result.error || 'Failed to delete appointment');
-            setIsSubmitting(false);
-            return;
-          }
-        }
-
-        // 2. Create new appointments (pending additions)
+        // IMPORTANT: Add new appointments FIRST, then delete old ones
+        // This prevents the booking_group from being deleted when all original appointments are removed
         for (const [, pending] of pendingAdditions) {
           const result = await addAppointmentToBooking({
             bookingId: booking.id,
@@ -706,7 +703,19 @@ export function EditAppointmentModal({
           }
         }
 
-        // 3. Update edited existing appointments
+        // Now safe to delete old appointments
+        for (const appointmentId of pendingDeletions) {
+          const result = await deleteCalendarAppointment(
+            appointmentId,
+            booking.id
+          );
+          if (!result.success) {
+            setError(result.error || 'Failed to delete appointment');
+            setIsSubmitting(false);
+            return;
+          }
+        }
+
         for (const [appointmentId, editedAppt] of editingAppointments) {
           if (pendingDeletions.has(appointmentId)) continue;
 
@@ -744,7 +753,6 @@ export function EditAppointmentModal({
           }
         }
 
-        // 4. Update notes if changed
         const notesChanged =
           bookingNotes !== (booking.notes || '') ||
           internalNotes !== (booking.internal_notes || '');
@@ -763,11 +771,8 @@ export function EditAppointmentModal({
           }
         }
 
-        // Clear pending states
         setPendingDeletions(new Set());
         setPendingAdditions(new Map());
-
-        // Refresh parent data
         onSuccess();
       } catch (err) {
         setError('An unexpected error occurred');
@@ -779,7 +784,6 @@ export function EditAppointmentModal({
       }
     }
 
-    // Go to payment
     setCurrentStep('payment');
   };
 
@@ -787,16 +791,12 @@ export function EditAppointmentModal({
     setCurrentStep('edit');
   };
 
-  // ✅ NEW: Handle editing a specific appointment
   const handleEditAppointment = (appointmentId: string) => {
     setEditingAppointmentId(appointmentId);
     setCurrentStep('edit-single');
   };
 
-  // =====================================================
-  // ✅ NEW: REBOOK HANDLERS
-  // =====================================================
-
+  // Rebook handlers
   const handleRebook = () => {
     setShowMoreMenu(false);
     setShowRebookOverlay(true);
@@ -824,13 +824,11 @@ export function EditAppointmentModal({
       onSuccess();
       onClose();
     } else {
-      // Handle error
       console.error('Rebook failed:', result.error);
       setError(result.error || 'Failed to create rebooking');
     }
   };
 
-  // Build rebook data from current booking
   const getRebookData = (): RebookData => {
     const services: RebookService[] = Array.from(editingAppointments.values())
       .filter((appt) => !pendingDeletions.has(appt.id))
@@ -858,23 +856,20 @@ export function EditAppointmentModal({
     };
   };
 
-  // =====================================================
-  // SERVICE SELECTION HANDLER
-  // =====================================================
-
+  // Service selection handler
   const handleSelectService = async (service: Service) => {
     const appointmentIdOrAdd = showServicePicker;
 
     if (appointmentIdOrAdd === 'add-new') {
-      // ✅ MODIFIED: Add locally instead of API call
       const tempId = `pending-${Date.now()}-${Math.random()
         .toString(36)
         .substr(2, 9)}`;
 
-      // Calculate suggested start time (after last visible appointment)
-      let suggestedStartTime = '09:00';
+      // Default to original booking's first appointment start time
+      const originalStartTime =
+        booking.appointments[0]?.start_time?.substring(0, 5) || '09:00';
+      let suggestedStartTime = originalStartTime;
 
-      // Get all visible appointments
       const visibleAppointments: Array<{
         startTime: string;
         duration: number;
@@ -897,6 +892,7 @@ export function EditAppointmentModal({
       });
 
       if (visibleAppointments.length > 0) {
+        // If there are visible appointments, calculate end time of the latest one
         let latestEnd = 0;
         visibleAppointments.forEach((appt) => {
           const endMinutes = timeToMinutes(appt.startTime) + appt.duration;
@@ -906,8 +902,8 @@ export function EditAppointmentModal({
         });
         suggestedStartTime = minutesToTime(latestEnd);
       }
+      // If no visible appointments, suggestedStartTime stays as originalStartTime
 
-      // ✅ Add to pending additions (local only)
       const newPending: PendingAppointment = {
         tempId,
         serviceId: service.id,
@@ -927,7 +923,6 @@ export function EditAppointmentModal({
 
       setShowServicePicker(null);
     } else if (appointmentIdOrAdd) {
-      // Updating existing appointment's service
       updateAppointmentField(appointmentIdOrAdd, 'serviceId', service.id);
       updateAppointmentField(appointmentIdOrAdd, 'serviceName', service.name);
       updateAppointmentField(
@@ -949,10 +944,7 @@ export function EditAppointmentModal({
     }
   };
 
-  // =====================================================
-  // HELPER FUNCTIONS
-  // =====================================================
-
+  // Helper functions
   const timeToMinutes = (time: string): number => {
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
@@ -1051,20 +1043,21 @@ export function EditAppointmentModal({
     return name.substring(0, 2).toUpperCase();
   };
 
-  // ✅ MODIFIED: Calculate total from visible appointments
   const getTotalPrice = (): number => {
     let total = 0;
 
-    // Add existing appointments (not deleted)
     editingAppointments.forEach((appt, id) => {
       if (!pendingDeletions.has(id)) {
         total += appt.price || 0;
       }
     });
 
-    // Add pending additions
     pendingAdditions.forEach((pending) => {
       total += pending.price || 0;
+    });
+
+    addedProducts.forEach((product) => {
+      total += product.unitPrice * product.quantity;
     });
 
     return total;
@@ -1073,25 +1066,22 @@ export function EditAppointmentModal({
   const getStatusLabel = (status: string): string => {
     const labels: Record<string, string> = {
       confirmed: 'Confirmed',
-      cancelled: 'Cancelled',
+      cancelled: 'Canceled',
       completed: 'Completed',
       no_show: 'No Show',
     };
     return labels[status] || status;
   };
 
-  // ✅ NEW: Get visible appointments map (for passing to child components)
   const getVisibleAppointments = (): Map<string, EditingAppointment> => {
     const visible = new Map<string, EditingAppointment>();
 
-    // Add existing appointments (not deleted)
     editingAppointments.forEach((appt, id) => {
       if (!pendingDeletions.has(id)) {
         visible.set(id, appt);
       }
     });
 
-    // Add pending additions as EditingAppointment
     pendingAdditions.forEach((pending, tempId) => {
       visible.set(tempId, {
         id: tempId,
@@ -1108,14 +1098,10 @@ export function EditAppointmentModal({
     return visible;
   };
 
-  // =====================================================
-  // SERVICE PICKER RENDER
-  // =====================================================
-
+  // Service picker render
   const renderServicePicker = () => {
     const services = availableServices.get(servicePickerTeamMemberId) || [];
 
-    // Group services by category
     const groupedServices = services.reduce((acc, service) => {
       const categoryName = service.service_categories?.name || 'Uncategorized';
       if (!acc[categoryName]) {
@@ -1197,13 +1183,41 @@ export function EditAppointmentModal({
     );
   };
 
-  // =====================================================
-  // MAIN RENDER
-  // =====================================================
+  // Products section render
+  const renderProductsSection = () => {
+    return (
+      <div className="mt-6 px-6">
+        <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+          Products
+        </h4>
 
+        {addedProducts.length > 0 && (
+          <div className="space-y-2 mb-3">
+            {addedProducts.map((product) => (
+              <ProductQuantityEditor
+                key={product.id}
+                product={product}
+                onUpdateQuantity={handleUpdateProductQuantity}
+                onRemove={handleRemoveProduct}
+              />
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowProductPicker(true)}
+          className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-500 hover:bg-purple-50 transition-colors w-fit"
+        >
+          <Plus className="w-4 h-4 text-gray-500" />
+          <span className="text-sm font-medium text-gray-700">Add product</span>
+        </button>
+      </div>
+    );
+  };
+
+  // Main render
   if (!isOpen) return null;
 
-  // ✅ Get visible appointments for child components
   const visibleAppointments = getVisibleAppointments();
 
   const renderContent = () => {
@@ -1230,6 +1244,7 @@ export function EditAppointmentModal({
             onCheckout={handleCheckout}
             onSave={handleSaveAll}
             onToggleEdit={handleToggleEdit}
+            onShowServicePicker={() => handleShowServicePicker('add-new')}
             onEditAppointment={handleEditAppointment}
             onDeleteBooking={handleDeleteBooking}
             onDeleteAppointment={handleDeleteAppointment}
@@ -1243,6 +1258,7 @@ export function EditAppointmentModal({
             getTotalPrice={getTotalPrice}
             getStatusLabel={getStatusLabel}
             onViewSale={handleViewSale}
+            productsSection={renderProductsSection()}
           />
         );
 
@@ -1287,13 +1303,11 @@ export function EditAppointmentModal({
         );
 
       case 'edit-single':
-        // Get the appointment being edited
         const singleAppointment = editingAppointmentId
           ? visibleAppointments.get(editingAppointmentId)
           : undefined;
 
         if (!singleAppointment || !editingAppointmentId) {
-          // Fallback to view if no appointment selected
           setCurrentStep('view');
           return null;
         }
@@ -1309,8 +1323,8 @@ export function EditAppointmentModal({
             showTeamMemberDropdown={showTeamMemberDropdown}
             showTimeDropdown={showTimeDropdown}
             showDurationDropdown={showDurationDropdown}
-            isSaving={false} // Never saving in single edit - just applying locally
-            canDelete={visibleAppointments.size > 1}
+            isSaving={false}
+            canDelete={true} // Always allow soft deletion
             onUpdateAppointmentField={updateAppointmentField}
             onTeamMemberChange={handleTeamMemberChange}
             onDeleteAppointment={async (id) => {
@@ -1319,9 +1333,6 @@ export function EditAppointmentModal({
             }}
             onShowServicePicker={(id) => handleShowServicePicker(id)}
             onSave={() => {
-              // ✅ FIXED: Don't save to DB - just go back to view mode
-              // Changes are already applied locally via onUpdateAppointmentField
-              // User will click "Save" in View Mode to actually save to DB
               setEditingAppointmentId(null);
               setCurrentStep('view');
             }}
@@ -1345,10 +1356,14 @@ export function EditAppointmentModal({
           <PaymentMode
             booking={booking}
             editingAppointments={visibleAppointments}
+            addedProducts={addedProducts}
             totalPrice={getTotalPrice()}
             onBack={() => setCurrentStep('view')}
             onClose={onClose}
-            onSuccess={onSuccess}
+            onSuccess={() => {
+              setAddedProducts([]);
+              onSuccess();
+            }}
           />
         );
 
@@ -1359,26 +1374,20 @@ export function EditAppointmentModal({
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/50 z-50" onClick={onClose} />
 
-      {/* Modal - Wider and more responsive */}
       <div className="fixed inset-y-0 right-0 w-full sm:w-[480px] md:w-[600px] lg:w-[750px] xl:w-[900px] bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
-        {/* Error Banner */}
         {error && (
           <div className="bg-red-50 border-b border-red-200 px-4 py-3">
             <p className="text-sm text-red-800">{error}</p>
           </div>
         )}
 
-        {/* Content */}
         {renderContent()}
 
-        {/* Service Picker */}
         {showServicePicker && renderServicePicker()}
       </div>
 
-      {/* ✅ Delete Booking Confirmation Modal */}
       {showDeleteBookingConfirm && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-[70]">
           <div className="w-full max-w-sm mx-4 rounded-xl bg-white p-6 shadow-xl">
@@ -1387,7 +1396,7 @@ export function EditAppointmentModal({
             </h3>
             <p className="mt-2 text-sm text-gray-600">
               {wouldBeEmpty()
-                ? 'This booking has no services. Delete the entire booking?'
+                ? 'This booking has no services or products. Delete the entire booking?'
                 : 'Are you sure you want to delete this entire booking? This action cannot be undone.'}
             </p>
             <div className="mt-6 flex justify-end gap-3">
@@ -1417,20 +1426,27 @@ export function EditAppointmentModal({
         </div>
       )}
 
-      {/* ✅ Sale Details Modal */}
       <SaleDetailsModal
         isOpen={showSaleModal}
         onClose={() => setShowSaleModal(false)}
         booking={booking}
       />
 
-      {/* ✅ NEW: Rebook Overlay */}
       {showRebookOverlay && (
         <RebookOverlay
           isOpen={showRebookOverlay}
           onClose={() => setShowRebookOverlay(false)}
           rebookData={getRebookData()}
           onConfirm={handleRebookConfirm}
+        />
+      )}
+
+      {showProductPicker && (
+        <ProductPicker
+          venueId={booking.venue_id}
+          onSelectProduct={handleAddProduct}
+          onClose={() => setShowProductPicker(false)}
+          existingProducts={addedProducts}
         />
       )}
     </>

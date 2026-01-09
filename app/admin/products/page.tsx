@@ -3,12 +3,20 @@ import { getProducts, getCategories } from '@/app/actions/products';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import ProductsContent from '@/components/admin/products/products-content';
 import { PageWrapper } from '@/components/admin';
+import { requireAdmin } from '@/lib/auth';
+import { redirect } from 'next/navigation';
 
 // ✅ Force dynamic rendering
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export default async function ProductsPage() {
+  try {
+    await requireAdmin();
+  } catch {
+    redirect('/');
+  }
+
   // Fetch initial data
   const [productsResult, categoriesResult, venuesResult] = await Promise.all([
     getProducts(),

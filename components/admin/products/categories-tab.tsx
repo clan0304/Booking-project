@@ -2,7 +2,14 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Plus, Search, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  MapPin,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -10,7 +17,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 import {
   DropdownMenu,
@@ -30,7 +36,7 @@ import { Badge } from '@/components/ui/badge';
 import AddCategoryModal from './add-category-modal';
 import EditCategoryModal from './edit-category-modal';
 import DeleteCategoryDialog from './delete-category-dialog';
-import type { Category } from '@/app/actions/products';
+import type { CategoryWithVenues } from '@/app/actions/products';
 
 type Venue = {
   id: string;
@@ -38,7 +44,7 @@ type Venue = {
 };
 
 type CategoriesTabProps = {
-  initialCategories: Category[];
+  initialCategories: CategoryWithVenues[];
   venues: Venue[];
 };
 
@@ -51,10 +57,10 @@ export default function CategoriesTab({
   const [selectedVenue, setSelectedVenue] = useState<string>('all');
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
-  const [deletingCategory, setDeletingCategory] = useState<Category | null>(
-    null
-  );
+  const [editingCategory, setEditingCategory] =
+    useState<CategoryWithVenues | null>(null);
+  const [deletingCategory, setDeletingCategory] =
+    useState<CategoryWithVenues | null>(null);
 
   // Filter categories
   const filteredCategories = useMemo(() => {
@@ -64,17 +70,31 @@ export default function CategoriesTab({
         .includes(searchQuery.toLowerCase());
 
       const matchesVenue =
-        selectedVenue === 'all' || category.venue_id === selectedVenue;
+        selectedVenue === 'all' ||
+        category.category_venues.some(
+          (cv) => cv.venue_id === selectedVenue && cv.is_active
+        );
 
       return matchesSearch && matchesVenue;
     });
   }, [categories, searchQuery, selectedVenue]);
 
-  const handleCategoryAdded = (newCategory: Category) => {
+  // Get venue names for a category
+  const getVenueNames = (category: CategoryWithVenues) => {
+    const activeVenueIds = category.category_venues
+      .filter((cv) => cv.is_active)
+      .map((cv) => cv.venue_id);
+
+    return venues
+      .filter((v) => activeVenueIds.includes(v.id))
+      .map((v) => v.name);
+  };
+
+  const handleCategoryAdded = (newCategory: CategoryWithVenues) => {
     setCategories((prev) => [newCategory, ...prev]);
   };
 
-  const handleCategoryUpdated = (updatedCategory: Category) => {
+  const handleCategoryUpdated = (updatedCategory: CategoryWithVenues) => {
     setCategories((prev) =>
       prev.map((c) => (c.id === updatedCategory.id ? updatedCategory : c))
     );
@@ -100,8 +120,12 @@ export default function CategoriesTab({
           </div>
 
           <Select value={selectedVenue} onValueChange={setSelectedVenue}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="All Venues" />
+            <SelectTrigger
+              className={`w-[52px] ${
+                selectedVenue !== 'all' ? 'border-primary text-primary' : ''
+              }`}
+            >
+              <MapPin className="h-4 w-4" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Venues</SelectItem>
@@ -132,9 +156,7 @@ export default function CategoriesTab({
           <p className="text-sm font-medium text-muted-foreground">
             Active Venues
           </p>
-          <p className="text-2xl font-bold">
-            {new Set(filteredCategories.map((c) => c.venue_id)).size}
-          </p>
+          <p className="text-2xl font-bold">{venues.length}</p>
         </div>
       </div>
 
@@ -146,7 +168,7 @@ export default function CategoriesTab({
               <TableHead className="w-[100px]">Color</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Description</TableHead>
-              <TableHead>Venue</TableHead>
+              <TableHead>Venues</TableHead>
               <TableHead className="w-[70px]"></TableHead>
             </TableRow>
           </TableHeader>
@@ -159,35 +181,39 @@ export default function CategoriesTab({
               </TableRow>
             ) : (
               filteredCategories.map((category) => {
-                const venue = venues.find((v) => v.id === category.venue_id);
+                const venueNames = getVenueNames(category);
                 return (
                   <TableRow key={category.id}>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="h-6 w-6 rounded border"
-                          style={{ backgroundColor: category.color }}
-                        />
-                        <Badge
-                          variant="outline"
-                          style={{ borderColor: category.color }}
-                        >
-                          {category.name}
-                        </Badge>
-                      </div>
+                      <div
+                        className="w-8 h-8 rounded-full border"
+                        style={{ backgroundColor: category.color }}
+                      />
                     </TableCell>
                     <TableCell className="font-medium">
                       {category.name}
                     </TableCell>
-                    <TableCell>
-                      <p className="text-sm text-muted-foreground line-clamp-2">
-                        {category.description || 'No description'}
-                      </p>
+                    <TableCell className="text-muted-foreground">
+                      {category.description || '-'}
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm">
-                        {venue?.name || 'Unknown'}
-                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {venueNames.length > 0 ? (
+                          venueNames.map((name) => (
+                            <Badge
+                              key={name}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {name}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            No venues assigned
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>

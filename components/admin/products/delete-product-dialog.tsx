@@ -13,12 +13,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { deleteProduct, deleteProductImage } from '@/app/actions/products';
-import type { Product } from '@/app/actions/products';
+import type { ProductWithDetails } from '@/app/actions/products';
 
 type DeleteProductDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  product: Product;
+  product: ProductWithDetails;
   onProductDeleted: (productId: string) => void;
 };
 
@@ -41,7 +41,7 @@ export default function DeleteProductDialog({
         await deleteProductImage(product.image_url);
       }
 
-      // Delete product from database
+      // Delete product from database (cascade handles venue assignments)
       const result = await deleteProduct(product.id);
 
       if (result.error) {
@@ -57,14 +57,22 @@ export default function DeleteProductDialog({
     }
   };
 
+  const venueCount = product.product_venues.filter((pv) => pv.is_active).length;
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Are you sure?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete <strong>{product.name}</strong> from
-            your inventory. This action cannot be undone.
+            This will permanently delete <strong>{product.name}</strong>
+            {venueCount > 0 && (
+              <>
+                {' '}
+                from {venueCount} venue{venueCount !== 1 ? 's' : ''}
+              </>
+            )}
+            . This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
 

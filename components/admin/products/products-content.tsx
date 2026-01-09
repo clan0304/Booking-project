@@ -5,20 +5,19 @@ import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ProductsTab from './products-tab';
 import CategoriesTab from './categories-tab';
-import type { Product, Category } from '@/app/actions/products';
+import type {
+  ProductWithDetails,
+  CategoryWithVenues,
+} from '@/app/actions/products';
 
 type Venue = {
   id: string;
   name: string;
 };
 
-type ProductWithCategory = Product & {
-  category: Category | null;
-};
-
 type ProductsContentProps = {
-  initialProducts: ProductWithCategory[];
-  initialCategories: Category[];
+  initialProducts: ProductWithDetails[];
+  initialCategories: CategoryWithVenues[];
   venues: Venue[];
 };
 

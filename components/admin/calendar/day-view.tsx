@@ -189,6 +189,10 @@ export function DayView({
   const [selectedBlockedTime, setSelectedBlockedTime] =
     useState<BlockedTime | null>(null);
 
+  const [editModalInitialStep, setEditModalInitialStep] = useState<
+    'view' | 'payment'
+  >('view');
+
   // Loading state for save operation
   const [isSaving, setIsSaving] = useState(false);
 
@@ -747,6 +751,7 @@ export function DayView({
     setShowBlockedTimeModal(true);
   };
 
+  // Handle checkout from create appointment modal (with products)
   // Appointment click handler
   const handleAppointmentClick = async (
     appointment: AppointmentWithBooking
@@ -755,6 +760,7 @@ export function DayView({
 
     setIsLoadingBooking(true);
     setIsEditModalOpen(true);
+    setEditModalInitialStep('view');
 
     try {
       const result = await getBookingByAppointmentId(appointment.id);
@@ -1252,11 +1258,14 @@ export function DayView({
               onClose={() => {
                 setIsEditModalOpen(false);
                 setSelectedBooking(null);
+                setEditModalInitialStep('view');
               }}
               booking={selectedBooking}
+              initialStep={editModalInitialStep}
               onSuccess={() => {
                 setIsEditModalOpen(false);
                 setSelectedBooking(null);
+                setEditModalInitialStep('view');
                 setUpdatedAppointments(new Map());
                 onRefresh();
               }}

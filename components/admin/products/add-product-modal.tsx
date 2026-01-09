@@ -22,8 +22,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { createProduct, uploadProductImage } from '@/app/actions/products';
-import type { Product, Category } from '@/app/actions/products';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  createProduct,
+  uploadProductImage,
+  getProductById,
+} from '@/app/actions/products';
+import type {
+  ProductWithDetails,
+  CategoryWithVenues,
+} from '@/app/actions/products';
 import Image from 'next/image';
 
 type Venue = {
@@ -31,12 +39,17 @@ type Venue = {
   name: string;
 };
 
+type VenueQuantity = {
+  is_active: boolean;
+  quantity: number;
+};
+
 type AddProductModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   venues: Venue[];
-  categories: Category[];
-  onProductAdded: (product: Product) => void;
+  categories: CategoryWithVenues[];
+  onProductAdded: (product: ProductWithDetails) => void;
 };
 
 export default function AddProductModal({
@@ -46,16 +59,50 @@ export default function AddProductModal({
   categories,
   onProductAdded,
 }: AddProductModalProps) {
-  const [venueId, setVenueId] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
-  const [quantity, setQuantity] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [venueQuantities, setVenueQuantities] = useState<
+    Record<string, VenueQuantity>
+  >({});
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const handleVenueToggle = (venueId: string, checked: boolean) => {
+    setVenueQuantities((prev) => ({
+      ...prev,
+      [venueId]: {
+        is_active: checked,
+        quantity: prev[venueId]?.quantity || 0,
+      },
+    }));
+  };
+
+  const handleQuantityChange = (venueId: string, quantity: string) => {
+    const qty = parseInt(quantity) || 0;
+    setVenueQuantities((prev) => ({
+      ...prev,
+      [venueId]: {
+        is_active: prev[venueId]?.is_active || false,
+        quantity: qty < 0 ? 0 : qty,
+      },
+    }));
+  };
+
+  const handleSelectAllVenues = () => {
+    const allSelected = venues.every((v) => venueQuantities[v.id]?.is_active);
+    const newQuantities: Record<string, VenueQuantity> = {};
+    venues.forEach((v) => {
+      newQuantities[v.id] = {
+        is_active: !allSelected,
+        quantity: venueQuantities[v.id]?.quantity || 0,
+      };
+    });
+    setVenueQuantities(newQuantities);
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,21 +126,27 @@ export default function AddProductModal({
     e.preventDefault();
     setError('');
 
-    if (!venueId || !name || !price || !quantity) {
+    if (!name || !price) {
       setError('Please fill in all required fields');
       return;
     }
 
     const priceNum = parseFloat(price);
-    const quantityNum = parseInt(quantity);
-
     if (isNaN(priceNum) || priceNum < 0) {
       setError('Please enter a valid price');
       return;
     }
 
-    if (isNaN(quantityNum) || quantityNum < 0) {
-      setError('Please enter a valid quantity');
+    const venueAssignments = Object.entries(venueQuantities)
+      .filter(([, vq]) => vq.is_active)
+      .map(([venueId, vq]) => ({
+        venue_id: venueId,
+        is_active: true,
+        quantity: vq.quantity,
+      }));
+
+    if (venueAssignments.length === 0) {
+      setError('Please select at least one venue');
       return;
     }
 
@@ -106,7 +159,7 @@ export default function AddProductModal({
         const formData = new FormData();
         formData.append('file', imageFile);
 
-        const uploadResult = await uploadProductImage(venueId, formData);
+        const uploadResult = await uploadProductImage(formData);
         if (uploadResult.error) {
           setError(uploadResult.error);
           setIsLoading(false);
@@ -117,19 +170,22 @@ export default function AddProductModal({
 
       // Create product
       const result = await createProduct({
-        venue_id: venueId,
         name,
         description: description || undefined,
         price: priceNum,
-        quantity: quantityNum,
         category_id: categoryId || undefined,
         image_url: imageUrl,
+        venue_assignments: venueAssignments,
       });
 
       if (result.error) {
         setError(result.error);
       } else if (result.data) {
-        onProductAdded(result.data);
+        // Fetch the full product with details
+        const fullProduct = await getProductById(result.data.id);
+        if (fullProduct.data) {
+          onProductAdded(fullProduct.data);
+        }
         handleClose();
       }
     } catch (err) {
@@ -140,22 +196,20 @@ export default function AddProductModal({
   };
 
   const handleClose = () => {
-    setVenueId('');
     setName('');
     setDescription('');
     setPrice('');
-    setQuantity('');
     setCategoryId('');
+    setVenueQuantities({});
     setImageFile(null);
     setImagePreview(null);
     setError('');
     onOpenChange(false);
   };
 
-  // Filter categories by selected venue
-  const filteredCategories = categories.filter(
-    (cat) => cat.venue_id === venueId
-  );
+  const selectedCount = Object.values(venueQuantities).filter(
+    (vq) => vq.is_active
+  ).length;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -163,30 +217,11 @@ export default function AddProductModal({
         <DialogHeader>
           <DialogTitle>Add New Product</DialogTitle>
           <DialogDescription>
-            Add a new product to your inventory
+            Add a new product and set quantities for each venue
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Venue Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="venue">
-              Venue <span className="text-destructive">*</span>
-            </Label>
-            <Select value={venueId} onValueChange={setVenueId}>
-              <SelectTrigger id="venue">
-                <SelectValue placeholder="Select venue" />
-              </SelectTrigger>
-              <SelectContent>
-                {venues.map((venue) => (
-                  <SelectItem key={venue.id} value={venue.id}>
-                    {venue.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Product Name */}
           <div className="space-y-2">
             <Label htmlFor="name">
@@ -212,7 +247,7 @@ export default function AddProductModal({
             />
           </div>
 
-          {/* Price and Quantity */}
+          {/* Price and Category */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="price">
@@ -230,87 +265,136 @@ export default function AddProductModal({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="quantity">
-                Quantity <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="quantity"
-                type="number"
-                min="0"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                placeholder="0"
-              />
+              <Label htmlFor="category">Category</Label>
+              <Select
+                value={categoryId || 'none'}
+                onValueChange={(value) =>
+                  setCategoryId(value === 'none' ? '' : value)
+                }
+              >
+                <SelectTrigger id="category">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No category</SelectItem>
+                  {categories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: category.color }}
+                        />
+                        {category.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
-          {/* Category */}
+          {/* Venue Selection with Quantities */}
           <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
-            <Select
-              value={categoryId}
-              onValueChange={setCategoryId}
-              disabled={!venueId || filteredCategories.length === 0}
-            >
-              <SelectTrigger id="category">
-                <SelectValue
-                  placeholder={
-                    !venueId
-                      ? 'Select venue first'
-                      : filteredCategories.length === 0
-                      ? 'No categories available'
-                      : 'Select category'
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {filteredCategories.map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center justify-between">
+              <Label>
+                Venues & Stock <span className="text-destructive">*</span>
+              </Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleSelectAllVenues}
+                className="h-auto py-1 px-2 text-xs"
+              >
+                {venues.every((v) => venueQuantities[v.id]?.is_active)
+                  ? 'Deselect All'
+                  : 'Select All'}
+              </Button>
+            </div>
+            <div className="border rounded-lg p-3 space-y-3 max-h-48 overflow-y-auto">
+              {venues.map((venue) => {
+                const vq = venueQuantities[venue.id] || {
+                  is_active: false,
+                  quantity: 0,
+                };
+                return (
+                  <div
+                    key={venue.id}
+                    className="flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center space-x-2 flex-1">
+                      <Checkbox
+                        id={`venue-${venue.id}`}
+                        checked={vq.is_active}
+                        onCheckedChange={(checked) =>
+                          handleVenueToggle(venue.id, checked as boolean)
+                        }
+                      />
+                      <label
+                        htmlFor={`venue-${venue.id}`}
+                        className="text-sm font-medium leading-none cursor-pointer"
+                      >
+                        {venue.name}
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-muted-foreground">
+                        Qty:
+                      </Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={vq.quantity}
+                        onChange={(e) =>
+                          handleQuantityChange(venue.id, e.target.value)
+                        }
+                        disabled={!vq.is_active}
+                        className="w-20 h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {selectedCount} venue{selectedCount !== 1 ? 's' : ''} selected
+            </p>
           </div>
 
           {/* Image Upload */}
           <div className="space-y-2">
             <Label>Product Image</Label>
             {imagePreview ? (
-              <div className="relative w-full h-48">
+              <div className="relative w-32 h-32">
                 <Image
                   src={imagePreview}
                   alt="Preview"
-                  className="w-full h-48 object-cover rounded-lg"
                   fill
+                  className="object-cover rounded-lg"
                 />
-                <Button
+                <button
                   type="button"
-                  variant="destructive"
-                  size="icon"
-                  className="absolute top-2 right-2"
                   onClick={handleRemoveImage}
+                  className="absolute -top-2 -right-2 p-1 bg-destructive text-destructive-foreground rounded-full"
                 >
                   <X className="h-4 w-4" />
-                </Button>
+                </button>
               </div>
             ) : (
-              <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground mb-2">
-                  Click to upload or drag and drop
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  PNG, JPG, WEBP up to 5MB
-                </p>
-                <Input
+              <label className="flex flex-col items-center justify-center w-32 h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50">
+                <Upload className="h-8 w-8 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground mt-2">
+                  Upload Image
+                </span>
+                <input
                   type="file"
                   accept="image/*"
                   onChange={handleImageChange}
-                  className="mt-2"
+                  className="hidden"
                 />
-              </div>
+              </label>
             )}
+            <p className="text-xs text-muted-foreground">Max 5MB</p>
           </div>
 
           {error && (
@@ -329,7 +413,7 @@ export default function AddProductModal({
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? 'Adding...' : 'Add Product'}
+              {isLoading ? 'Creating...' : 'Create Product'}
             </Button>
           </DialogFooter>
         </form>

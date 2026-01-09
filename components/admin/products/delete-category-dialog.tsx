@@ -13,12 +13,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { deleteCategory } from '@/app/actions/products';
-import type { Category } from '@/app/actions/products';
+import type { CategoryWithVenues } from '@/app/actions/products';
 
 type DeleteCategoryDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  category: Category;
+  category: CategoryWithVenues;
   onCategoryDeleted: (categoryId: string) => void;
 };
 

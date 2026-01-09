@@ -1,5 +1,6 @@
 // components/admin/calendar/appointment/edit-appointment-types.ts
 
+import type { ReactNode } from 'react';
 import type { BookingGroupWithAppointments } from '@/types/calendar';
 
 // =====================================================
@@ -8,12 +9,7 @@ import type { BookingGroupWithAppointments } from '@/types/calendar';
 
 export type ModalStep = 'view' | 'edit' | 'edit-single' | 'payment';
 
-export type BookingStatus =
-  | 'confirmed'
-  | 'pending'
-  | 'cancelled'
-  | 'completed'
-  | 'no_show';
+export type BookingStatus = 'confirmed' | 'cancelled' | 'completed' | 'no_show';
 
 // =====================================================
 // SERVICE & TEAM MEMBER TYPES
@@ -96,7 +92,7 @@ export interface ViewModeProps {
   bookingNotes: string;
   allowEdit: boolean;
 
-  // ✅ NEW: Track unsaved changes
+  // Track unsaved changes
   hasUnsavedChanges: boolean;
   isSaving: boolean;
 
@@ -108,10 +104,11 @@ export interface ViewModeProps {
   onViewSale: () => void;
   onSave: () => Promise<void>;
   onToggleEdit: () => void;
-  onEditAppointment: (appointmentId: string) => void; // ✅ NEW: Edit specific appointment
+  onShowServicePicker: () => void; // Directly open service picker
+  onEditAppointment: (appointmentId: string) => void; // Edit specific appointment
   onDeleteBooking: () => void;
   onDeleteAppointment: (appointmentId: string) => Promise<void>;
-  onRebook: () => void; // ✅ NEW: Trigger rebook flow
+  onRebook: () => void; // Trigger rebook flow
   onClose: () => void;
 
   // Helper functions
@@ -122,6 +119,9 @@ export interface ViewModeProps {
   getClientInitials: () => string;
   getTotalPrice: () => number;
   getStatusLabel: (status: BookingStatus) => string;
+
+  // Products section (optional - rendered from parent)
+  productsSection?: ReactNode;
 }
 
 // =====================================================

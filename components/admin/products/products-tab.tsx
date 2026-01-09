@@ -2,7 +2,15 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Plus, Search, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  Package,
+  MapPin,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -27,10 +35,19 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import AddProductModal from './add-product-modal';
 import EditProductModal from './edit-product-modal';
 import DeleteProductDialog from './delete-product-dialog';
-import type { Product, Category } from '@/app/actions/products';
+import type {
+  ProductWithDetails,
+  CategoryWithVenues,
+} from '@/app/actions/products';
 import Image from 'next/image';
 
 type Venue = {
@@ -38,13 +55,9 @@ type Venue = {
   name: string;
 };
 
-type ProductWithCategory = Product & {
-  category: Category | null;
-};
-
 type ProductsTabProps = {
-  initialProducts: ProductWithCategory[];
-  categories: Category[];
+  initialProducts: ProductWithDetails[];
+  categories: CategoryWithVenues[];
   venues: Venue[];
 };
 
@@ -60,8 +73,9 @@ export default function ProductsTab({
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] =
-    useState<ProductWithCategory | null>(null);
-  const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
+    useState<ProductWithDetails | null>(null);
+  const [deletingProduct, setDeletingProduct] =
+    useState<ProductWithDetails | null>(null);
 
   // Filter products
   const filteredProducts = useMemo(() => {
@@ -71,7 +85,10 @@ export default function ProductsTab({
         .includes(searchQuery.toLowerCase());
 
       const matchesVenue =
-        selectedVenue === 'all' || product.venue_id === selectedVenue;
+        selectedVenue === 'all' ||
+        product.product_venues.some(
+          (pv) => pv.venue_id === selectedVenue && pv.is_active
+        );
 
       const matchesCategory =
         selectedCategory === 'all' || product.category_id === selectedCategory;
@@ -80,7 +97,25 @@ export default function ProductsTab({
     });
   }, [products, searchQuery, selectedVenue, selectedCategory]);
 
-  // Get stock status
+  // Get total quantity across all venues
+  const getTotalQuantity = (product: ProductWithDetails) => {
+    return product.product_venues
+      .filter((pv) => pv.is_active)
+      .reduce((sum, pv) => sum + pv.quantity, 0);
+  };
+
+  // Get quantity for selected venue or total
+  const getDisplayQuantity = (product: ProductWithDetails) => {
+    if (selectedVenue === 'all') {
+      return getTotalQuantity(product);
+    }
+    const venueProduct = product.product_venues.find(
+      (pv) => pv.venue_id === selectedVenue && pv.is_active
+    );
+    return venueProduct?.quantity || 0;
+  };
+
+  // Get stock status based on quantity
   const getStockStatus = (quantity: number) => {
     if (quantity === 0)
       return { label: 'Out of Stock', color: 'destructive' as const };
@@ -89,17 +124,24 @@ export default function ProductsTab({
     return { label: 'In Stock', color: 'default' as const };
   };
 
-  const handleProductAdded = (newProduct: Product) => {
-    setProducts((prev) => [{ ...newProduct, category: null }, ...prev]);
+  // Get venue quantities tooltip content
+  const getVenueQuantities = (product: ProductWithDetails) => {
+    return product.product_venues
+      .filter((pv) => pv.is_active)
+      .map((pv) => {
+        const venue = venues.find((v) => v.id === pv.venue_id);
+        return `${venue?.name || 'Unknown'}: ${pv.quantity}`;
+      })
+      .join('\n');
   };
 
-  const handleProductUpdated = (updatedProduct: Product) => {
+  const handleProductAdded = (newProduct: ProductWithDetails) => {
+    setProducts((prev) => [newProduct, ...prev]);
+  };
+
+  const handleProductUpdated = (updatedProduct: ProductWithDetails) => {
     setProducts((prev) =>
-      prev.map((p) =>
-        p.id === updatedProduct.id
-          ? { ...updatedProduct, category: p.category }
-          : p
-      )
+      prev.map((p) => (p.id === updatedProduct.id ? updatedProduct : p))
     );
   };
 
@@ -107,12 +149,25 @@ export default function ProductsTab({
     setProducts((prev) => prev.filter((p) => p.id !== productId));
   };
 
+  // Calculate stats
+  const totalProducts = filteredProducts.length;
+  const inStockCount = filteredProducts.filter(
+    (p) => getDisplayQuantity(p) > 0
+  ).length;
+  const lowStockCount = filteredProducts.filter((p) => {
+    const qty = getDisplayQuantity(p);
+    return qty > 0 && qty < 10;
+  }).length;
+  const outOfStockCount = filteredProducts.filter(
+    (p) => getDisplayQuantity(p) === 0
+  ).length;
+
   return (
     <div className="space-y-4">
       {/* Header with filters */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 gap-2">
-          <div className="relative flex-1 max-w-sm">
+        <div className="flex flex-1 gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search products..."
@@ -123,8 +178,12 @@ export default function ProductsTab({
           </div>
 
           <Select value={selectedVenue} onValueChange={setSelectedVenue}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="All Venues" />
+            <SelectTrigger
+              className={`w-[52px] ${
+                selectedVenue !== 'all' ? 'border-primary text-primary' : ''
+              }`}
+            >
+              <MapPin className="h-4 w-4" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Venues</SelectItem>
@@ -163,30 +222,21 @@ export default function ProductsTab({
           <p className="text-sm font-medium text-muted-foreground">
             Total Products
           </p>
-          <p className="text-2xl font-bold">{filteredProducts.length}</p>
+          <p className="text-2xl font-bold">{totalProducts}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
           <p className="text-sm font-medium text-muted-foreground">In Stock</p>
-          <p className="text-2xl font-bold">
-            {filteredProducts.filter((p) => p.quantity > 0).length}
-          </p>
+          <p className="text-2xl font-bold text-green-600">{inStockCount}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
           <p className="text-sm font-medium text-muted-foreground">Low Stock</p>
-          <p className="text-2xl font-bold">
-            {
-              filteredProducts.filter((p) => p.quantity > 0 && p.quantity < 10)
-                .length
-            }
-          </p>
+          <p className="text-2xl font-bold text-yellow-600">{lowStockCount}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
           <p className="text-sm font-medium text-muted-foreground">
             Out of Stock
           </p>
-          <p className="text-2xl font-bold">
-            {filteredProducts.filter((p) => p.quantity === 0).length}
-          </p>
+          <p className="text-2xl font-bold text-red-600">{outOfStockCount}</p>
         </div>
       </div>
 
@@ -198,8 +248,11 @@ export default function ProductsTab({
               <TableHead className="w-[80px]">Image</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Category</TableHead>
-              <TableHead>Price</TableHead>
-              <TableHead>Stock</TableHead>
+              <TableHead className="text-right">Price</TableHead>
+              <TableHead className="text-right">
+                {selectedVenue === 'all' ? 'Total Qty' : 'Qty'}
+              </TableHead>
+              <TableHead>Venues</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="w-[70px]"></TableHead>
             </TableRow>
@@ -207,13 +260,18 @@ export default function ProductsTab({
           <TableBody>
             {filteredProducts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center">
+                <TableCell colSpan={8} className="h-24 text-center">
                   No products found.
                 </TableCell>
               </TableRow>
             ) : (
               filteredProducts.map((product) => {
-                const stockStatus = getStockStatus(product.quantity);
+                const quantity = getDisplayQuantity(product);
+                const stockStatus = getStockStatus(quantity);
+                const activeVenues = product.product_venues.filter(
+                  (pv) => pv.is_active
+                );
+
                 return (
                   <TableRow key={product.id}>
                     <TableCell>
@@ -221,27 +279,18 @@ export default function ProductsTab({
                         <Image
                           src={product.image_url}
                           alt={product.name}
-                          className="h-12 w-12 rounded object-cover"
-                          width={12}
-                          height={12}
+                          width={48}
+                          height={48}
+                          className="rounded-md object-cover"
                         />
                       ) : (
-                        <div className="h-12 w-12 rounded bg-muted flex items-center justify-center">
-                          <span className="text-xs text-muted-foreground">
-                            No image
-                          </span>
+                        <div className="w-12 h-12 rounded-md bg-muted flex items-center justify-center">
+                          <Package className="h-6 w-6 text-muted-foreground" />
                         </div>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{product.name}</p>
-                        {product.description && (
-                          <p className="text-sm text-muted-foreground line-clamp-1">
-                            {product.description}
-                          </p>
-                        )}
-                      </div>
+                    <TableCell className="font-medium">
+                      {product.name}
                     </TableCell>
                     <TableCell>
                       {product.category ? (
@@ -257,10 +306,56 @@ export default function ProductsTab({
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="font-medium">
+                    <TableCell className="text-right font-medium">
                       ${product.price.toFixed(2)}
                     </TableCell>
-                    <TableCell>{product.quantity}</TableCell>
+                    <TableCell className="text-right">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help underline decoration-dotted">
+                              {quantity}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="whitespace-pre-line text-xs">
+                              {getVenueQuantities(product) ||
+                                'No venues assigned'}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {activeVenues.length > 0 ? (
+                          activeVenues.length <= 2 ? (
+                            activeVenues.map((pv) => {
+                              const venue = venues.find(
+                                (v) => v.id === pv.venue_id
+                              );
+                              return (
+                                <Badge
+                                  key={pv.venue_id}
+                                  variant="secondary"
+                                  className="text-xs"
+                                >
+                                  {venue?.name || 'Unknown'}
+                                </Badge>
+                              );
+                            })
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">
+                              {activeVenues.length} venues
+                            </Badge>
+                          )
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            No venues
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={stockStatus.color}>
                         {stockStatus.label}

@@ -17,11 +17,20 @@ import {
   createCalendarAppointment,
   searchClientsForBooking,
   getRecentClients,
+  getBookingById,
 } from '@/app/actions/calendar-appointments';
 import { getAvailableServices } from '@/app/actions/services';
 import { getTeamMembersByVenue } from '@/app/actions/team-venue-assignments';
 import type { ClientSelectionType, SelectedService, ClientInfo } from './types';
 import Image from 'next/image';
+import {
+  ProductPicker,
+  ProductQuantityEditor,
+  type SelectedProduct,
+} from './product-picker';
+import { PaymentMode } from './edit-appointment-payment-mode';
+import type { BookingGroupWithAppointments } from '@/types/calendar';
+import type { EditingAppointment } from './edit-appointment-types';
 
 interface CreateAppointmentModalProps {
   isOpen: boolean;
@@ -85,9 +94,13 @@ export function CreateAppointmentModal({
   // =====================================================
   // VIEW STATE
   // =====================================================
-  const [currentView, setCurrentView] = useState<'main' | 'service-picker'>(
-    'main'
-  );
+  const [currentView, setCurrentView] = useState<
+    'main' | 'service-picker' | 'payment'
+  >('main');
+
+  // Saved booking for payment mode
+  const [savedBooking, setSavedBooking] =
+    useState<BookingGroupWithAppointments | null>(null);
 
   // =====================================================
   // SERVICES STATE
@@ -136,6 +149,12 @@ export function CreateAppointmentModal({
   );
 
   // =====================================================
+  // PRODUCTS STATE
+  // =====================================================
+  const [addedProducts, setAddedProducts] = useState<SelectedProduct[]>([]);
+  const [showProductPicker, setShowProductPicker] = useState(false);
+
+  // =====================================================
   // EFFECTS
   // =====================================================
 
@@ -143,6 +162,7 @@ export function CreateAppointmentModal({
   useEffect(() => {
     if (isOpen) {
       setAddedServices([]);
+      setAddedProducts([]); // Reset products
       setSelectedClient(null);
       setBookingNotes('');
       setInternalNotes('');
@@ -153,6 +173,8 @@ export function CreateAppointmentModal({
       setCurrentView('main');
       setExpandedServiceId(null);
       setAvailableTeamMembers([]);
+      setShowProductPicker(false);
+      setSavedBooking(null); // Reset saved booking
     }
   }, [isOpen]);
 
@@ -254,12 +276,20 @@ export function CreateAppointmentModal({
 
   // Calculate total price and duration
   const totalPrice = useMemo(() => {
-    return addedServices.reduce((sum, s) => sum + s.price, 0);
-  }, [addedServices]);
+    const servicesTotal = addedServices.reduce((sum, s) => sum + s.price, 0);
+    const productsTotal = addedProducts.reduce(
+      (sum, p) => sum + p.unitPrice * p.quantity,
+      0
+    );
+    return servicesTotal + productsTotal;
+  }, [addedServices, addedProducts]);
 
   const totalDuration = useMemo(() => {
     return addedServices.reduce((sum, s) => sum + s.duration, 0);
   }, [addedServices]);
+
+  // Check if we have anything to save
+  const hasItems = addedServices.length > 0 || addedProducts.length > 0;
 
   // Get the next available start time (after the last service ends)
   const getNextStartTime = (): string => {
@@ -476,6 +506,37 @@ export function CreateAppointmentModal({
     });
   };
 
+  // =====================================================
+  // PRODUCT HANDLERS
+  // =====================================================
+  const handleAddProduct = (product: SelectedProduct) => {
+    // Check if product already exists, if so increase quantity
+    const existing = addedProducts.find(
+      (p) => p.productId === product.productId
+    );
+    if (existing) {
+      setAddedProducts((prev) =>
+        prev.map((p) =>
+          p.productId === product.productId
+            ? { ...p, quantity: Math.min(p.quantity + 1, p.maxQuantity) }
+            : p
+        )
+      );
+    } else {
+      setAddedProducts((prev) => [...prev, product]);
+    }
+  };
+
+  const handleUpdateProductQuantity = (productId: string, quantity: number) => {
+    setAddedProducts((prev) =>
+      prev.map((p) => (p.id === productId ? { ...p, quantity } : p))
+    );
+  };
+
+  const handleRemoveProduct = (productId: string) => {
+    setAddedProducts((prev) => prev.filter((p) => p.id !== productId));
+  };
+
   const handleTeamMemberChange = (
     serviceInstanceId: string,
     newTeamMemberId: string
@@ -539,12 +600,11 @@ export function CreateAppointmentModal({
     loadRecentClients();
   };
 
-  const handleSubmit = async () => {
-    if (addedServices.length === 0) {
-      setError('Please add at least one service');
+  const handleSubmit = async (goToCheckout: boolean = false) => {
+    if (addedServices.length === 0 && addedProducts.length === 0) {
+      setError('Please add at least one service or product');
       return;
     }
-
     setIsSubmitting(true);
     setError('');
 
@@ -560,6 +620,14 @@ export function CreateAppointmentModal({
         startTime: s.startTime, // Include start time per service
       }));
 
+      // Build products array
+      const products = addedProducts.map((p) => ({
+        productId: p.productId,
+        productName: p.productName,
+        quantity: p.quantity,
+        unitPrice: p.unitPrice,
+      }));
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const requestData: any = {
         venueId,
@@ -567,6 +635,7 @@ export function CreateAppointmentModal({
         teamMemberId, // Default team member (from clicked slot)
         startTime: bookingStartTime,
         services,
+        products, // Include products
         bookingNotes: bookingNotes || undefined,
         internalNotes: internalNotes || undefined,
       };
@@ -584,8 +653,25 @@ export function CreateAppointmentModal({
       const result = await createCalendarAppointment(requestData);
 
       if (result.success) {
-        onSuccess();
-        onClose();
+        if (goToCheckout && result.bookingId) {
+          // Checkout flow: fetch booking and switch to payment mode
+          try {
+            const bookingResult = await getBookingById(result.bookingId);
+            if (bookingResult.success && bookingResult.data) {
+              setSavedBooking(bookingResult.data);
+              setCurrentView('payment');
+            } else {
+              setError('Failed to load booking for checkout');
+            }
+          } catch (fetchError) {
+            console.error('Error fetching booking:', fetchError);
+            setError('Failed to load booking for checkout');
+          }
+        } else {
+          // Normal save flow
+          onSuccess();
+          onClose();
+        }
       } else {
         setError(result.error || 'Failed to create appointment');
       }
@@ -608,6 +694,72 @@ export function CreateAppointmentModal({
     clientSearchQuery.trim() && !isSearching && searchResults.length === 0;
 
   if (!isOpen) return null;
+
+  // =====================================================
+  // PAYMENT VIEW
+  // =====================================================
+
+  if (currentView === 'payment' && savedBooking) {
+    // Create editingAppointments map from booking appointments
+    const editingAppointments = new Map<string, EditingAppointment>();
+    savedBooking.appointments?.forEach((apt) => {
+      editingAppointments.set(apt.id, {
+        id: apt.id,
+        serviceId: apt.service_id,
+        serviceName: apt.service_name,
+        teamMemberId: apt.team_member_id,
+        startTime: apt.start_time.substring(0, 5),
+        duration: apt.duration_minutes,
+        price: apt.price,
+        categoryColor: undefined,
+      });
+    });
+
+    // Calculate total price (services + products)
+    const servicesTotal = Array.from(editingAppointments.values()).reduce(
+      (sum, apt) => sum + apt.price,
+      0
+    );
+    const productsTotal = addedProducts.reduce(
+      (sum, p) => sum + p.unitPrice * p.quantity,
+      0
+    );
+    const totalPrice = servicesTotal + productsTotal;
+
+    return (
+      <>
+        <div
+          className="fixed inset-0 bg-black/50 z-50"
+          onClick={() => {
+            onSuccess();
+            onClose();
+          }}
+        />
+        <div className="fixed inset-y-0 right-0 w-full sm:w-[480px] md:w-[600px] lg:w-[750px] xl:w-[900px] bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
+          <PaymentMode
+            booking={savedBooking}
+            editingAppointments={editingAppointments}
+            addedProducts={addedProducts}
+            totalPrice={totalPrice}
+            onBack={() => {
+              // Go back to main view (but booking is already saved)
+              setCurrentView('main');
+            }}
+            onClose={() => {
+              onSuccess(); // Refresh calendar
+              onClose();
+            }}
+            onSuccess={() => {
+              setAddedProducts([]);
+              setSavedBooking(null);
+              onSuccess();
+              onClose();
+            }}
+          />
+        </div>
+      </>
+    );
+  }
 
   // =====================================================
   // SERVICE PICKER VIEW
@@ -919,8 +1071,9 @@ export function CreateAppointmentModal({
               </p>
             </div>
 
-            {/* Services Section */}
+            {/* Services & Products Section */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
+              {/* Services Section */}
               <h4 className="text-lg font-bold text-gray-900 mb-4">Services</h4>
 
               {/* Added Services List */}
@@ -1086,8 +1239,38 @@ export function CreateAppointmentModal({
                 </button>
               </div>
 
+              {/* Products Section */}
+              <div className="mt-6">
+                <h4 className="text-lg font-bold text-gray-900 mb-4">
+                  Products
+                </h4>
+
+                {/* Added Products List */}
+                <div className="space-y-2 mb-3">
+                  {addedProducts.map((product) => (
+                    <ProductQuantityEditor
+                      key={product.id}
+                      product={product}
+                      onUpdateQuantity={handleUpdateProductQuantity}
+                      onRemove={handleRemoveProduct}
+                    />
+                  ))}
+                </div>
+
+                {/* Add Product Button */}
+                <button
+                  onClick={() => setShowProductPicker(true)}
+                  className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-500 hover:bg-purple-50 transition-colors w-fit"
+                >
+                  <Plus className="w-4 h-4 text-gray-500" />
+                  <span className="text-sm font-medium text-gray-700">
+                    Add product
+                  </span>
+                </button>
+              </div>
+
               {/* Notes Section */}
-              {addedServices.length > 0 && (
+              {hasItems && (
                 <div className="mt-6 pt-6 border-t border-gray-200">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -1133,9 +1316,7 @@ export function CreateAppointmentModal({
             <div>
               <span className="text-sm text-gray-600">Total</span>
               <span className="ml-2 text-lg font-bold text-gray-900">
-                {addedServices.length > 0
-                  ? `A$${totalPrice.toFixed(0)}`
-                  : 'A$0'}
+                {hasItems ? `A$${totalPrice.toFixed(0)}` : 'A$0'}
               </span>
               {totalDuration > 0 && (
                 <span className="ml-2 text-sm text-gray-500">
@@ -1161,16 +1342,17 @@ export function CreateAppointmentModal({
 
               {/* Checkout Button */}
               <button
-                disabled={addedServices.length === 0}
+                onClick={() => handleSubmit(true)}
+                disabled={isSubmitting || !hasItems}
                 className="px-6 py-3 border border-gray-300 rounded-full font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Checkout
+                {isSubmitting ? 'Saving...' : 'Checkout'}
               </button>
 
               {/* Save Button */}
               <button
-                onClick={handleSubmit}
-                disabled={isSubmitting || addedServices.length === 0}
+                onClick={() => handleSubmit(false)}
+                disabled={isSubmitting || !hasItems}
                 className="px-8 py-3 bg-black text-white rounded-full font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isSubmitting ? 'Saving...' : 'Save'}
@@ -1185,6 +1367,16 @@ export function CreateAppointmentModal({
         isOpen={showAddClientModal}
         onClose={handleAddClientSuccess}
       />
+
+      {/* Product Picker */}
+      {showProductPicker && (
+        <ProductPicker
+          venueId={venueId}
+          onSelectProduct={handleAddProduct}
+          onClose={() => setShowProductPicker(false)}
+          existingProducts={addedProducts}
+        />
+      )}
     </>
   );
 }

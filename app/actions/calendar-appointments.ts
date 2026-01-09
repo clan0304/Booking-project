@@ -27,14 +27,25 @@ interface CreateCalendarAppointmentData {
     birthday?: string;
   };
 
-  // Services (at least one required)
-  services: Array<{
+  // Services (optional if products exist)
+  services?: Array<{
     serviceId: string;
     variantId?: string;
     addonIds?: string[];
     duration: number;
     serviceName: string;
     price: number;
+    teamMemberId?: string; // Optional: override team member per service
+    startTime?: string; // Optional: override start time per service
+    categoryColor?: string;
+  }>;
+
+  // Products (optional if services exist)
+  products?: Array<{
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
   }>;
 
   // Optional notes
@@ -99,6 +110,7 @@ interface AppointmentPriceData {
  * - Walk-in appointments
  * - New client creation
  * - Multiple services per booking
+ * - Product-only sales (no services)
  * - Auto-detection of client type (A, B, B+, C) for commission tracking
  */
 export async function createCalendarAppointment(
@@ -120,10 +132,14 @@ export async function createCalendarAppointment(
       return { success: false, error: 'Missing required booking information' };
     }
 
-    if (!data.services || data.services.length === 0) {
+    const hasServices = data.services && data.services.length > 0;
+    const hasProducts = data.products && data.products.length > 0;
+
+    // Must have at least one service OR one product
+    if (!hasServices && !hasProducts) {
       return {
         success: false,
-        error: 'At least one service is required',
+        error: 'At least one service or product is required',
       };
     }
 
@@ -190,21 +206,34 @@ export async function createCalendarAppointment(
     }
 
     // =====================================================
-    // 3. CALCULATE APPOINTMENT TIMES
+    // 3. CALCULATE TOTALS
     // =====================================================
 
-    const appointmentTimes = calculateAppointmentTimes(
-      data.startTime,
-      data.services
-    );
+    // Calculate services total and times
+    let appointmentTimes: Array<{ startTime: string; endTime: string }> = [];
+    let servicesTotal = 0;
 
-    const totalPrice = data.services.reduce((sum, s) => sum + s.price, 0);
+    if (hasServices && data.services) {
+      appointmentTimes = calculateAppointmentTimes(
+        data.startTime,
+        data.services
+      );
+      servicesTotal = data.services.reduce((sum, s) => sum + s.price, 0);
+    }
+
+    // Calculate products total
+    const productsTotal =
+      hasProducts && data.products
+        ? data.products.reduce((sum, p) => sum + p.unitPrice * p.quantity, 0)
+        : 0;
+
+    const totalPrice = servicesTotal + productsTotal;
+    const totalAppointments = hasServices ? data.services!.length : 0;
 
     // =====================================================
-    // 4. AUTO-DETECT CLIENT TYPE (NEW!)
+    // 4. AUTO-DETECT CLIENT TYPE
     // =====================================================
 
-    // Import detectClientType from '@/lib/client-type-helpers'
     const clientType = await detectClientType(finalClientId, data.teamMemberId);
 
     // =====================================================
@@ -222,12 +251,12 @@ export async function createCalendarAppointment(
         guest_last_name: guestLastName,
         guest_email: guestEmail,
         guest_phone: guestPhone,
-        total_appointments: data.services.length,
-        total_price: totalPrice,
+        total_appointments: totalAppointments, // 0 for product-only sales
+        total_price: totalPrice, // Includes both services and products
         status: 'confirmed',
         notes: data.bookingNotes || null,
         internal_notes: data.internalNotes || null,
-        client_type: clientType, // ← NEW: Auto-detected client type
+        client_type: clientType,
       })
       .select()
       .single();
@@ -238,37 +267,45 @@ export async function createCalendarAppointment(
     }
 
     // =====================================================
-    // 6. CREATE APPOINTMENTS
+    // 6. CREATE APPOINTMENTS (only if services exist)
     // =====================================================
 
-    const appointmentInserts = data.services.map((service, index) => {
-      const times = appointmentTimes[index];
-      return {
-        booking_group_id: bookingGroup.id,
-        team_member_id: data.teamMemberId,
-        service_id: service.serviceId,
-        service_name: service.serviceName,
-        start_time: times.startTime + ':00', // Add seconds
-        end_time: times.endTime + ':00',
-        duration_minutes: service.duration,
-        price: service.price,
-        status: 'confirmed',
-      };
-    });
+    if (hasServices && data.services) {
+      const appointmentInserts = data.services.map((service, index) => {
+        const times = appointmentTimes[index];
+        // Use service-specific team member if provided, otherwise use default
+        const teamMemberId = service.teamMemberId || data.teamMemberId;
+        return {
+          booking_group_id: bookingGroup.id,
+          team_member_id: teamMemberId,
+          service_id: service.serviceId,
+          service_name: service.serviceName,
+          start_time: times.startTime + ':00', // Add seconds
+          end_time: times.endTime + ':00',
+          duration_minutes: service.duration,
+          price: service.price,
+          status: 'confirmed',
+        };
+      });
 
-    const { error: appointmentsError } = await supabaseAdmin
-      .from('appointments')
-      .insert(appointmentInserts);
+      const { error: appointmentsError } = await supabaseAdmin
+        .from('appointments')
+        .insert(appointmentInserts);
 
-    if (appointmentsError) {
-      console.error('Error creating appointments:', appointmentsError);
-      // Rollback booking group
-      await supabaseAdmin
-        .from('booking_groups')
-        .delete()
-        .eq('id', bookingGroup.id);
-      return { success: false, error: 'Failed to create appointments' };
+      if (appointmentsError) {
+        console.error('Error creating appointments:', appointmentsError);
+        // Rollback booking group
+        await supabaseAdmin
+          .from('booking_groups')
+          .delete()
+          .eq('id', bookingGroup.id);
+        return { success: false, error: 'Failed to create appointments' };
+      }
     }
+
+    // Note: Products are NOT stored at booking time.
+    // They become transaction_items when payment is processed in PaymentMode.
+    // The payment flow calls decrementProductStock() after successful payment.
 
     // =====================================================
     // 7. SUCCESS - REVALIDATE & RETURN
@@ -279,7 +316,9 @@ export async function createCalendarAppointment(
 
     return {
       success: true,
-      message: 'Appointment created successfully',
+      message: hasServices
+        ? 'Appointment created successfully'
+        : 'Product sale created successfully',
       bookingId: bookingGroup.id,
     };
   } catch (error) {
@@ -1202,6 +1241,149 @@ export async function updateBookingClientType(
     return { success: true };
   } catch (error) {
     console.error('Error in updateBookingClientType:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Get a booking by its ID
+ * Used when opening edit modal directly (e.g., after creating a booking for checkout)
+ */
+export async function getBookingById(bookingId: string): Promise<{
+  success: boolean;
+  data?: BookingGroupWithAppointments;
+  error?: string;
+}> {
+  try {
+    await requireStaff();
+
+    const { data: booking, error: bookingError } = await supabaseAdmin
+      .from('booking_groups')
+      .select(
+        `
+        id,
+        venue_id,
+        booking_date,
+        booking_source,
+        client_id,
+        guest_first_name,
+        guest_last_name,
+        guest_email,
+        guest_phone,
+        total_appointments,
+        total_price,
+        status,
+        notes,
+        internal_notes,
+        client_type,
+        created_at,
+        updated_at,
+        client:users!booking_groups_client_id_fkey (
+          id,
+          first_name,
+          last_name,
+          email,
+          phone_number,
+          photo_url
+        ),
+        appointments (
+          id,
+          booking_group_id,
+          service_id,
+          service_name,
+          team_member_id,
+          start_time,
+          end_time,
+          duration_minutes,
+          price,
+          status,
+          notes,
+          created_at,
+          team_member:users!appointments_team_member_id_fkey (
+            id,
+            first_name,
+            last_name,
+            photo_url
+          )
+        )
+      `
+      )
+      .eq('id', bookingId)
+      .single();
+
+    if (bookingError || !booking) {
+      console.error('Error fetching booking:', bookingError);
+      return { success: false, error: 'Booking not found' };
+    }
+
+    return {
+      success: true,
+      data: booking as unknown as BookingGroupWithAppointments,
+    };
+  } catch (error) {
+    console.error('Error in getBookingById:', error);
+    return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Update booking status
+ * Allowed transitions:
+ * - confirmed -> cancelled, no_show
+ * - cancelled -> (none - locked)
+ * - completed -> (none - locked)
+ * - no_show -> confirmed (allow reversal)
+ */
+export async function updateBookingStatus(
+  bookingId: string,
+  newStatus: 'confirmed' | 'completed' | 'cancelled' | 'no_show'
+): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    await requireAdmin();
+
+    const { data: booking, error: fetchError } = await supabaseAdmin
+      .from('booking_groups')
+      .select('status')
+      .eq('id', bookingId)
+      .single();
+
+    if (fetchError || !booking) {
+      return { success: false, error: 'Booking not found' };
+    }
+
+    // Validate status transitions
+    const currentStatus = booking.status;
+
+    // Completed bookings cannot be changed
+    if (currentStatus === 'completed') {
+      return { success: false, error: 'Completed bookings cannot be modified' };
+    }
+
+    // Cancelled bookings cannot be changed
+    if (currentStatus === 'canceled') {
+      return { success: false, error: 'Cancelled bookings cannot be modified' };
+    }
+
+    // Update the status
+    const { error: updateError } = await supabaseAdmin
+      .from('booking_groups')
+      .update({ status: newStatus })
+      .eq('id', bookingId);
+
+    if (updateError) {
+      console.error('Error updating booking status:', updateError);
+      return { success: false, error: 'Failed to update booking status' };
+    }
+
+    revalidatePath('/admin/calendar');
+    revalidatePath('/admin/bookings');
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error in updateBookingStatus:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }

@@ -61,10 +61,24 @@ export function AppointmentCard({
 
   const isInteracting = interactionMode !== null;
   const isCompleted = booking.status === 'completed';
+  const isCancelled = booking.status === 'cancelled';
+  const isNoShow = booking.status === 'no_show';
+  const isInactive = isCancelled || isNoShow;
+
+  // Status-based colors
   const COMPLETED_COLOR = '#9CA3AF'; // gray-400
-  const backgroundColor = isCompleted
-    ? COMPLETED_COLOR
-    : appointment.category_color || DEFAULT_COLOR;
+  const CANCELLED_COLOR = '#EF4444'; // red-500
+  const NO_SHOW_COLOR = '#DC2626'; // red-600
+
+  // Determine background color based on status
+  const getBackgroundColor = (): string => {
+    if (isCompleted) return COMPLETED_COLOR;
+    if (isCancelled) return CANCELLED_COLOR;
+    if (isNoShow) return NO_SHOW_COLOR;
+    return appointment.category_color || DEFAULT_COLOR;
+  };
+
+  const backgroundColor = getBackgroundColor();
 
   // Determine layout based on duration
   const duration = appointment.duration_minutes;
@@ -303,12 +317,14 @@ export function AppointmentCard({
                   : booking.status === 'cancelled'
                   ? 'bg-red-100 text-red-800'
                   : booking.status === 'no_show'
-                  ? 'bg-gray-100 text-gray-800'
+                  ? 'bg-red-100 text-red-800'
                   : 'bg-blue-100 text-blue-800'
               }`}
             >
-              {booking.status.charAt(0).toUpperCase() +
-                booking.status.slice(1).replace('_', ' ')}
+              {booking.status === 'no_show'
+                ? 'No Show'
+                : booking.status.charAt(0).toUpperCase() +
+                  booking.status.slice(1)}
             </span>
           </div>
         )}
@@ -339,6 +355,11 @@ export function AppointmentCard({
             <span className="font-medium">{startTime}</span>
             <span className="mx-1">·</span>
             <span className="font-bold">{clientName || 'Walk-in'}</span>
+            {isInactive && (
+              <span className="ml-1 opacity-80">
+                ({isCancelled ? 'Cancelled' : 'No Show'})
+              </span>
+            )}
           </p>
         </div>
       );
@@ -355,6 +376,11 @@ export function AppointmentCard({
           </p>
           <p className="text-[10px] text-white/80 truncate leading-tight mt-0.5">
             {appointment.service_name}
+            {isInactive && (
+              <span className="ml-1 font-medium">
+                • {isCancelled ? 'Cancelled' : 'No Show'}
+              </span>
+            )}
           </p>
         </div>
       );
@@ -373,6 +399,11 @@ export function AppointmentCard({
           <p className="text-[10px] text-white/80 truncate leading-tight mt-0.5">
             {appointment.service_name}
           </p>
+          {isInactive && (
+            <p className="text-[10px] text-white font-medium mt-0.5">
+              {isCancelled ? 'Cancelled' : 'No Show'}
+            </p>
+          )}
         </div>
       );
     }
@@ -390,13 +421,22 @@ export function AppointmentCard({
           {appointment.service_name}
         </p>
         {/* Status badge for longer cards */}
-        {!isInteracting && appointment.status !== 'confirmed' && (
-          <div className="mt-auto pt-1">
-            <span className="inline-block px-1.5 py-0.5 text-[9px] font-medium rounded-full bg-white/30 truncate">
-              {appointment.status}
-            </span>
-          </div>
-        )}
+        {!isInteracting &&
+          (isInactive || appointment.status !== 'confirmed') && (
+            <div className="mt-auto pt-1">
+              <span
+                className={`inline-block px-1.5 py-0.5 text-[9px] font-medium rounded-full truncate ${
+                  isInactive ? 'bg-white/40 text-white' : 'bg-white/30'
+                }`}
+              >
+                {isCancelled
+                  ? 'Cancelled'
+                  : isNoShow
+                  ? 'No Show'
+                  : appointment.status}
+              </span>
+            </div>
+          )}
       </div>
     );
   };
@@ -422,6 +462,7 @@ export function AppointmentCard({
               : ''
           }
           ${isCompleted ? 'border border-gray-300' : ''}
+          ${isInactive ? 'border border-red-300' : ''}
           ${isFloating ? 'opacity-30 pointer-events-none' : ''}
         `}
         style={{
@@ -468,6 +509,29 @@ export function AppointmentCard({
         {/* Completed overlay */}
         {isCompleted && (
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-gray-500/20 pointer-events-none" />
+        )}
+
+        {/* Cancelled/No Show strikethrough overlay */}
+        {isInactive && (
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-red-900/20" />
+            {/* Diagonal strikethrough lines */}
+            <svg className="absolute inset-0 w-full h-full opacity-20">
+              <pattern
+                id="strikethrough"
+                patternUnits="userSpaceOnUse"
+                width="8"
+                height="8"
+              >
+                <path
+                  d="M-2,2 l4,-4 M0,8 l8,-8 M6,10 l4,-4"
+                  stroke="white"
+                  strokeWidth="1"
+                />
+              </pattern>
+              <rect width="100%" height="100%" fill="url(#strikethrough)" />
+            </svg>
+          </div>
         )}
       </div>
 

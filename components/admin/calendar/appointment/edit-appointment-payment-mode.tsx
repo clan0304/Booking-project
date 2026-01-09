@@ -18,6 +18,7 @@ import {
 } from '@/app/actions/stripe';
 import { getClientPaymentMethods } from '@/app/actions/stripe/setup-intents';
 import { updateBooking } from '@/app/actions/bookings';
+import { decrementProductStock } from '@/app/actions/products';
 import type {
   CheckoutItem,
   PaymentEntry,
@@ -26,10 +27,12 @@ import type {
 import type { PaymentMethodType } from '@/types/payments';
 import type { BookingGroupWithAppointments } from '@/types/calendar';
 import type { EditingAppointment } from './edit-appointment-types';
+import type { SelectedProduct } from './product-picker';
 
 interface PaymentModeProps {
   booking: BookingGroupWithAppointments;
   editingAppointments: Map<string, EditingAppointment>;
+  addedProducts: SelectedProduct[];
   totalPrice: number;
   onBack: () => void;
   onClose: () => void;
@@ -39,14 +42,16 @@ interface PaymentModeProps {
 export function PaymentMode({
   booking,
   editingAppointments,
+  addedProducts,
   totalPrice,
   onBack,
   onClose,
   onSuccess,
 }: PaymentModeProps) {
-  // Build checkout items from appointments
-  const items: CheckoutItem[] = Array.from(editingAppointments.values()).map(
-    (appt) => ({
+  // Build checkout items from appointments AND products
+  const items: CheckoutItem[] = [
+    // Services/Appointments
+    ...Array.from(editingAppointments.values()).map((appt) => ({
       id: appt.id,
       type: 'appointment' as const,
       name: appt.serviceName,
@@ -54,8 +59,18 @@ export function PaymentMode({
       quantity: 1,
       unitPrice: appt.price,
       categoryColor: appt.categoryColor,
-    })
-  );
+    })),
+    // Products
+    ...addedProducts.map((product) => ({
+      id: product.productId,
+      type: 'product' as const,
+      name: product.productName,
+      description: undefined,
+      quantity: product.quantity,
+      unitPrice: product.unitPrice,
+      categoryColor: undefined,
+    })),
+  ];
 
   // State
   const [state, setState] = useState<CheckoutState>(() => ({
@@ -152,16 +167,17 @@ export function PaymentMode({
     setState((prev) => ({ ...prev, isProcessing: true, error: null }));
 
     try {
+      // Build checkout items for transaction (includes both services and products)
+      const checkoutItems = items.map((item) => ({
+        type: item.type,
+        id: item.id,
+        name: item.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      }));
+
       for (const payment of state.payments) {
         if (payment.status !== 'pending') continue;
-
-        const checkoutItems = items.map((item) => ({
-          type: item.type,
-          id: item.id,
-          name: item.name,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-        }));
 
         if (payment.method === 'cash') {
           // Cash payment - record directly
@@ -183,7 +199,7 @@ export function PaymentMode({
             ),
           }));
         } else if (payment.method === 'card_saved' && payment.paymentMethodId) {
-          // ✅ SAVED CARD - Use chargeSavedCard which creates PaymentIntent + confirms + records
+          // SAVED CARD - Use chargeSavedCard which creates PaymentIntent + confirms + records
           if (!booking.client_id) {
             throw new Error('Client ID required for saved card payment');
           }
@@ -217,7 +233,7 @@ export function PaymentMode({
           payment.method === 'card_terminal'
         ) {
           if (payment.paymentIntentId) {
-            // ✅ REAL card payment - has Stripe PaymentIntent
+            // REAL card payment - has Stripe PaymentIntent
             const { error } = await recordCardPayment(
               booking.id,
               booking.venue_id,
@@ -240,7 +256,7 @@ export function PaymentMode({
               ),
             }));
           } else if (process.env.NODE_ENV === 'development') {
-            // 🧪 SIMULATED terminal/card - dev only, no Stripe involved
+            // SIMULATED terminal/card - dev only, no Stripe involved
             // Record as cash payment for local testing
             console.warn('⚠️ Simulated card payment - dev only');
             const { error } = await recordCashPayment(
@@ -287,6 +303,24 @@ export function PaymentMode({
               p.id === payment.id ? { ...p, status: 'succeeded' as const } : p
             ),
           }));
+        }
+      }
+
+      // Decrement product stock after successful payment
+      if (addedProducts.length > 0) {
+        const stockUpdates = addedProducts.map((p) => ({
+          productId: p.productId,
+          quantity: p.quantity,
+        }));
+
+        const { error: stockError } = await decrementProductStock(
+          booking.venue_id,
+          stockUpdates
+        );
+
+        if (stockError) {
+          console.error('Failed to decrement stock:', stockError);
+          // Don't throw - payment already succeeded, just log the error
         }
       }
 

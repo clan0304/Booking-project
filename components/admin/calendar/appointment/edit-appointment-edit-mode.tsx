@@ -240,348 +240,352 @@ export function EditMode({
 
             {/* Appointments List */}
             <div className="space-y-3">
-              {Array.from(editingAppointments.entries())
-                .sort(([, a], [, b]) => {
-                  // Sort by start time (earlier first)
-                  const timeToMinutes = (time: string) => {
-                    const [hours, minutes] = time.split(':').map(Number);
-                    return hours * 60 + minutes;
-                  };
-                  return (
-                    timeToMinutes(a.startTime) - timeToMinutes(b.startTime)
-                  );
-                })
-                .map(([appointmentId, appointment]) => {
-                  const isExpanded = expandedAppointmentId === appointmentId;
-                  const teamMember = getTeamMember(appointment.teamMemberId);
-                  const service = getService(
-                    appointment.teamMemberId,
-                    appointment.serviceId
-                  );
-                  const categoryColor =
-                    appointment.categoryColor ||
-                    service?.service_categories?.color ||
-                    '#A855F7';
+              {editingAppointments.size === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <p className="text-sm">No services added</p>
+                  <p className="text-xs mt-1">
+                    Add a service or product to continue
+                  </p>
+                </div>
+              ) : (
+                Array.from(editingAppointments.entries())
+                  .sort(([, a], [, b]) => {
+                    // Sort by start time (earlier first)
+                    const timeToMinutes = (time: string) => {
+                      const [hours, minutes] = time.split(':').map(Number);
+                      return hours * 60 + minutes;
+                    };
+                    return (
+                      timeToMinutes(a.startTime) - timeToMinutes(b.startTime)
+                    );
+                  })
+                  .map(([appointmentId, appointment]) => {
+                    const isExpanded = expandedAppointmentId === appointmentId;
+                    const teamMember = getTeamMember(appointment.teamMemberId);
+                    const service = getService(
+                      appointment.teamMemberId,
+                      appointment.serviceId
+                    );
+                    const categoryColor =
+                      appointment.categoryColor ||
+                      service?.service_categories?.color ||
+                      '#A855F7';
 
-                  const isPendingAddition =
-                    appointmentId.startsWith('pending-');
+                    const isPendingAddition =
+                      appointmentId.startsWith('pending-');
 
-                  return (
-                    <div
-                      key={appointmentId}
-                      className={`bg-white rounded-lg border overflow-hidden ${
-                        isPendingAddition
-                          ? 'border-green-300 ring-2 ring-green-100'
-                          : 'border-gray-200'
-                      }`}
-                    >
-                      {/* Collapsed View - Improved single-line layout */}
-                      <button
-                        onClick={() => onToggleAppointment(appointmentId)}
-                        className={`w-full p-3 lg:p-4 flex items-center gap-3 transition-colors ${
+                    return (
+                      <div
+                        key={appointmentId}
+                        className={`bg-white rounded-lg border overflow-hidden ${
                           isPendingAddition
-                            ? 'bg-green-50 hover:bg-green-100'
-                            : 'hover:bg-gray-50'
+                            ? 'border-green-300 ring-2 ring-green-100'
+                            : 'border-gray-200'
                         }`}
                       >
-                        {/* Color Bar */}
-                        <div
-                          className="w-1 self-stretch rounded flex-shrink-0"
-                          style={{ backgroundColor: categoryColor }}
-                        />
-
-                        {/* Service Info - Flexible */}
-                        <div className="flex-1 min-w-0 text-left">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-semibold text-gray-900 truncate">
-                              {appointment.serviceName}
-                            </h4>
-                            {isPendingAddition && (
-                              <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
-                                NEW
-                              </span>
-                            )}
-                          </div>
-                          {/* Details on single line */}
-                          <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
-                            <span className="flex-shrink-0">
-                              {formatTime(appointment.startTime)}
-                            </span>
-                            <span className="text-gray-300">•</span>
-                            <span className="flex-shrink-0">
-                              {getDurationDisplay(appointment.duration)}
-                            </span>
-                            <span className="text-gray-300">•</span>
-                            <span className="truncate">
-                              {teamMember?.first_name} {teamMember?.last_name}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Price - Fixed width */}
-                        <div className="flex-shrink-0 text-right">
-                          <p className="font-semibold text-gray-900">
-                            A$ {appointment.price.toFixed(0)}
-                          </p>
-                        </div>
-
-                        {/* Chevron */}
-                        <ChevronRight
-                          className={`w-5 h-5 text-gray-400 flex-shrink-0 transition-transform ${
-                            isExpanded ? 'rotate-90' : ''
+                        {/* Collapsed View - Improved single-line layout */}
+                        <button
+                          onClick={() => onToggleAppointment(appointmentId)}
+                          className={`w-full p-3 lg:p-4 flex items-center gap-3 transition-colors ${
+                            isPendingAddition
+                              ? 'bg-green-50 hover:bg-green-100'
+                              : 'hover:bg-gray-50'
                           }`}
-                        />
-                      </button>
+                        >
+                          {/* Color Bar */}
+                          <div
+                            className="w-1 self-stretch rounded flex-shrink-0"
+                            style={{ backgroundColor: categoryColor }}
+                          />
 
-                      {/* Expanded View */}
-                      {isExpanded && (
-                        <div className="p-4 bg-gray-50 border-t border-gray-200 space-y-4">
-                          {/* Service Selection */}
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-900 mb-2">
-                              Service
-                            </label>
-                            <button
-                              onClick={() =>
-                                onShowServicePicker(appointment.id)
-                              }
-                              className="w-full p-3 border-l-4 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition-colors text-left flex items-center justify-between"
-                              style={{ borderLeftColor: categoryColor }}
-                            >
-                              <span className="font-medium text-gray-900">
-                                {appointment.serviceName},{' '}
-                                {appointment.duration}min
+                          {/* Service Info - Flexible */}
+                          <div className="flex-1 min-w-0 text-left">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold text-gray-900 truncate">
+                                {appointment.serviceName}
+                              </h4>
+                              {isPendingAddition && (
+                                <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                                  NEW
+                                </span>
+                              )}
+                            </div>
+                            {/* Details on single line */}
+                            <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
+                              <span className="flex-shrink-0">
+                                {formatTime(appointment.startTime)}
                               </span>
-                              <ChevronRight className="h-5 w-5 text-gray-400" />
-                            </button>
+                              <span className="text-gray-300">•</span>
+                              <span className="flex-shrink-0">
+                                {getDurationDisplay(appointment.duration)}
+                              </span>
+                              <span className="text-gray-300">•</span>
+                              <span className="truncate">
+                                {teamMember?.first_name} {teamMember?.last_name}
+                              </span>
+                            </div>
                           </div>
 
-                          {/* Team Member */}
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-900 mb-2">
-                              Team member
-                            </label>
-                            <div className="flex items-center gap-3">
-                              <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
-                                <Heart className="h-5 w-5 text-red-500 fill-red-500" />
-                              </div>
+                          {/* Price - Fixed width */}
+                          <div className="flex-shrink-0 text-right">
+                            <p className="font-semibold text-gray-900">
+                              A$ {appointment.price.toFixed(0)}
+                            </p>
+                          </div>
 
-                              <div className="flex-1 relative">
-                                {teamMembersLoading ? (
-                                  <div className="w-full px-4 py-3 bg-white rounded-lg border border-gray-200">
-                                    <span className="text-gray-500">
-                                      Loading...
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <button
-                                      onClick={() =>
-                                        setShowTeamMemberDropdown(
-                                          showTeamMemberDropdown ===
-                                            appointment.id
-                                            ? null
-                                            : appointment.id
-                                        )
-                                      }
-                                      className="w-full flex items-center gap-3 px-4 py-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                                    >
-                                      {teamMember?.photo_url ? (
-                                        <Image
-                                          src={teamMember.photo_url}
-                                          alt={teamMember.first_name}
-                                          width={32}
-                                          height={32}
-                                          className="rounded-full object-cover"
-                                        />
-                                      ) : (
-                                        <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
-                                          <span className="text-sm font-medium text-purple-600">
-                                            {teamMember?.first_name[0]}
-                                          </span>
+                          {/* Chevron */}
+                          <ChevronRight
+                            className={`w-5 h-5 text-gray-400 flex-shrink-0 transition-transform ${
+                              isExpanded ? 'rotate-90' : ''
+                            }`}
+                          />
+                        </button>
+
+                        {/* Expanded View */}
+                        {isExpanded && (
+                          <div className="p-4 bg-gray-50 border-t border-gray-200 space-y-4">
+                            {/* Service Selection */}
+                            <div>
+                              <label className="block text-sm font-semibold text-gray-900 mb-2">
+                                Service
+                              </label>
+                              <button
+                                onClick={() =>
+                                  onShowServicePicker(appointment.id)
+                                }
+                                className="w-full p-3 border-l-4 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition-colors text-left flex items-center justify-between"
+                                style={{ borderLeftColor: categoryColor }}
+                              >
+                                <span className="font-medium text-gray-900">
+                                  {appointment.serviceName},{' '}
+                                  {appointment.duration}min
+                                </span>
+                                <ChevronRight className="h-5 w-5 text-gray-400" />
+                              </button>
+                            </div>
+
+                            {/* Team Member */}
+                            <div>
+                              <label className="block text-sm font-semibold text-gray-900 mb-2">
+                                Team member
+                              </label>
+                              <div className="flex items-center gap-3">
+                                <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
+                                  <Heart className="h-5 w-5 text-red-500 fill-red-500" />
+                                </div>
+
+                                <div className="flex-1 relative">
+                                  {teamMembersLoading ? (
+                                    <div className="w-full px-4 py-3 bg-white rounded-lg border border-gray-200">
+                                      <span className="text-gray-500">
+                                        Loading...
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <button
+                                        onClick={() =>
+                                          setShowTeamMemberDropdown(
+                                            showTeamMemberDropdown ===
+                                              appointment.id
+                                              ? null
+                                              : appointment.id
+                                          )
+                                        }
+                                        className="w-full flex items-center gap-3 px-4 py-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                                      >
+                                        {teamMember?.photo_url ? (
+                                          <Image
+                                            src={teamMember.photo_url}
+                                            alt={teamMember.first_name}
+                                            width={32}
+                                            height={32}
+                                            className="rounded-full object-cover"
+                                          />
+                                        ) : (
+                                          <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
+                                            <span className="text-sm font-medium text-purple-600">
+                                              {teamMember?.first_name[0]}
+                                            </span>
+                                          </div>
+                                        )}
+                                        <span className="flex-1 text-left font-medium text-gray-900">
+                                          {teamMember?.first_name}{' '}
+                                          {teamMember?.last_name}
+                                        </span>
+                                        <ChevronDown className="h-5 w-5 text-gray-400" />
+                                      </button>
+
+                                      {showTeamMemberDropdown ===
+                                        appointment.id && (
+                                        <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+                                          {availableTeamMembers.map(
+                                            (member) => (
+                                              <button
+                                                key={member.id}
+                                                onClick={() =>
+                                                  onTeamMemberChange(
+                                                    appointment.id,
+                                                    member.id
+                                                  )
+                                                }
+                                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+                                              >
+                                                {member.photo_url ? (
+                                                  <Image
+                                                    src={member.photo_url}
+                                                    alt={member.first_name}
+                                                    width={32}
+                                                    height={32}
+                                                    className="rounded-full object-cover"
+                                                  />
+                                                ) : (
+                                                  <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
+                                                    <span className="text-sm font-medium text-purple-600">
+                                                      {member.first_name[0]}
+                                                    </span>
+                                                  </div>
+                                                )}
+                                                <span className="flex-1 text-left font-medium text-gray-900">
+                                                  {member.first_name}{' '}
+                                                  {member.last_name}
+                                                </span>
+                                              </button>
+                                            )
+                                          )}
                                         </div>
                                       )}
-                                      <span className="flex-1 text-left font-medium text-gray-900">
-                                        {teamMember?.first_name}{' '}
-                                        {teamMember?.last_name}
-                                      </span>
-                                      <ChevronDown className="h-5 w-5 text-gray-400" />
-                                    </button>
-
-                                    {showTeamMemberDropdown ===
-                                      appointment.id && (
-                                      <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
-                                        {availableTeamMembers.map((member) => (
-                                          <button
-                                            key={member.id}
-                                            onClick={() =>
-                                              onTeamMemberChange(
-                                                appointment.id,
-                                                member.id
-                                              )
-                                            }
-                                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-                                          >
-                                            {member.photo_url ? (
-                                              <Image
-                                                src={member.photo_url}
-                                                alt={member.first_name}
-                                                width={32}
-                                                height={32}
-                                                className="rounded-full object-cover"
-                                              />
-                                            ) : (
-                                              <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
-                                                <span className="text-sm font-medium text-purple-600">
-                                                  {member.first_name[0]}
-                                                </span>
-                                              </div>
-                                            )}
-                                            <span className="flex-1 text-left font-medium text-gray-900">
-                                              {member.first_name}{' '}
-                                              {member.last_name}
-                                            </span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Start Time & Duration - Side by side */}
-                          <div className="grid grid-cols-2 gap-4">
-                            {/* Start Time */}
-                            <div>
-                              <label className="block text-sm font-semibold text-gray-900 mb-2">
-                                Start time
-                              </label>
-                              <div className="relative">
-                                <button
-                                  onClick={() =>
-                                    setShowTimeDropdown(
-                                      showTimeDropdown === appointmentId
-                                        ? null
-                                        : appointmentId
-                                    )
-                                  }
-                                  className="w-full px-4 py-3 bg-white rounded-lg border border-gray-200 flex items-center justify-between hover:bg-gray-50 transition-colors"
-                                >
-                                  <span className="font-medium text-gray-900">
-                                    {formatTime(appointment.startTime)}
-                                  </span>
-                                  <ChevronDown className="h-5 w-5 text-gray-400" />
-                                </button>
-
-                                {showTimeDropdown === appointmentId && (
-                                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
-                                    {generateTimeSlots().map((time) => (
-                                      <button
-                                        key={time}
-                                        onClick={() => {
-                                          onUpdateAppointmentField(
-                                            appointmentId,
-                                            'startTime',
-                                            time
-                                          );
-                                          setShowTimeDropdown(null);
-                                        }}
-                                        className={`w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors ${
-                                          time === appointment.startTime
-                                            ? 'bg-purple-50 text-purple-600'
-                                            : 'text-gray-900'
-                                        }`}
-                                      >
-                                        {formatTime(time)}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
+                                    </>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
-                            {/* Duration */}
-                            <div>
-                              <label className="block text-sm font-semibold text-gray-900 mb-2">
-                                Duration
-                              </label>
-                              <div className="relative">
-                                <button
-                                  onClick={() =>
-                                    setShowDurationDropdown(
-                                      showDurationDropdown === appointmentId
-                                        ? null
-                                        : appointmentId
-                                    )
-                                  }
-                                  className="w-full px-4 py-3 bg-white rounded-lg border border-gray-200 flex items-center justify-between hover:bg-gray-50 transition-colors"
-                                >
-                                  <span className="font-medium text-gray-900">
-                                    {getDurationDisplay(appointment.duration)}
-                                  </span>
-                                  <ChevronDown className="h-5 w-5 text-gray-400" />
-                                </button>
+                            {/* Start Time & Duration - Side by side */}
+                            <div className="grid grid-cols-2 gap-4">
+                              {/* Start Time */}
+                              <div>
+                                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                                  Start time
+                                </label>
+                                <div className="relative">
+                                  <button
+                                    onClick={() =>
+                                      setShowTimeDropdown(
+                                        showTimeDropdown === appointmentId
+                                          ? null
+                                          : appointmentId
+                                      )
+                                    }
+                                    className="w-full px-4 py-3 bg-white rounded-lg border border-gray-200 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                                  >
+                                    <span className="font-medium text-gray-900">
+                                      {formatTime(appointment.startTime)}
+                                    </span>
+                                    <ChevronDown className="h-5 w-5 text-gray-400" />
+                                  </button>
 
-                                {showDurationDropdown === appointmentId && (
-                                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
-                                    {generateDurationOptions().map(
-                                      (duration) => (
+                                  {showTimeDropdown === appointmentId && (
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+                                      {generateTimeSlots().map((time) => (
                                         <button
-                                          key={duration}
+                                          key={time}
                                           onClick={() => {
                                             onUpdateAppointmentField(
                                               appointmentId,
-                                              'duration',
-                                              duration
+                                              'startTime',
+                                              time
                                             );
-                                            setShowDurationDropdown(null);
+                                            setShowTimeDropdown(null);
                                           }}
                                           className={`w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors ${
-                                            duration === appointment.duration
+                                            time === appointment.startTime
                                               ? 'bg-purple-50 text-purple-600'
                                               : 'text-gray-900'
                                           }`}
                                         >
-                                          {getDurationDisplay(duration)}
+                                          {formatTime(time)}
                                         </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Duration */}
+                              <div>
+                                <label className="block text-sm font-semibold text-gray-900 mb-2">
+                                  Duration
+                                </label>
+                                <div className="relative">
+                                  <button
+                                    onClick={() =>
+                                      setShowDurationDropdown(
+                                        showDurationDropdown === appointmentId
+                                          ? null
+                                          : appointmentId
                                       )
-                                    )}
-                                  </div>
-                                )}
+                                    }
+                                    className="w-full px-4 py-3 bg-white rounded-lg border border-gray-200 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                                  >
+                                    <span className="font-medium text-gray-900">
+                                      {getDurationDisplay(appointment.duration)}
+                                    </span>
+                                    <ChevronDown className="h-5 w-5 text-gray-400" />
+                                  </button>
+
+                                  {showDurationDropdown === appointmentId && (
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+                                      {generateDurationOptions().map(
+                                        (duration) => (
+                                          <button
+                                            key={duration}
+                                            onClick={() => {
+                                              onUpdateAppointmentField(
+                                                appointmentId,
+                                                'duration',
+                                                duration
+                                              );
+                                              setShowDurationDropdown(null);
+                                            }}
+                                            className={`w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors ${
+                                              duration === appointment.duration
+                                                ? 'bg-purple-50 text-purple-600'
+                                                : 'text-gray-900'
+                                            }`}
+                                          >
+                                            {getDurationDisplay(duration)}
+                                          </button>
+                                        )
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* Delete Service Button */}
-                          <button
-                            onClick={() => onDeleteAppointment(appointment.id)}
-                            disabled={editingAppointments.size <= 1}
-                            className="w-full px-4 py-3 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Remove service
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                            {/* Delete Service Button - Always allow soft deletion */}
+                            <button
+                              onClick={() =>
+                                onDeleteAppointment(appointment.id)
+                              }
+                              className="w-full px-4 py-3 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 flex items-center justify-center gap-2 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Remove service
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+              )}
             </div>
 
-            {/* Add Service Button */}
+            {/* Add Service Button - Always enabled */}
             <button
-              onClick={() => {
-                const firstAppointment = Array.from(
-                  editingAppointments.values()
-                )[0];
-                if (firstAppointment) {
-                  onShowServicePicker('add-new');
-                }
-              }}
-              disabled={editingAppointments.size === 0}
-              className="mt-4 w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors flex items-center justify-center gap-2 text-gray-600 hover:text-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => onShowServicePicker('add-new')}
+              className="mt-4 w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors flex items-center justify-center gap-2 text-gray-600 hover:text-purple-600"
             >
               <Plus className="h-5 w-5" />
               Add service

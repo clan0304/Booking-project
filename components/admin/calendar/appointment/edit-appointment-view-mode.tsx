@@ -52,6 +52,7 @@ export function ViewMode({
   onViewSale,
   onSave,
   onToggleEdit,
+  onShowServicePicker,
   onEditAppointment,
   onDeleteBooking,
   onDeleteAppointment,
@@ -65,6 +66,9 @@ export function ViewMode({
   getClientInitials,
   getTotalPrice,
   getStatusLabel,
+
+  // Products section (optional)
+  productsSection,
 }: ViewModeProps): React.ReactElement {
   // Cast booking to extended type with client_type
   const bookingWithType = booking as BookingWithClientType;
@@ -106,11 +110,9 @@ export function ViewMode({
 
   // Handle delete with confirmation
   const handleDeleteClick = (appointmentId: string): void => {
-    if (editingAppointments.size <= 1) {
-      onDeleteBooking();
-    } else {
-      setDeleteConfirmId(appointmentId);
-    }
+    // Always show delete confirmation for the specific appointment
+    // The booking will only be deleted if Save is clicked with no items
+    setDeleteConfirmId(appointmentId);
   };
 
   // Confirm delete
@@ -197,13 +199,37 @@ export function ViewMode({
     return timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
   });
 
-  // Status options for dropdown
-  const statusOptions: BookingStatus[] = [
-    'confirmed',
-    'completed',
-    'cancelled',
-    'no_show',
-  ];
+  // Get available status options based on current status and booking time
+  const getAvailableStatusOptions = (): BookingStatus[] => {
+    // If already cancelled, no changes allowed
+    if (bookingStatus === 'cancelled') {
+      return ['cancelled'];
+    }
+
+    // If already completed, no changes allowed
+    if (bookingStatus === 'completed') {
+      return ['completed'];
+    }
+
+    // Base options (excluding 'completed' - that's set via checkout only)
+    const options: BookingStatus[] = ['confirmed', 'cancelled'];
+
+    // Only show 'no_show' if current time has passed the booking time
+    const now = new Date();
+    const bookingDateTime = new Date(
+      `${booking.booking_date}T${
+        booking.appointments[0]?.start_time || '00:00:00'
+      }`
+    );
+
+    if (now > bookingDateTime) {
+      options.push('no_show');
+    }
+
+    return options;
+  };
+
+  const statusOptions = getAvailableStatusOptions();
 
   return (
     <div className="flex flex-col h-full">
@@ -231,23 +257,33 @@ export function ViewMode({
           <div className="flex items-center gap-2 ml-2 flex-shrink-0">
             {/* Status Dropdown */}
             <div className="relative">
-              <button
-                onClick={onToggleStatusDropdown}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-white/30 hover:bg-white/10 transition-colors text-sm ${
-                  showStatusDropdown ? 'bg-white/10' : ''
-                }`}
-              >
-                <span className="font-medium capitalize">
-                  {getStatusLabel(bookingStatus)}
-                </span>
-                <ChevronDown
-                  className={`w-4 h-4 transition-transform ${
-                    showStatusDropdown ? 'rotate-180' : ''
+              {statusOptions.length > 1 ? (
+                // Editable status - show dropdown
+                <button
+                  onClick={onToggleStatusDropdown}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-white/30 hover:bg-white/10 transition-colors text-sm ${
+                    showStatusDropdown ? 'bg-white/10' : ''
                   }`}
-                />
-              </button>
+                >
+                  <span className="font-medium capitalize">
+                    {getStatusLabel(bookingStatus)}
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform ${
+                      showStatusDropdown ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+              ) : (
+                // Locked status (cancelled/completed) - no dropdown
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 border-white/30 text-sm opacity-80">
+                  <span className="font-medium capitalize">
+                    {getStatusLabel(bookingStatus)}
+                  </span>
+                </div>
+              )}
 
-              {showStatusDropdown && (
+              {showStatusDropdown && statusOptions.length > 1 && (
                 <>
                   <div
                     className="fixed inset-0 z-40"
@@ -523,134 +559,148 @@ export function ViewMode({
 
             {/* Appointments List */}
             <div className="space-y-3">
-              {sortedAppointments.map(
-                ([appointmentId, appointment]: [
-                  string,
-                  EditingAppointment
-                ]) => {
-                  const isPendingAddition: boolean =
-                    appointmentId.startsWith('pending-');
+              {sortedAppointments.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <p className="text-sm">No services added</p>
+                  <p className="text-xs mt-1">
+                    Add a service or product to continue
+                  </p>
+                </div>
+              ) : (
+                sortedAppointments.map(
+                  ([appointmentId, appointment]: [
+                    string,
+                    EditingAppointment
+                  ]) => {
+                    const isPendingAddition: boolean =
+                      appointmentId.startsWith('pending-');
 
-                  return (
-                    <div key={appointmentId} className="relative group">
-                      {/* Service Card - Clickable */}
-                      <div
-                        onClick={() => {
-                          if (allowEdit) {
-                            onEditAppointment(appointmentId);
-                          }
-                        }}
-                        className={`flex items-center gap-3 p-3 lg:p-4 bg-gray-50 rounded-xl transition-colors ${
-                          isPendingAddition
-                            ? 'ring-2 ring-green-200 bg-green-50'
-                            : ''
-                        } ${
-                          allowEdit ? 'cursor-pointer hover:bg-gray-100' : ''
-                        }`}
-                      >
-                        {/* Color Bar */}
+                    return (
+                      <div key={appointmentId} className="relative group">
+                        {/* Service Card - Clickable */}
                         <div
-                          className="w-1 self-stretch rounded flex-shrink-0"
-                          style={{
-                            backgroundColor: getCategoryColor(appointment),
+                          onClick={() => {
+                            if (allowEdit) {
+                              onEditAppointment(appointmentId);
+                            }
                           }}
-                        />
+                          className={`flex items-center gap-3 p-3 lg:p-4 bg-gray-50 rounded-xl transition-colors ${
+                            isPendingAddition
+                              ? 'ring-2 ring-green-200 bg-green-50'
+                              : ''
+                          } ${
+                            allowEdit ? 'cursor-pointer hover:bg-gray-100' : ''
+                          }`}
+                        >
+                          {/* Color Bar */}
+                          <div
+                            className="w-1 self-stretch rounded flex-shrink-0"
+                            style={{
+                              backgroundColor: getCategoryColor(appointment),
+                            }}
+                          />
 
-                        {/* Service Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-gray-900 text-sm lg:text-base truncate">
-                              {appointment.serviceName}
-                            </p>
-                            {isPendingAddition && (
-                              <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
-                                NEW
+                          {/* Service Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-gray-900 text-sm lg:text-base truncate">
+                                {appointment.serviceName}
+                              </p>
+                              {isPendingAddition && (
+                                <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                                  NEW
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
+                              <span className="flex-shrink-0">
+                                {formatTime(appointment.startTime)}
                               </span>
+                              <span className="text-gray-300">•</span>
+                              <span className="flex-shrink-0">
+                                {appointment.duration}min
+                              </span>
+                              <span className="text-gray-300">•</span>
+                              <span className="truncate">
+                                {getTeamMemberName(appointment.teamMemberId)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Price & Actions */}
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <p className="font-semibold text-gray-900">
+                              {getPriceDisplay(appointment.price)}
+                            </p>
+
+                            {/* Delete button - show on hover or always on mobile */}
+                            {allowEdit && (
+                              <button
+                                onClick={(
+                                  e: React.MouseEvent<HTMLButtonElement>
+                                ) => {
+                                  e.stopPropagation();
+                                  handleDeleteClick(appointmentId);
+                                }}
+                                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {allowEdit && (
+                              <ChevronRight className="w-4 h-4 text-gray-400" />
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-0.5">
-                            <span className="flex-shrink-0">
-                              {formatTime(appointment.startTime)}
-                            </span>
-                            <span className="text-gray-300">•</span>
-                            <span className="flex-shrink-0">
-                              {appointment.duration}min
-                            </span>
-                            <span className="text-gray-300">•</span>
-                            <span className="truncate">
-                              {getTeamMemberName(appointment.teamMemberId)}
-                            </span>
+                        </div>
+
+                        {/* Delete Confirmation Tooltip */}
+                        {deleteConfirmId === appointmentId && (
+                          <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 min-w-[220px]">
+                            <p className="text-sm text-gray-700 mb-3">
+                              Remove this service?
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={handleCancelDelete}
+                                className="flex-1 px-3 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => {
+                                  void handleConfirmDelete(appointmentId);
+                                }}
+                                disabled={isDeleting}
+                                className="flex-1 px-3 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
+                              >
+                                {isDeleting ? 'Removing...' : 'Remove'}
+                              </button>
+                            </div>
                           </div>
-                        </div>
-
-                        {/* Price & Actions */}
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <p className="font-semibold text-gray-900">
-                            {getPriceDisplay(appointment.price)}
-                          </p>
-
-                          {/* Delete button - show on hover or always on mobile */}
-                          {allowEdit && (
-                            <button
-                              onClick={(
-                                e: React.MouseEvent<HTMLButtonElement>
-                              ) => {
-                                e.stopPropagation();
-                                handleDeleteClick(appointmentId);
-                              }}
-                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-
-                          {allowEdit && (
-                            <ChevronRight className="w-4 h-4 text-gray-400" />
-                          )}
-                        </div>
+                        )}
                       </div>
-
-                      {/* Delete Confirmation Tooltip */}
-                      {deleteConfirmId === appointmentId && (
-                        <div className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 min-w-[220px]">
-                          <p className="text-sm text-gray-700 mb-3">
-                            Remove this service?
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={handleCancelDelete}
-                              className="flex-1 px-3 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => {
-                                void handleConfirmDelete(appointmentId);
-                              }}
-                              disabled={isDeleting}
-                              className="flex-1 px-3 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
-                            >
-                              {isDeleting ? 'Removing...' : 'Remove'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
+                    );
+                  }
+                )
               )}
             </div>
 
             {/* Add Service Button */}
             {allowEdit && (
               <button
-                onClick={onToggleEdit}
+                onClick={onShowServicePicker}
                 className="mt-4 w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-colors flex items-center justify-center gap-2 text-gray-600 hover:text-purple-600"
               >
                 <Plus className="h-5 w-5" />
                 Add service
               </button>
             )}
+
+            {/* =====================================================
+                PRODUCTS SECTION (Rendered from parent)
+                ===================================================== */}
+            {productsSection}
 
             {/* Mobile Notes Section */}
             {bookingNotes && (
