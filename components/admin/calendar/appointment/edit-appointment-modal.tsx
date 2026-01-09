@@ -1066,7 +1066,7 @@ export function EditAppointmentModal({
   const getStatusLabel = (status: string): string => {
     const labels: Record<string, string> = {
       confirmed: 'Confirmed',
-      cancelled: 'Canceled',
+      cancelled: 'Cancelled',
       completed: 'Completed',
       no_show: 'No Show',
     };
@@ -1185,6 +1185,13 @@ export function EditAppointmentModal({
 
   // Products section render
   const renderProductsSection = () => {
+    // Don't show "Add product" button for terminal states (completed, cancelled, no_show)
+    const isReadOnly =
+      bookingStatus === 'completed' ||
+      bookingStatus === 'cancelled' ||
+      bookingStatus === 'no_show';
+    const canEditProducts = allowEdit && !isReadOnly;
+
     return (
       <div className="mt-6 px-6">
         <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -1197,20 +1204,26 @@ export function EditAppointmentModal({
               <ProductQuantityEditor
                 key={product.id}
                 product={product}
-                onUpdateQuantity={handleUpdateProductQuantity}
-                onRemove={handleRemoveProduct}
+                onUpdateQuantity={
+                  canEditProducts ? handleUpdateProductQuantity : undefined
+                }
+                onRemove={canEditProducts ? handleRemoveProduct : undefined}
               />
             ))}
           </div>
         )}
 
-        <button
-          onClick={() => setShowProductPicker(true)}
-          className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-500 hover:bg-purple-50 transition-colors w-fit"
-        >
-          <Plus className="w-4 h-4 text-gray-500" />
-          <span className="text-sm font-medium text-gray-700">Add product</span>
-        </button>
+        {canEditProducts && (
+          <button
+            onClick={() => setShowProductPicker(true)}
+            className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-500 hover:bg-purple-50 transition-colors w-fit"
+          >
+            <Plus className="w-4 h-4 text-gray-500" />
+            <span className="text-sm font-medium text-gray-700">
+              Add product
+            </span>
+          </button>
+        )}
       </div>
     );
   };

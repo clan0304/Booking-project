@@ -214,8 +214,8 @@ export function ProductPicker({
 // Inline product quantity editor component
 interface ProductQuantityEditorProps {
   product: SelectedProduct;
-  onUpdateQuantity: (productId: string, quantity: number) => void;
-  onRemove: (productId: string) => void;
+  onUpdateQuantity?: (productId: string, quantity: number) => void;
+  onRemove?: (productId: string) => void;
 }
 
 export function ProductQuantityEditor({
@@ -223,7 +223,10 @@ export function ProductQuantityEditor({
   onUpdateQuantity,
   onRemove,
 }: ProductQuantityEditorProps) {
+  const isReadOnly = !onUpdateQuantity || !onRemove;
+
   const handleDecrease = () => {
+    if (!onUpdateQuantity || !onRemove) return;
     if (product.quantity <= 1) {
       onRemove(product.id);
     } else {
@@ -232,6 +235,7 @@ export function ProductQuantityEditor({
   };
 
   const handleIncrease = () => {
+    if (!onUpdateQuantity) return;
     if (product.quantity < product.maxQuantity) {
       onUpdateQuantity(product.id, product.quantity + 1);
     }
@@ -264,23 +268,31 @@ export function ProductQuantityEditor({
         </p>
       </div>
 
-      {/* Quantity Controls */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleDecrease}
-          className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
-        >
-          <Minus className="w-4 h-4" />
-        </button>
-        <span className="w-8 text-center font-medium">{product.quantity}</span>
-        <button
-          onClick={handleIncrease}
-          disabled={product.quantity >= product.maxQuantity}
-          className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
+      {/* Quantity Controls - show buttons or just quantity based on mode */}
+      {isReadOnly ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">Qty: {product.quantity}</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDecrease}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+          <span className="w-8 text-center font-medium">
+            {product.quantity}
+          </span>
+          <button
+            onClick={handleIncrease}
+            disabled={product.quantity >= product.maxQuantity}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Total Price */}
       <div className="text-right min-w-[60px]">

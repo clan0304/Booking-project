@@ -1,6 +1,6 @@
 // components/admin/calendar/calendar-client.tsx
 // =====================================================
-// UPDATED WITH BOOKING HOLDS INTEGRATION + FULL-WIDTH LAYOUT
+// FRESHA-STYLE CALENDAR WITH NON-BLOCKING LOADING & CACHING
 // =====================================================
 'use client';
 
@@ -16,6 +16,7 @@ import {
 import { getCalendarBookings } from '@/app/actions/bookings';
 import { getBlockedTimes } from '@/app/actions/blocked-times';
 import { getActiveHoldsForCalendar } from '@/app/actions/booking-holds';
+import { readCalendarCache, writeCalendarCache } from '@/lib/calendar-cache';
 import type { CalendarBooking, BlockedTime } from '@/types/calendar';
 import { Loader2 } from 'lucide-react';
 
@@ -73,62 +74,71 @@ interface CalendarClientProps {
   initialVenues: Array<{ id: string; name: string }>;
 }
 
-// Receive initialVenues as prop
+// =====================================================
+// MAIN COMPONENT
+// =====================================================
 export function CalendarClient({ initialVenues }: CalendarClientProps) {
+  // =====================================================
+  // VIEW & FILTER STATE
+  // =====================================================
   const [viewType, setViewType] = useState<CalendarViewType>('day');
-
-  // Initialize with first venue from props
   const [selectedVenue, setSelectedVenue] = useState<string>(
     initialVenues[0]?.id || ''
   );
-
   const [currentDate, setCurrentDate] = useState<string>(getLocalToday());
   const [currentWeekStart, setCurrentWeekStart] = useState<string>(
     getLocalStartOfWeek()
   );
-  const [loading, setLoading] = useState(false);
+
+  // =====================================================
+  // DATA STATE
+  // =====================================================
   const [bookings, setBookings] = useState<CalendarBooking[]>([]);
   const [shifts, setShifts] = useState<ShiftWithTeamMember[]>([]);
   const [assignedTeamMembers, setAssignedTeamMembers] = useState<
     AssignedTeamMember[]
   >([]);
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([]);
-
-  // =====================================================
-  // Booking Holds State
-  // =====================================================
   const [bookingHolds, setBookingHolds] = useState<BookingHold[]>([]);
 
-  // Store previous bookings for optimistic UI
-  const previousBookingsRef = useRef<CalendarBooking[]>([]);
+  // =====================================================
+  // LOADING STATE (Fresha-style)
+  // =====================================================
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [hasInitialData, setHasInitialData] = useState(false);
 
-  // Team filtering state
+  // Track if this is the very first load (no cache, no data)
+  const isFirstLoadRef = useRef(true);
+
+  // =====================================================
+  // TEAM FILTERING STATE
+  // =====================================================
   const [teamFilterMode, setTeamFilterMode] =
     useState<TeamFilterMode>('scheduled');
   const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState<string[]>(
     []
   );
 
+  // =====================================================
+  // COMPUTED VALUES
+  // =====================================================
+
+  // Get the date key for caching
+  const dateKey = viewType === 'day' ? currentDate : currentWeekStart;
+
   // Compute scheduled team member IDs
   const scheduledTeamMemberIds = useMemo(() => {
     const scheduledIds = new Set<string>();
 
-    // From shifts
     shifts.forEach((shift) => scheduledIds.add(shift.team_member_id));
-
-    // From appointments
     bookings.forEach((booking) => {
       booking.appointments.forEach((appt) => {
         scheduledIds.add(appt.team_member_id);
       });
     });
-
-    // From blocked times
     blockedTimes.forEach((blocked) => {
       scheduledIds.add(blocked.team_member_id);
     });
-
-    // From booking holds
     bookingHolds.forEach((hold) => {
       scheduledIds.add(hold.team_member_id);
     });
@@ -136,7 +146,9 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
     return Array.from(scheduledIds);
   }, [shifts, bookings, blockedTimes, bookingHolds]);
 
-  // Auto-select team members when mode changes or data loads
+  // =====================================================
+  // AUTO-SELECT TEAM MEMBERS
+  // =====================================================
   useEffect(() => {
     if (assignedTeamMembers.length === 0) return;
 
@@ -148,7 +160,7 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
   }, [teamFilterMode, assignedTeamMembers, scheduledTeamMemberIds]);
 
   // =====================================================
-  // Helper to fetch holds for date range
+  // HELPER: Fetch holds for date range
   // =====================================================
   async function fetchHoldsForDateRange(
     venueId: string,
@@ -156,13 +168,11 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
     endDate: string
   ): Promise<BookingHold[]> {
     try {
-      // For day view, just fetch one day
       if (startDate === endDate) {
         const result = await getActiveHoldsForCalendar(venueId, startDate);
         return result.holds || [];
       }
 
-      // For week view, fetch each day
       const allHolds: BookingHold[] = [];
       const current = new Date(startDate + 'T00:00:00');
       const end = new Date(endDate + 'T00:00:00');
@@ -184,105 +194,155 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
   }
 
   // =====================================================
-  // Fetch data function (extracted for reuse)
+  // LOAD FROM CACHE (Instant display)
   // =====================================================
-  const fetchData = useCallback(async () => {
-    if (!selectedVenue) return;
+  const loadFromCache = useCallback(() => {
+    if (!selectedVenue) return false;
 
-    // Store previous for optimistic UI
-    previousBookingsRef.current = bookings;
+    const cached = readCalendarCache(selectedVenue, viewType, dateKey);
 
-    setLoading(true);
-    try {
-      let startDate: string;
-      let endDate: string;
-
-      if (viewType === 'day') {
-        startDate = currentDate;
-        endDate = currentDate;
-      } else {
-        startDate = currentWeekStart;
-        endDate = addDays(currentWeekStart, 6);
-      }
-
-      // Fetch bookings, blocked times, AND holds in parallel
-      const [bookingsResult, blockedTimesResult, holdsResult] =
-        await Promise.all([
-          getCalendarBookings({
-            venueId: selectedVenue,
-            teamMemberId: undefined,
-            startDate,
-            endDate,
-            viewType,
-          }),
-          getBlockedTimes(selectedVenue, startDate, endDate),
-          fetchHoldsForDateRange(selectedVenue, startDate, endDate),
-        ]);
-
-      if (bookingsResult.success && bookingsResult.data) {
-        setBookings(bookingsResult.data);
-        setShifts(bookingsResult.shifts || []);
-        setAssignedTeamMembers(bookingsResult.assignedTeamMembers || []);
-      } else {
-        setBookings([]);
-        setShifts([]);
-        setAssignedTeamMembers([]);
-      }
-
-      if (blockedTimesResult.success && blockedTimesResult.data) {
-        setBlockedTimes(blockedTimesResult.data);
-      } else {
-        setBlockedTimes([]);
-      }
-
-      // Set booking holds
-      setBookingHolds(holdsResult);
-    } catch (error) {
-      console.error('Error fetching calendar data:', error);
-      setBookings([]);
-      setShifts([]);
-      setAssignedTeamMembers([]);
-      setBlockedTimes([]);
-      setBookingHolds([]);
-    } finally {
-      setLoading(false);
+    if (cached) {
+      setBookings(cached.bookings);
+      setShifts(cached.shifts);
+      setAssignedTeamMembers(cached.assignedTeamMembers);
+      setBlockedTimes(cached.blockedTimes);
+      setBookingHolds(cached.bookingHolds);
+      setHasInitialData(true);
+      return true;
     }
-  }, [selectedVenue, currentDate, currentWeekStart, viewType, bookings]);
+
+    return false;
+  }, [selectedVenue, viewType, dateKey]);
 
   // =====================================================
-  // Fetch bookings, blocked times, AND holds
+  // FETCH DATA (Background sync)
+  // =====================================================
+  const fetchData = useCallback(
+    async (isBackgroundSync: boolean = false) => {
+      if (!selectedVenue) return;
+
+      // Only show spinner if we have no data to display
+      if (!isBackgroundSync && !hasInitialData) {
+        setIsSyncing(true);
+      } else if (!isBackgroundSync) {
+        // We have data, show non-blocking spinner
+        setIsSyncing(true);
+      }
+
+      try {
+        let startDate: string;
+        let endDate: string;
+
+        if (viewType === 'day') {
+          startDate = currentDate;
+          endDate = currentDate;
+        } else {
+          startDate = currentWeekStart;
+          endDate = addDays(currentWeekStart, 6);
+        }
+
+        // Fetch all data in parallel
+        const [bookingsResult, blockedTimesResult, holdsResult] =
+          await Promise.all([
+            getCalendarBookings({
+              venueId: selectedVenue,
+              teamMemberId: undefined,
+              startDate,
+              endDate,
+              viewType,
+            }),
+            getBlockedTimes(selectedVenue, startDate, endDate),
+            fetchHoldsForDateRange(selectedVenue, startDate, endDate),
+          ]);
+
+        // Update state with new data
+        if (bookingsResult.success && bookingsResult.data) {
+          setBookings(bookingsResult.data);
+          setShifts(bookingsResult.shifts || []);
+          setAssignedTeamMembers(bookingsResult.assignedTeamMembers || []);
+        }
+
+        if (blockedTimesResult.success && blockedTimesResult.data) {
+          setBlockedTimes(blockedTimesResult.data);
+        }
+
+        setBookingHolds(holdsResult);
+        setHasInitialData(true);
+        isFirstLoadRef.current = false;
+
+        // Write to cache for future instant loads
+        writeCalendarCache(selectedVenue, viewType, dateKey, {
+          bookings: bookingsResult.data || [],
+          shifts: bookingsResult.shifts || [],
+          assignedTeamMembers: bookingsResult.assignedTeamMembers || [],
+          blockedTimes: blockedTimesResult.data || [],
+          bookingHolds: holdsResult,
+        });
+      } catch (error) {
+        console.error('Error fetching calendar data:', error);
+        // Don't clear existing data on error - keep showing what we have
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [
+      selectedVenue,
+      currentDate,
+      currentWeekStart,
+      viewType,
+      dateKey,
+      hasInitialData,
+    ]
+  );
+
+  // =====================================================
+  // INITIAL LOAD & CACHE CHECK
   // =====================================================
   useEffect(() => {
-    fetchData();
+    if (!selectedVenue) return;
 
-    // Refresh periodically to update hold expirations
-    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
+    // Try to load from cache first for instant display
+    const hasCachedData = loadFromCache();
+
+    // Always fetch fresh data
+    // If we have cached data, this becomes a background sync
+    fetchData(!hasCachedData ? false : true);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedVenue, currentDate, currentWeekStart, viewType]);
 
   // =====================================================
-  // Refresh handler for child components
+  // POLLING (30-second interval like Fresha)
+  // =====================================================
+  useEffect(() => {
+    if (!selectedVenue) return;
+
+    const interval = setInterval(() => {
+      // Background sync - don't show spinner for polling
+      fetchData(true);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [selectedVenue, fetchData]);
+
+  // =====================================================
+  // REFRESH HANDLER (For child components)
   // =====================================================
   const handleRefresh = useCallback(() => {
-    fetchData();
+    fetchData(false);
   }, [fetchData]);
 
-  // Use previous bookings during loading for smoother UX
-  const displayBookings =
-    loading && previousBookingsRef.current.length > 0
-      ? previousBookingsRef.current
-      : bookings;
-
-  // Filter data by selected team members
+  // =====================================================
+  // FILTERED DATA
+  // =====================================================
   const filteredBookings = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
-    return displayBookings.filter((booking) =>
+    return bookings.filter((booking) =>
       booking.appointments.some((appt) =>
         selectedTeamMemberIds.includes(appt.team_member_id)
       )
     );
-  }, [displayBookings, selectedTeamMemberIds]);
+  }, [bookings, selectedTeamMemberIds]);
 
   const filteredShifts = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
@@ -305,7 +365,6 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
     );
   }, [blockedTimes, selectedTeamMemberIds]);
 
-  // Filter booking holds by selected team members
   const filteredBookingHolds = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
     return bookingHolds.filter((hold) =>
@@ -313,61 +372,59 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
     );
   }, [bookingHolds, selectedTeamMemberIds]);
 
+  // =====================================================
+  // RENDER
+  // =====================================================
   return (
-    <div className="bg-white min-h-[calc(100vh-64px)]">
-      {/* Header with Title and Filters */}
-      <div className="border-b border-gray-200 sticky top-0 bg-white z-20">
-        {/* Title Row */}
-        <div className="px-6 pt-4 pb-3">
-          <h1 className="text-2xl font-bold text-gray-900">Calendar</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Manage appointments and schedules
-          </p>
-        </div>
+    <div className="flex flex-col h-full w-full relative">
+      {/* Calendar Filters Header */}
+      <CalendarFilters
+        viewType={viewType}
+        onViewTypeChange={setViewType}
+        currentDate={currentDate}
+        onDateChange={setCurrentDate}
+        currentWeekStart={currentWeekStart}
+        onWeekChange={setCurrentWeekStart}
+        venues={initialVenues}
+        selectedVenue={selectedVenue}
+        onVenueChange={setSelectedVenue}
+        teamFilterMode={teamFilterMode}
+        onTeamFilterModeChange={setTeamFilterMode}
+        assignedTeamMembers={filteredAssignedTeamMembers}
+        allAssignedTeamMembers={assignedTeamMembers}
+        scheduledTeamMemberIds={scheduledTeamMemberIds}
+        selectedTeamMemberIds={selectedTeamMemberIds}
+        onTeamMemberIdsChange={setSelectedTeamMemberIds}
+        onTeamOrderChange={handleRefresh}
+      />
 
-        {/* Filters Row */}
-        <div className="px-6 pb-3">
-          <CalendarFilters
-            venues={initialVenues}
-            viewType={viewType}
-            onViewTypeChange={setViewType}
-            selectedVenue={selectedVenue}
-            onVenueChange={setSelectedVenue}
-            currentDate={currentDate}
-            onDateChange={setCurrentDate}
-            currentWeekStart={currentWeekStart}
-            onWeekChange={setCurrentWeekStart}
-            teamFilterMode={teamFilterMode}
-            onTeamFilterModeChange={setTeamFilterMode}
-            allAssignedTeamMembers={assignedTeamMembers}
-            assignedTeamMembers={filteredAssignedTeamMembers}
-            scheduledTeamMemberIds={scheduledTeamMemberIds}
-            selectedTeamMemberIds={selectedTeamMemberIds}
-            onTeamOrderChange={fetchData}
-            onTeamMemberIdsChange={setSelectedTeamMemberIds}
-          />
-        </div>
-      </div>
-
-      {/* Subtle loading indicator (doesn't block view) */}
-      {loading && (
-        <div className="fixed top-20 right-4 z-50">
-          <div className="flex items-center gap-2 bg-white rounded-lg shadow-lg px-4 py-2 border border-gray-200">
-            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-            <span className="text-sm text-gray-600">Updating...</span>
+      {/* Calendar Content */}
+      <div className="flex-1 overflow-hidden relative">
+        {/* =====================================================
+            NON-BLOCKING CENTERED SPINNER (Fresha-style)
+            Shows during sync while calendar remains visible
+            ===================================================== */}
+        {isSyncing && (
+          <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
+            <div className="p-4 bg-white/90 rounded-full shadow-lg backdrop-blur-sm">
+              <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Full-width Calendar Grid */}
-      <div>
+        {/* Calendar Views */}
         {!selectedVenue ? (
           <div className="flex items-center justify-center h-96 bg-gray-50">
             <p className="text-gray-500">
               Please select a venue to view the calendar
             </p>
           </div>
-        ) : selectedTeamMemberIds.length === 0 ? (
+        ) : !hasInitialData && isSyncing ? (
+          // First load - show empty state with spinner (spinner already showing above)
+          <div className="flex items-center justify-center h-96 bg-gray-50">
+            <p className="text-gray-400">Loading calendar...</p>
+          </div>
+        ) : selectedTeamMemberIds.length === 0 && hasInitialData ? (
           <div className="flex items-center justify-center h-96 bg-gray-50">
             <p className="text-gray-500">
               No team members scheduled for this{' '}

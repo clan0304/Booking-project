@@ -77,6 +77,14 @@ export function ViewMode({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const isCompleted: boolean = booking.status === 'completed';
+  const isCancelled: boolean = booking.status === 'cancelled';
+  const isNoShow: boolean = booking.status === 'no_show';
+
+  // Read-only mode for terminal states (completed, cancelled, no_show)
+  const isReadOnly: boolean = isCompleted || isCancelled || isNoShow;
+
+  // Can edit only if allowEdit is true AND not in a terminal state
+  const canEdit: boolean = allowEdit && !isReadOnly;
 
   // =====================================================
   // CLIENT TYPE STATE
@@ -461,11 +469,11 @@ export function ViewMode({
                 <button
                   type="button"
                   onClick={() => {
-                    if (allowEdit && !isSavingClientType) {
+                    if (canEdit && !isSavingClientType) {
                       setShowClientTypeDropdown(!showClientTypeDropdown);
                     }
                   }}
-                  disabled={isSavingClientType || !allowEdit}
+                  disabled={isSavingClientType || !canEdit}
                   className={`
                     w-full px-4 py-2.5 rounded-lg border-2 transition-all text-left font-semibold
                     flex items-center justify-between
@@ -475,7 +483,7 @@ export function ViewMode({
                         : 'border-gray-200 text-gray-500'
                     }
                     ${
-                      isSavingClientType || !allowEdit
+                      isSavingClientType || !canEdit
                         ? 'opacity-50 cursor-not-allowed'
                         : 'cursor-pointer hover:border-purple-400'
                     }
@@ -580,7 +588,7 @@ export function ViewMode({
                         {/* Service Card - Clickable */}
                         <div
                           onClick={() => {
-                            if (allowEdit) {
+                            if (canEdit) {
                               onEditAppointment(appointmentId);
                             }
                           }}
@@ -589,7 +597,7 @@ export function ViewMode({
                               ? 'ring-2 ring-green-200 bg-green-50'
                               : ''
                           } ${
-                            allowEdit ? 'cursor-pointer hover:bg-gray-100' : ''
+                            canEdit ? 'cursor-pointer hover:bg-gray-100' : ''
                           }`}
                         >
                           {/* Color Bar */}
@@ -634,7 +642,7 @@ export function ViewMode({
                             </p>
 
                             {/* Delete button - show on hover or always on mobile */}
-                            {allowEdit && (
+                            {canEdit && (
                               <button
                                 onClick={(
                                   e: React.MouseEvent<HTMLButtonElement>
@@ -648,7 +656,7 @@ export function ViewMode({
                               </button>
                             )}
 
-                            {allowEdit && (
+                            {canEdit && (
                               <ChevronRight className="w-4 h-4 text-gray-400" />
                             )}
                           </div>
@@ -687,7 +695,7 @@ export function ViewMode({
             </div>
 
             {/* Add Service Button */}
-            {allowEdit && (
+            {canEdit && (
               <button
                 onClick={onShowServicePicker}
                 className="mt-4 w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-colors flex items-center justify-center gap-2 text-gray-600 hover:text-purple-600"
@@ -726,49 +734,57 @@ export function ViewMode({
             </p>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-3">
-            {/* Save button - hide when completed */}
-            {hasUnsavedChanges && !isCompleted && (
-              <button
-                onClick={() => {
-                  void onSave();
-                }}
-                disabled={isSaving}
-                className="px-4 lg:px-5 py-2.5 lg:py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {isSaving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-gray-400 border-t-gray-700 rounded-full animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <span>Save</span>
-                )}
-              </button>
-            )}
+          {/* Action Buttons - Hidden for cancelled/no_show */}
+          {bookingStatus === 'cancelled' || bookingStatus === 'no_show' ? (
+            <div className="text-sm text-gray-500 italic">
+              {bookingStatus === 'cancelled'
+                ? 'Booking cancelled'
+                : 'Client did not show'}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              {/* Save button - hide when completed */}
+              {hasUnsavedChanges && !isCompleted && (
+                <button
+                  onClick={() => {
+                    void onSave();
+                  }}
+                  disabled={isSaving}
+                  className="px-4 lg:px-5 py-2.5 lg:py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-gray-700 rounded-full animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <span>Save</span>
+                  )}
+                </button>
+              )}
 
-            {/* Checkout OR View Sale */}
-            {isCompleted ? (
-              <button
-                onClick={onViewSale}
-                className="px-5 lg:px-6 py-2.5 lg:py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors font-medium text-sm lg:text-base flex items-center gap-2"
-              >
-                <Receipt className="w-4 h-4" />
-                View Sale
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  void onCheckout();
-                }}
-                disabled={isSaving}
-                className="px-5 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-xl hover:bg-gray-900 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Checkout
-              </button>
-            )}
-          </div>
+              {/* Checkout OR View Sale */}
+              {isCompleted ? (
+                <button
+                  onClick={onViewSale}
+                  className="px-5 lg:px-6 py-2.5 lg:py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors font-medium text-sm lg:text-base flex items-center gap-2"
+                >
+                  <Receipt className="w-4 h-4" />
+                  View Sale
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    void onCheckout();
+                  }}
+                  disabled={isSaving}
+                  className="px-5 lg:px-6 py-2.5 lg:py-3 bg-black text-white rounded-xl hover:bg-gray-900 transition-colors font-medium text-sm lg:text-base disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Checkout
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
