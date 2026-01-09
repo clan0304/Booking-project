@@ -946,16 +946,27 @@ export function DayView({
                           );
 
                           let bgColorClass = 'bg-gray-100';
-                          let cursorClass = 'cursor-not-allowed';
-                          let isClickable = false;
-                          let titleText = 'Outside of working hours';
+                          let cursorClass = 'cursor-pointer';
+                          let isClickable = true;
+                          let titleText = formatTime12Hour(time);
 
-                          if (inShift && !isBlocked) {
+                          if (isBlocked) {
+                            // Blocked times are not clickable
+                            bgColorClass = 'bg-gray-100';
+                            cursorClass = 'cursor-not-allowed';
+                            isClickable = false;
+                            titleText = 'Time is blocked';
+                          } else if (inShift) {
+                            // Available working hours - full styling
                             bgColorClass =
                               'bg-white hover:bg-purple-50 active:bg-purple-100';
-                            isClickable = true;
-                            cursorClass = 'cursor-pointer';
-                            titleText = formatTime12Hour(time);
+                          } else {
+                            // Outside working hours but still clickable
+                            bgColorClass =
+                              'bg-gray-100 hover:bg-gray-200 active:bg-gray-300';
+                            titleText = `${formatTime12Hour(
+                              time
+                            )} (Outside working hours)`;
                           }
 
                           return (
