@@ -64,6 +64,10 @@ export function AppointmentCard({
   const isCancelled = booking.status === 'cancelled';
   const isNoShow = booking.status === 'no_show';
   const isInactive = isCancelled || isNoShow;
+  const isConfirmed = booking.status === 'confirmed';
+
+  // Only confirmed bookings can be dragged/resized
+  const canInteract = isConfirmed;
 
   // Status-based colors
   const COMPLETED_COLOR = '#9CA3AF'; // gray-400
@@ -149,6 +153,7 @@ export function AppointmentCard({
   // ============================================
 
   const handleTopPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!canInteract) return; // Only confirmed bookings can resize
     e.stopPropagation();
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
@@ -156,6 +161,7 @@ export function AppointmentCard({
   };
 
   const handleBottomPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!canInteract) return; // Only confirmed bookings can resize
     e.stopPropagation();
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
@@ -167,6 +173,8 @@ export function AppointmentCard({
     if ((e.target as HTMLElement).classList.contains('resize-handle')) {
       return;
     }
+
+    if (!canInteract) return; // Only confirmed bookings can drag
 
     e.stopPropagation();
     const target = e.currentTarget;
@@ -450,7 +458,8 @@ export function AppointmentCard({
       <div
         ref={cardRef}
         className={`
-          h-full rounded-lg relative overflow-hidden cursor-pointer transition-all duration-100
+          h-full rounded-lg relative overflow-hidden transition-all duration-100
+          ${canInteract ? 'cursor-grab' : 'cursor-pointer'}
           ${
             isInteracting && !isFloating
               ? 'shadow-lg ring-2 ring-purple-500 opacity-90'
@@ -491,20 +500,24 @@ export function AppointmentCard({
           }
         }}
       >
-        {/* Top resize handle */}
-        <div
-          className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize z-10 hover:bg-black/10"
-          onPointerDown={handleTopPointerDown}
-        />
+        {/* Top resize handle - only show for confirmed bookings */}
+        {canInteract && (
+          <div
+            className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize z-10 hover:bg-black/10"
+            onPointerDown={handleTopPointerDown}
+          />
+        )}
 
         {/* Content - Height responsive */}
         {renderContent()}
 
-        {/* Bottom resize handle */}
-        <div
-          className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-10 hover:bg-black/10"
-          onPointerDown={handleBottomPointerDown}
-        />
+        {/* Bottom resize handle - only show for confirmed bookings */}
+        {canInteract && (
+          <div
+            className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize z-10 hover:bg-black/10"
+            onPointerDown={handleBottomPointerDown}
+          />
+        )}
 
         {/* Completed overlay */}
         {isCompleted && (
