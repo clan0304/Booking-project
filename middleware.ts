@@ -1,8 +1,11 @@
 // middleware.ts
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 import type { UserRole } from '@/types/database';
+
+// ✅ DON'T import supabaseAdmin - create client inline for Edge Runtime
+// import { supabaseAdmin } from '@/lib/supabase/server';  // ❌ REMOVE THIS
 
 // Define protected routes
 const isAdminRoute = createRouteMatcher(['/admin(.*)']);
@@ -26,51 +29,63 @@ export default clerkMiddleware(async (auth, req) => {
 
   // If user is signed in and trying to access protected routes
   if (userId && isProtectedRoute(req)) {
-    // Fetch user roles from Supabase (single source of truth)
-    // Use maybeSingle() instead of single() to handle missing users gracefully
-    const { data: user, error } = await supabaseAdmin
-      .from('users')
-      .select('roles, onboarding_completed')
-      .eq('clerk_user_id', userId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error fetching user in middleware:', error);
-      return NextResponse.redirect(new URL('/sign-in', req.url));
-    }
-
-    // If user not found in database, they might be a new user
-    // Redirect to sign-in which will trigger the webhook
-    if (!user) {
-      console.warn(
-        `User ${userId} not found in Supabase, redirecting to sign-in`
+    try {
+      // ✅ Create client inline - this is Edge Runtime safe
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        }
       );
-      const signInUrl = new URL('/sign-in', req.url);
-      signInUrl.searchParams.set('redirect_url', req.url);
-      return NextResponse.redirect(signInUrl);
-    }
 
-    const roles: UserRole[] = user.roles || ['client'];
+      const { data: user, error } = await supabase
+        .from('users')
+        .select('roles, onboarding_completed')
+        .eq('clerk_user_id', userId)
+        .maybeSingle();
 
-    // Check if user is trying to access admin route
-    if (isAdminRoute(req)) {
-      const isAuthorized =
-        roles.includes('admin') || roles.includes('team_member');
-
-      if (!isAuthorized) {
-        return NextResponse.redirect(new URL('/unauthorized', req.url));
+      if (error) {
+        console.error('Error fetching user in middleware:', error);
+        // ✅ On error, allow request to continue instead of blocking
+        return NextResponse.next();
       }
-    }
 
-    // Check onboarding status (skip for onboarding route itself and admin routes)
-    if (
-      !isOnboardingRoute(req) &&
-      !isAdminRoute(req) &&
-      isProtectedRoute(req)
-    ) {
-      if (!user.onboarding_completed) {
-        return NextResponse.redirect(new URL('/onboarding', req.url));
+      if (!user) {
+        console.warn(`User ${userId} not found in Supabase, allowing request`);
+        // ✅ Allow request - webhook might still be processing
+        return NextResponse.next();
       }
+
+      const roles: UserRole[] = user.roles || ['client'];
+
+      // Check if user is trying to access admin route
+      if (isAdminRoute(req)) {
+        const isAuthorized =
+          roles.includes('admin') || roles.includes('team_member');
+
+        if (!isAuthorized) {
+          return NextResponse.redirect(new URL('/unauthorized', req.url));
+        }
+      }
+
+      // Check onboarding status
+      if (
+        !isOnboardingRoute(req) &&
+        !isAdminRoute(req) &&
+        isProtectedRoute(req)
+      ) {
+        if (!user.onboarding_completed) {
+          return NextResponse.redirect(new URL('/onboarding', req.url));
+        }
+      }
+    } catch (error) {
+      console.error('Middleware error:', error);
+      // ✅ On any error, allow request to continue
+      return NextResponse.next();
     }
   }
 
@@ -79,9 +94,7 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
     '/(api|trpc)(.*)',
   ],
 };

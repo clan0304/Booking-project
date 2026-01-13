@@ -106,9 +106,36 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
   // =====================================================
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasInitialData, setHasInitialData] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // Track if this is the very first load (no cache, no data)
   const isFirstLoadRef = useRef(true);
+
+  // =====================================================
+  // PERSISTENT TEAM MEMBERS (Fresha-style)
+  // Keep team members visible when changing dates
+  // =====================================================
+  const [persistentTeamMembers, setPersistentTeamMembers] = useState<
+    AssignedTeamMember[]
+  >([]);
+
+  // Update persistent team members when we get new data
+  // Only update if we actually have team members (don't clear on empty)
+  useEffect(() => {
+    if (assignedTeamMembers.length > 0) {
+      setPersistentTeamMembers(assignedTeamMembers);
+    }
+  }, [assignedTeamMembers]);
+
+  // Use persistent team members for display (fallback to current if available)
+  const displayTeamMembers = useMemo(() => {
+    // If we have current data, use it
+    if (assignedTeamMembers.length > 0) {
+      return assignedTeamMembers;
+    }
+    // Otherwise, keep showing previous team members while loading
+    return persistentTeamMembers;
+  }, [assignedTeamMembers, persistentTeamMembers]);
 
   // =====================================================
   // TEAM FILTERING STATE
@@ -150,14 +177,31 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
   // AUTO-SELECT TEAM MEMBERS
   // =====================================================
   useEffect(() => {
-    if (assignedTeamMembers.length === 0) return;
+    // Use displayTeamMembers for selection (includes persistent)
+    if (displayTeamMembers.length === 0) return;
 
     if (teamFilterMode === 'scheduled') {
-      setSelectedTeamMemberIds(scheduledTeamMemberIds);
+      // If we have scheduled IDs, use them; otherwise show all
+      if (scheduledTeamMemberIds.length > 0) {
+        setSelectedTeamMemberIds(scheduledTeamMemberIds);
+      } else {
+        // No scheduled members for this date - show all team members
+        setSelectedTeamMemberIds(displayTeamMembers.map((m) => m.id));
+      }
     } else if (teamFilterMode === 'all') {
-      setSelectedTeamMemberIds(assignedTeamMembers.map((m) => m.id));
+      setSelectedTeamMemberIds(displayTeamMembers.map((m) => m.id));
     }
-  }, [teamFilterMode, assignedTeamMembers, scheduledTeamMemberIds]);
+
+    // Mark initialization complete after team members are set
+    if (hasInitialData) {
+      setIsInitializing(false);
+    }
+  }, [
+    teamFilterMode,
+    displayTeamMembers,
+    scheduledTeamMemberIds,
+    hasInitialData,
+  ]);
 
   // =====================================================
   // HELPER: Fetch holds for date range
@@ -199,6 +243,9 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
   const loadFromCache = useCallback(() => {
     if (!selectedVenue) return false;
 
+    // Reset initialization state when loading new data
+    setIsInitializing(true);
+
     const cached = readCalendarCache(selectedVenue, viewType, dateKey);
 
     if (cached) {
@@ -221,13 +268,15 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
     async (isBackgroundSync: boolean = false) => {
       if (!selectedVenue) return;
 
-      // Only show spinner if we have no data to display
-      if (!isBackgroundSync && !hasInitialData) {
-        setIsSyncing(true);
-      } else if (!isBackgroundSync) {
-        // We have data, show non-blocking spinner
+      // Always show spinner for non-background syncs
+      // But calendar structure remains visible (Fresha-style)
+      if (!isBackgroundSync) {
         setIsSyncing(true);
       }
+
+      // ✅ FRESHA-STYLE: Don't clear data during sync!
+      // Keep showing previous appointments while loading new ones
+      // This prevents the jarring "disappearing content" effect
 
       try {
         let startDate: string;
@@ -255,7 +304,7 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
             fetchHoldsForDateRange(selectedVenue, startDate, endDate),
           ]);
 
-        // Update state with new data
+        // Update state with new data (replaces old data atomically)
         if (bookingsResult.success && bookingsResult.data) {
           setBookings(bookingsResult.data);
           setShifts(bookingsResult.shifts || []);
@@ -285,14 +334,7 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
         setIsSyncing(false);
       }
     },
-    [
-      selectedVenue,
-      currentDate,
-      currentWeekStart,
-      viewType,
-      dateKey,
-      hasInitialData,
-    ]
+    [selectedVenue, currentDate, currentWeekStart, viewType, dateKey]
   );
 
   // =====================================================
@@ -334,6 +376,7 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
 
   // =====================================================
   // FILTERED DATA
+  // Use displayTeamMembers for filtering
   // =====================================================
   const filteredBookings = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
@@ -353,10 +396,10 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
 
   const filteredAssignedTeamMembers = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
-    return assignedTeamMembers.filter((member) =>
+    return displayTeamMembers.filter((member) =>
       selectedTeamMemberIds.includes(member.id)
     );
-  }, [assignedTeamMembers, selectedTeamMemberIds]);
+  }, [displayTeamMembers, selectedTeamMemberIds]);
 
   const filteredBlockedTimes = useMemo(() => {
     if (selectedTeamMemberIds.length === 0) return [];
@@ -377,7 +420,7 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
   // =====================================================
   return (
     <div className="flex flex-col h-full w-full relative">
-      {/* Calendar Filters Header */}
+      {/* Calendar Filters Header - with loading indicator */}
       <CalendarFilters
         viewType={viewType}
         onViewTypeChange={setViewType}
@@ -391,40 +434,69 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
         teamFilterMode={teamFilterMode}
         onTeamFilterModeChange={setTeamFilterMode}
         assignedTeamMembers={filteredAssignedTeamMembers}
-        allAssignedTeamMembers={assignedTeamMembers}
+        allAssignedTeamMembers={displayTeamMembers}
         scheduledTeamMemberIds={scheduledTeamMemberIds}
         selectedTeamMemberIds={selectedTeamMemberIds}
         onTeamMemberIdsChange={setSelectedTeamMemberIds}
         onTeamOrderChange={handleRefresh}
+        isSyncing={isSyncing}
       />
 
       {/* Calendar Content */}
       <div className="flex-1 overflow-hidden relative">
         {/* =====================================================
-            NON-BLOCKING CENTERED SPINNER (Fresha-style)
-            Shows during sync while calendar remains visible
+            NON-BLOCKING SPINNER OVERLAY (Fresha-style)
+            Shows during sync while calendar remains VISIBLE
+            Appointments are shown but not clickable
             ===================================================== */}
-        {isSyncing && (
-          <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
-            <div className="p-4 bg-white/90 rounded-full shadow-lg backdrop-blur-sm">
-              <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+        {isSyncing && !isInitializing && (
+          <div className="absolute inset-0 z-40 pointer-events-auto bg-white/50">
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="p-4 bg-white/90 rounded-full shadow-lg backdrop-blur-sm">
+                <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+              </div>
             </div>
           </div>
         )}
 
         {/* Calendar Views */}
         {!selectedVenue ? (
+          // No venue selected
           <div className="flex items-center justify-center h-96 bg-gray-50">
             <p className="text-gray-500">
               Please select a venue to view the calendar
             </p>
           </div>
-        ) : !hasInitialData && isSyncing ? (
-          // First load - show empty state with spinner (spinner already showing above)
-          <div className="flex items-center justify-center h-96 bg-gray-50">
-            <p className="text-gray-400">Loading calendar...</p>
+        ) : isInitializing && filteredAssignedTeamMembers.length === 0 ? (
+          // ONLY show skeleton on FIRST load when we have NO data at all
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            {/* Skeleton Header */}
+            <div className="flex border-b border-gray-200 bg-gray-50">
+              <div className="flex-shrink-0 w-14 h-16" />
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="flex-1 border-r border-gray-200 py-3 px-2"
+                >
+                  <div className="flex flex-col items-center gap-2 animate-pulse">
+                    <div className="w-10 h-10 bg-gray-200 rounded-full" />
+                    <div className="w-20 h-4 bg-gray-200 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Skeleton Body */}
+            <div className="relative" style={{ height: '600px' }}>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+                  <p className="text-sm text-gray-500">Loading calendar...</p>
+                </div>
+              </div>
+            </div>
           </div>
-        ) : selectedTeamMemberIds.length === 0 && hasInitialData ? (
+        ) : filteredAssignedTeamMembers.length === 0 && !isSyncing ? (
+          // No team members after data fully loaded (not during sync)
           <div className="flex items-center justify-center h-96 bg-gray-50">
             <p className="text-gray-500">
               No team members scheduled for this{' '}
@@ -432,27 +504,33 @@ export function CalendarClient({ initialVenues }: CalendarClientProps) {
             </p>
           </div>
         ) : viewType === 'day' ? (
-          <DayView
-            bookings={filteredBookings}
-            shifts={filteredShifts}
-            assignedTeamMembers={filteredAssignedTeamMembers}
-            blockedTimes={filteredBlockedTimes}
-            bookingHolds={filteredBookingHolds}
-            venueId={selectedVenue}
-            currentDate={currentDate}
-            onRefresh={handleRefresh}
-          />
+          // Day View - wrapped to disable interactions during sync
+          <div className={isSyncing ? 'pointer-events-none' : ''}>
+            <DayView
+              bookings={filteredBookings}
+              shifts={filteredShifts}
+              assignedTeamMembers={filteredAssignedTeamMembers}
+              blockedTimes={filteredBlockedTimes}
+              bookingHolds={filteredBookingHolds}
+              venueId={selectedVenue}
+              currentDate={currentDate}
+              onRefresh={handleRefresh}
+            />
+          </div>
         ) : (
-          <WeekView
-            bookings={filteredBookings}
-            shifts={filteredShifts}
-            assignedTeamMembers={filteredAssignedTeamMembers}
-            blockedTimes={filteredBlockedTimes}
-            bookingHolds={filteredBookingHolds}
-            weekStart={currentWeekStart}
-            venueId={selectedVenue}
-            onRefresh={handleRefresh}
-          />
+          // Week View - wrapped to disable interactions during sync
+          <div className={isSyncing ? 'pointer-events-none' : ''}>
+            <WeekView
+              bookings={filteredBookings}
+              shifts={filteredShifts}
+              assignedTeamMembers={filteredAssignedTeamMembers}
+              blockedTimes={filteredBlockedTimes}
+              bookingHolds={filteredBookingHolds}
+              weekStart={currentWeekStart}
+              venueId={selectedVenue}
+              onRefresh={handleRefresh}
+            />
+          </div>
         )}
       </div>
     </div>

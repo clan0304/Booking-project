@@ -75,24 +75,44 @@ export interface EditAppointmentModalProps {
   onSuccess: () => void;
   initialStep?: ModalStep;
   allowEdit?: boolean;
+  onSelectBooking?: (bookingId: string) => void;
 }
 
 // =====================================================
 // VIEW MODE PROPS
 // =====================================================
+//
+// NOTES LAYOUT:
+// ┌──────────────────┬──────────────────────────────────┐
+// │ LEFT SIDEBAR     │ RIGHT SIDE                       │
+// │ (Client Info)    │ (Booking Details)                │
+// │                  │                                  │
+// │ • Client photo   │ • Services list                  │
+// │ • Name, contact  │ • Products list                  │
+// │ • Client type    │ • Notes section:                 │
+// │ • ⚠️ Alert note  │   - Client note (if online)     │
+// │   (EDITABLE)     │   - Internal notes (EDITABLE)   │
+// └──────────────────┴──────────────────────────────────┘
+//
+// Notes are editable directly in VIEW mode:
+// - Client Alert: Saves to users.alert_note
+// - Internal Notes: Saves to booking_groups.internal_notes
 
 export interface ViewModeProps {
   booking: BookingGroupWithAppointments;
   editingAppointments: Map<string, EditingAppointment>;
   availableTeamMembers: TeamMember[];
-  availableServices: Map<string, Service[]>; // For looking up category colors
+  availableServices: Map<string, Service[]>;
   bookingStatus: BookingStatus;
   showStatusDropdown: boolean;
   showMoreMenu: boolean;
-  bookingNotes: string;
-  allowEdit: boolean;
 
-  // Track unsaved changes
+  // Notes - see layout diagram above
+  bookingNotes: string; // Client's note from online booking (RIGHT SIDE, read-only)
+  internalNotes: string; // Staff notes for this booking (RIGHT SIDE, EDITABLE)
+  clientAlertNote: string | null; // Warning about the client (LEFT SIDEBAR, EDITABLE)
+
+  allowEdit: boolean;
   hasUnsavedChanges: boolean;
   isSaving: boolean;
 
@@ -100,16 +120,23 @@ export interface ViewModeProps {
   onStatusChange: (status: BookingStatus) => void;
   onToggleStatusDropdown: () => void;
   onToggleMoreMenu: () => void;
-  onCheckout: () => Promise<void>; // Async - saves then goes to payment
+  onCheckout: () => Promise<void>;
   onViewSale: () => void;
   onSave: () => Promise<void>;
   onToggleEdit: () => void;
-  onShowServicePicker: () => void; // Directly open service picker
-  onEditAppointment: (appointmentId: string) => void; // Edit specific appointment
+  onShowServicePicker: () => void;
+  onEditAppointment: (appointmentId: string) => void;
   onDeleteBooking: () => void;
   onDeleteAppointment: (appointmentId: string) => Promise<void>;
-  onRebook: () => void; // Trigger rebook flow
+  onRebook: () => void;
   onClose: () => void;
+
+  // Notes change handlers (optional - component saves directly to DB)
+  onInternalNotesChange?: (notes: string) => void;
+  onClientAlertChange?: (alert: string | null) => void;
+
+  // Navigation handler for client profile view
+  onSelectBooking?: (bookingId: string) => void;
 
   // Helper functions
   formatDate: (dateStr: string) => string;
@@ -127,6 +154,8 @@ export interface ViewModeProps {
 // =====================================================
 // EDIT MODE PROPS
 // =====================================================
+// Edit mode is focused on SERVICE changes (time, duration, team member, price)
+// Notes editing is handled in VIEW mode directly
 
 export interface EditModeProps {
   booking: BookingGroupWithAppointments;
@@ -139,8 +168,12 @@ export interface EditModeProps {
   showTeamMemberDropdown: string | null;
   showTimeDropdown: string | null;
   showDurationDropdown: string | null;
-  bookingNotes: string;
-  internalNotes: string;
+
+  // Notes - displayed read-only for reference
+  bookingNotes: string; // Client's note from online booking (read-only)
+  internalNotes: string; // Staff notes (read-only in edit mode)
+  clientAlertNote: string | null; // Client alert (read-only in edit mode)
+
   isSubmitting: boolean;
   isDeleting: boolean;
 
@@ -166,57 +199,11 @@ export interface EditModeProps {
   setShowTeamMemberDropdown: (id: string | null) => void;
   setShowTimeDropdown: (id: string | null) => void;
   setShowDurationDropdown: (id: string | null) => void;
-  setBookingNotes: (notes: string) => void;
-  setInternalNotes: (notes: string) => void;
+  setInternalNotes: (notes: string) => void; // Still needed for parent state sync
 
   // Helpers
   getTeamMember: (teamMemberId: string) => TeamMember | undefined;
   getService: (teamMemberId: string, serviceId: string) => Service | undefined;
-  formatTime: (time: string) => string;
-  getDurationDisplay: (minutes: number) => string;
-  generateTimeSlots: () => string[];
-  generateDurationOptions: () => number[];
-}
-
-// =====================================================
-// SINGLE EDIT MODE PROPS (Focused single appointment edit)
-// =====================================================
-
-export interface SingleEditModeProps {
-  appointment: EditingAppointment;
-  appointmentId: string;
-  teamMember: TeamMember | undefined;
-  availableTeamMembers: TeamMember[];
-  availableServices: Map<string, Service[]>; // For looking up category colors
-  teamMembersLoading: boolean;
-  showTeamMemberDropdown: string | null;
-  showTimeDropdown: string | null;
-  showDurationDropdown: string | null;
-  isSaving: boolean;
-  canDelete: boolean; // Can only delete if more than 1 appointment in booking
-
-  // Handlers
-  onUpdateAppointmentField: <K extends keyof EditingAppointment>(
-    id: string,
-    field: K,
-    value: EditingAppointment[K]
-  ) => void;
-  onTeamMemberChange: (
-    appointmentId: string,
-    teamMemberId: string
-  ) => Promise<void>;
-  onDeleteAppointment: (id: string) => Promise<void>;
-  onShowServicePicker: (appointmentId: string) => void;
-  onSave: () => void; // Sync - just goes back to view mode
-  onBack: () => void;
-  onClose: () => void;
-
-  // State setters
-  setShowTeamMemberDropdown: (id: string | null) => void;
-  setShowTimeDropdown: (id: string | null) => void;
-  setShowDurationDropdown: (id: string | null) => void;
-
-  // Helpers
   formatTime: (time: string) => string;
   getDurationDisplay: (minutes: number) => string;
   generateTimeSlots: () => string[];
@@ -239,39 +226,42 @@ export interface PaymentModeProps {
 }
 
 // =====================================================
-// FOCUSED EDIT MODE PROPS (Single Appointment Edit)
+// SINGLE EDIT MODE PROPS
 // =====================================================
 
-export interface FocusedEditModeProps {
-  booking: BookingGroupWithAppointments;
+export interface SingleEditModeProps {
   appointment: EditingAppointment;
   appointmentId: string;
+  teamMember: TeamMember | undefined;
   availableTeamMembers: TeamMember[];
-  availableServices: Service[];
+  availableServices: Map<string, Service[]>;
   teamMembersLoading: boolean;
-  servicesLoading: boolean;
-  showTeamMemberDropdown: boolean;
-  showTimeDropdown: boolean;
-  showDurationDropdown: boolean;
-  isSubmitting: boolean;
-  canDelete: boolean; // false if this is the only appointment
+  showTeamMemberDropdown: string | null;
+  showTimeDropdown: string | null;
+  showDurationDropdown: string | null;
+  isSaving: boolean;
+  canDelete: boolean;
 
   // Handlers
-  onUpdateField: <K extends keyof EditingAppointment>(
+  onUpdateAppointmentField: <K extends keyof EditingAppointment>(
+    id: string,
     field: K,
     value: EditingAppointment[K]
   ) => void;
-  onTeamMemberChange: (teamMemberId: string) => Promise<void>;
-  onShowServicePicker: () => void;
-  onDeleteAppointment: () => Promise<void>;
-  onSave: () => Promise<void>;
+  onTeamMemberChange: (
+    appointmentId: string,
+    teamMemberId: string
+  ) => Promise<void>;
+  onDeleteAppointment: (id: string) => Promise<void>;
+  onShowServicePicker: (appointmentId: string) => void;
+  onSave: () => void;
   onBack: () => void;
   onClose: () => void;
 
   // State setters
-  setShowTeamMemberDropdown: (show: boolean) => void;
-  setShowTimeDropdown: (show: boolean) => void;
-  setShowDurationDropdown: (show: boolean) => void;
+  setShowTeamMemberDropdown: (id: string | null) => void;
+  setShowTimeDropdown: (id: string | null) => void;
+  setShowDurationDropdown: (id: string | null) => void;
 
   // Helpers
   formatTime: (time: string) => string;

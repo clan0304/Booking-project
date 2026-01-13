@@ -54,6 +54,7 @@ export function AppointmentCard({
   isFloating = false,
 }: AppointmentCardProps) {
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
+  const [tooltipSide, setTooltipSide] = useState<'left' | 'right'>('right');
   const [arrowPosition, setArrowPosition] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -100,17 +101,38 @@ export function AppointmentCard({
   useEffect(() => {
     if (isHovered && cardRef.current && !isInteracting) {
       const rect = cardRef.current.getBoundingClientRect();
-
-      // Calculate position to the right of the card
-      const left = rect.right + 8; // 8px gap
-      let top = rect.top;
+      const tooltipWidth = 320; // w-80 = 20rem = 320px
+      const tooltipHeight = 400; // approximate height
+      const gap = 8; // gap between card and tooltip
+      const windowWidth = window.innerWidth;
+      const windowHeight = window.innerHeight;
 
       // Calculate the card's center point
       const cardCenter = rect.top + rect.height / 2;
 
+      // Determine which side has more space
+      const spaceOnRight = windowWidth - rect.right;
+      const spaceOnLeft = rect.left;
+
+      // Choose side based on available space (prefer right if equal)
+      const showOnRight =
+        spaceOnRight >= tooltipWidth + gap || spaceOnRight >= spaceOnLeft;
+
+      let left: number;
+      if (showOnRight) {
+        // Position to the right of the card
+        left = rect.right + gap;
+        setTooltipSide('right');
+      } else {
+        // Position to the left of the card
+        left = rect.left - tooltipWidth - gap;
+        setTooltipSide('left');
+      }
+
+      // Calculate vertical position
+      let top = rect.top;
+
       // Ensure tooltip doesn't go off the bottom of the screen
-      const tooltipHeight = 400; // approximate height
-      const windowHeight = window.innerHeight;
       if (top + tooltipHeight > windowHeight) {
         top = windowHeight - tooltipHeight - 20;
       }
@@ -337,11 +359,15 @@ export function AppointmentCard({
           </div>
         )}
 
-        {/* Arrow pointing to card */}
+        {/* Arrow pointing to card - direction based on tooltip side */}
         <div
-          className="absolute w-3 h-3 bg-white border-l border-t border-gray-200 transform -rotate-45"
+          className={`absolute w-3 h-3 bg-white border-gray-200 transform ${
+            tooltipSide === 'right'
+              ? 'border-l border-t -rotate-45'
+              : 'border-r border-b rotate-45'
+          }`}
           style={{
-            left: '-7px',
+            [tooltipSide === 'right' ? 'left' : 'right']: '-7px',
             top: `${arrowPosition}px`,
             marginTop: '-6px',
           }}

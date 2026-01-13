@@ -56,6 +56,7 @@ export function EditAppointmentModal({
   onSuccess,
   initialStep = 'view',
   allowEdit = true,
+  onSelectBooking,
 }: EditAppointmentModalProps) {
   // Step management
   const [currentStep, setCurrentStep] = useState<ModalStep>(initialStep);
@@ -117,6 +118,8 @@ export function EditAppointmentModal({
   >(null);
 
   // Form state
+  // bookingNotes = client notes from online booking (read-only in edit)
+  // internalNotes = staff-only notes (editable)
   const [bookingNotes, setBookingNotes] = useState(booking.notes || '');
   const [internalNotes, setInternalNotes] = useState(
     booking.internal_notes || ''
@@ -130,6 +133,9 @@ export function EditAppointmentModal({
   // Products state
   const [addedProducts, setAddedProducts] = useState<SelectedProduct[]>([]);
   const [showProductPicker, setShowProductPicker] = useState(false);
+
+  // Get client alert note from booking.client
+  const clientAlertNote = booking.client?.alert_note || null;
 
   // Effects
   useEffect(() => {
@@ -296,7 +302,7 @@ export function EditAppointmentModal({
       if (hasChanges) return true;
     }
 
-    if (bookingNotes !== (booking.notes || '')) return true;
+    // Only check internal notes for changes (booking notes are read-only)
     if (internalNotes !== (booking.internal_notes || '')) return true;
 
     return false;
@@ -511,7 +517,7 @@ export function EditAppointmentModal({
             startTime: editedAppt.startTime,
             duration: editedAppt.duration,
             price: editedAppt.price,
-            bookingNotes: bookingNotes,
+            // Don't send bookingNotes - it's read-only from online bookings
             internalNotes: internalNotes,
           });
 
@@ -523,9 +529,8 @@ export function EditAppointmentModal({
         }
       }
 
-      const notesChanged =
-        bookingNotes !== (booking.notes || '') ||
-        internalNotes !== (booking.internal_notes || '');
+      // Only check internal notes for changes
+      const notesChanged = internalNotes !== (booking.internal_notes || '');
 
       const hasOtherUpdates =
         pendingDeletions.size > 0 ||
@@ -551,7 +556,6 @@ export function EditAppointmentModal({
           await updateCalendarAppointment({
             appointmentId: firstNonDeleted[0],
             bookingId: booking.id,
-            bookingNotes: bookingNotes,
             internalNotes: internalNotes,
           });
         }
@@ -671,7 +675,6 @@ export function EditAppointmentModal({
           edited.price !== orig.price
         );
       }) ||
-      bookingNotes !== (booking.notes || '') ||
       internalNotes !== (booking.internal_notes || '');
 
     if (hasServiceChanges) {
@@ -741,7 +744,6 @@ export function EditAppointmentModal({
               startTime: editedAppt.startTime,
               duration: editedAppt.duration,
               price: editedAppt.price,
-              bookingNotes: bookingNotes,
               internalNotes: internalNotes,
             });
 
@@ -753,9 +755,7 @@ export function EditAppointmentModal({
           }
         }
 
-        const notesChanged =
-          bookingNotes !== (booking.notes || '') ||
-          internalNotes !== (booking.internal_notes || '');
+        const notesChanged = internalNotes !== (booking.internal_notes || '');
 
         if (notesChanged) {
           const firstNonDeleted = Array.from(
@@ -765,7 +765,6 @@ export function EditAppointmentModal({
             await updateCalendarAppointment({
               appointmentId: firstNonDeleted[0],
               bookingId: booking.id,
-              bookingNotes: bookingNotes,
               internalNotes: internalNotes,
             });
           }
@@ -1246,6 +1245,8 @@ export function EditAppointmentModal({
             showStatusDropdown={showStatusDropdown}
             showMoreMenu={showMoreMenu}
             bookingNotes={bookingNotes}
+            internalNotes={internalNotes}
+            clientAlertNote={clientAlertNote}
             allowEdit={allowEdit}
             hasUnsavedChanges={hasUnsavedChanges()}
             isSaving={isSubmitting}
@@ -1263,6 +1264,7 @@ export function EditAppointmentModal({
             onDeleteAppointment={handleDeleteAppointment}
             onRebook={handleRebook}
             onClose={onClose}
+            onInternalNotesChange={setInternalNotes}
             formatDate={formatDate}
             formatTime={formatTime}
             getPriceDisplay={getPriceDisplay}
@@ -1272,6 +1274,7 @@ export function EditAppointmentModal({
             getStatusLabel={getStatusLabel}
             onViewSale={handleViewSale}
             productsSection={renderProductsSection()}
+            onSelectBooking={onSelectBooking}
           />
         );
 
@@ -1290,6 +1293,7 @@ export function EditAppointmentModal({
             showDurationDropdown={showDurationDropdown}
             bookingNotes={bookingNotes}
             internalNotes={internalNotes}
+            clientAlertNote={clientAlertNote}
             isSubmitting={isSubmitting}
             isDeleting={isDeleting}
             onToggleAppointment={toggleAppointment}
@@ -1304,7 +1308,6 @@ export function EditAppointmentModal({
             setShowTeamMemberDropdown={setShowTeamMemberDropdown}
             setShowTimeDropdown={setShowTimeDropdown}
             setShowDurationDropdown={setShowDurationDropdown}
-            setBookingNotes={setBookingNotes}
             setInternalNotes={setInternalNotes}
             getTeamMember={getTeamMember}
             getService={getService}

@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Trash2,
   ArrowLeft,
+  AlertTriangle,
 } from 'lucide-react';
 import { AddClientModal } from '@/components/admin/clients';
 import {
@@ -131,8 +132,9 @@ export function CreateAppointmentModal({
 
   // =====================================================
   // BOOKING STATE
+  // Only internal notes for admin-created bookings
+  // Client notes (booking.notes) only come from online bookings
   // =====================================================
-  const [bookingNotes, setBookingNotes] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
 
   // =====================================================
@@ -164,7 +166,6 @@ export function CreateAppointmentModal({
       setAddedServices([]);
       setAddedProducts([]); // Reset products
       setSelectedClient(null);
-      setBookingNotes('');
       setInternalNotes('');
       setError('');
       setServiceSearchQuery('');
@@ -349,6 +350,14 @@ export function CreateAppointmentModal({
       }))
       .filter((category) => category.services.length > 0);
   }, [servicesByCategory, serviceSearchQuery]);
+
+  // Get client alert note if client is selected and has one
+  const clientAlertNote = useMemo(() => {
+    if (selectedClient?.type === 'existing') {
+      return selectedClient.client.alert_note;
+    }
+    return null;
+  }, [selectedClient]);
 
   // =====================================================
   // HELPER FUNCTIONS
@@ -588,9 +597,35 @@ export function CreateAppointmentModal({
     setShowClientSearch(false);
   };
 
-  const handleAddClientSuccess = () => {
+  const handleAddClientSuccess = (client?: {
+    id: string;
+    first_name: string;
+    last_name: string | null;
+    email: string;
+    phone_number: string | null;
+    photo_url: string | null;
+    alert_note?: string | null;
+  }) => {
     setShowAddClientModal(false);
     setShowClientSearch(false);
+
+    // If client data provided, auto-select the new client
+    if (client) {
+      setSelectedClient({
+        type: 'existing',
+        client: {
+          id: client.id,
+          first_name: client.first_name,
+          last_name: client.last_name,
+          email: client.email,
+          phone_number: client.phone_number,
+          photo_url: client.photo_url,
+          alert_note: client.alert_note,
+        },
+      });
+    }
+
+    // Also refresh recent clients list
     const loadRecentClients = async () => {
       const result = await getRecentClients(venueId, 10);
       if (result.success && result.data) {
@@ -636,7 +671,7 @@ export function CreateAppointmentModal({
         startTime: bookingStartTime,
         services,
         products, // Include products
-        bookingNotes: bookingNotes || undefined,
+        // No bookingNotes - client notes only come from online bookings
         internalNotes: internalNotes || undefined,
       };
 
@@ -724,7 +759,7 @@ export function CreateAppointmentModal({
       (sum, p) => sum + p.unitPrice * p.quantity,
       0
     );
-    const totalPrice = servicesTotal + productsTotal;
+    const paymentTotalPrice = servicesTotal + productsTotal;
 
     return (
       <>
@@ -740,7 +775,7 @@ export function CreateAppointmentModal({
             booking={savedBooking}
             editingAppointments={editingAppointments}
             addedProducts={addedProducts}
-            totalPrice={totalPrice}
+            totalPrice={paymentTotalPrice}
             onBack={() => {
               // Go back to main view (but booking is already saved)
               setCurrentView('main');
@@ -899,6 +934,21 @@ export function CreateAppointmentModal({
           </div>
         </div>
 
+        {/* Client Alert Banner - Shows when client has alert_note */}
+        {clientAlertNote && (
+          <div className="mx-6 mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-800">
+                  Client Alert
+                </p>
+                <p className="text-sm text-amber-700 mt-1">{clientAlertNote}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* LEFT SIDEBAR - Client Section */}
@@ -1046,6 +1096,15 @@ export function CreateAppointmentModal({
                             <div className="text-xs font-medium text-gray-900 truncate">
                               {client.first_name} {client.last_name || ''}
                             </div>
+                            {/* Alert indicator for clients with alert_note */}
+                            {client.alert_note && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <AlertTriangle className="w-3 h-3 text-amber-500" />
+                                <span className="text-[10px] text-amber-600">
+                                  Has alert
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </button>
                       ))
@@ -1269,34 +1328,20 @@ export function CreateAppointmentModal({
                 </button>
               </div>
 
-              {/* Notes Section */}
+              {/* Notes Section - Only Internal Notes for admin-created bookings */}
               {hasItems && (
                 <div className="mt-6 pt-6 border-t border-gray-200">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Booking notes
-                      </label>
-                      <textarea
-                        value={bookingNotes}
-                        onChange={(e) => setBookingNotes(e.target.value)}
-                        placeholder="Client visible..."
-                        rows={2}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500 resize-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Internal notes
-                      </label>
-                      <textarea
-                        value={internalNotes}
-                        onChange={(e) => setInternalNotes(e.target.value)}
-                        placeholder="Staff only..."
-                        rows={2}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500 resize-none"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Internal notes
+                    </label>
+                    <textarea
+                      value={internalNotes}
+                      onChange={(e) => setInternalNotes(e.target.value)}
+                      placeholder="Staff only..."
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500 resize-none"
+                    />
                   </div>
                 </div>
               )}
@@ -1365,7 +1410,8 @@ export function CreateAppointmentModal({
       {/* Add Client Modal */}
       <AddClientModal
         isOpen={showAddClientModal}
-        onClose={handleAddClientSuccess}
+        onClose={() => setShowAddClientModal(false)}
+        onSuccess={handleAddClientSuccess}
       />
 
       {/* Product Picker */}

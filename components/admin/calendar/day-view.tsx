@@ -18,7 +18,10 @@ import type {
 } from '@/types/calendar';
 import { EditAppointmentModal } from './appointment/edit-appointment-modal';
 import Image from 'next/image';
-import { getBookingByAppointmentId } from '@/app/actions/calendar-appointments';
+import {
+  getBookingByAppointmentId,
+  getBookingById,
+} from '@/app/actions/calendar-appointments';
 import type { BookingGroupWithAppointments } from '@/types/calendar';
 import { BookingHoldBlock } from './booking-hold-block';
 import type { BookingHold } from './calendar-client';
@@ -214,6 +217,9 @@ export function DayView({
   // Ref to track column boundaries for horizontal drag
   const columnRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
+  // Track if initial scroll to current time has been done
+  const hasInitialScrolledRef = useRef(false);
+
   // Highlighted column during drag
   const [highlightedTeamMemberId, setHighlightedTeamMemberId] = useState<
     string | null
@@ -393,9 +399,16 @@ export function DayView({
     };
   }, [shouldShowCurrentTime, currentTime]);
 
-  // Auto-scroll to current time
+  // Auto-scroll to current time (only on initial load)
   useEffect(() => {
-    if (shouldShowCurrentTime && getCurrentTimePosition) {
+    // Only scroll once on initial page load, not when switching dates back to today
+    if (
+      shouldShowCurrentTime &&
+      getCurrentTimePosition &&
+      !hasInitialScrolledRef.current
+    ) {
+      hasInitialScrolledRef.current = true;
+
       setTimeout(() => {
         const indicatorPosition = getCurrentTimePosition.top;
         const calendarElement = document.querySelector(
@@ -414,7 +427,7 @@ export function DayView({
         }
       }, 100);
     }
-  }, [shouldShowCurrentTime, getCurrentTimePosition, currentDate]);
+  }, [shouldShowCurrentTime, getCurrentTimePosition]);
 
   // Find team member from X position
   const findTeamMemberFromX = useCallback((clientX: number): string | null => {
@@ -781,6 +794,31 @@ export function DayView({
     }
   };
 
+  // Handle selecting a booking directly by ID (from client profile view)
+  const handleSelectBooking = async (bookingId: string) => {
+    // Don't reload if it's the same booking
+    if (selectedBooking?.id === bookingId) return;
+
+    setIsLoadingBooking(true);
+
+    try {
+      const result = await getBookingById(bookingId);
+
+      if (result.success && result.data) {
+        setSelectedBooking(result.data);
+        setEditModalInitialStep('view');
+      } else {
+        console.error('Failed to load booking:', result.error);
+        alert('Failed to load booking details. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error fetching booking:', error);
+      alert('An unexpected error occurred');
+    } finally {
+      setIsLoadingBooking(false);
+    }
+  };
+
   // Get style for positioning
   const getStyle = (startTime: string, endTime: string) => {
     const startMinutes = timeToMinutes(startTime);
@@ -946,16 +984,15 @@ export function DayView({
                           );
 
                           let bgColorClass = 'bg-gray-100';
-                          let cursorClass = 'cursor-pointer';
-                          let isClickable = true;
+                          const cursorClass = 'cursor-pointer';
+                          const isClickable = true;
                           let titleText = formatTime12Hour(time);
 
                           if (isBlocked) {
-                            // Blocked times are not clickable
-                            bgColorClass = 'bg-gray-100';
-                            cursorClass = 'cursor-not-allowed';
-                            isClickable = false;
-                            titleText = 'Time is blocked';
+                            // Blocked times - still clickable for admin override
+                            bgColorClass =
+                              'bg-gray-100 hover:bg-gray-200 active:bg-gray-300';
+                            titleText = `${formatTime12Hour(time)} (Blocked)`;
                           } else if (inShift) {
                             // Available working hours - full styling
                             bgColorClass =
@@ -1280,6 +1317,7 @@ export function DayView({
                 setUpdatedAppointments(new Map());
                 onRefresh();
               }}
+              onSelectBooking={handleSelectBooking}
             />
           ) : null}
         </>

@@ -342,7 +342,9 @@ export async function searchClientsForBooking(query: string) {
 
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('id, first_name, last_name, email, phone_number, photo_url')
+      .select(
+        'id, first_name, last_name, email, phone_number, photo_url, alert_note'
+      )
       .contains('roles', ['client'])
       .or(
         `first_name.ilike.%${query}%,last_name.ilike.%${query}%,email.ilike.%${query}%,phone_number.ilike.%${query}%`
@@ -1026,7 +1028,8 @@ export async function getBookingByAppointmentId(
           last_name,
           email,
           phone_number,
-          photo_url
+          photo_url,
+          alert_note
         ),
         appointments (
           id,
@@ -1284,7 +1287,8 @@ export async function getBookingById(bookingId: string): Promise<{
           last_name,
           email,
           phone_number,
-          photo_url
+          photo_url,
+          alert_note
         ),
         appointments (
           id,
@@ -1385,5 +1389,61 @@ export async function updateBookingStatus(
   } catch (error) {
     console.error('Error in updateBookingStatus:', error);
     return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Update client alert note
+ * Saves directly to users.alert_note field
+ */
+export async function updateClientAlertNote(
+  clientId: string,
+  alertNote: string | null
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireStaff();
+
+    const { error } = await supabaseAdmin
+      .from('users')
+      .update({ alert_note: alertNote })
+      .eq('id', clientId);
+
+    if (error) {
+      console.error('Error updating client alert note:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error in updateClientAlertNote:', error);
+    return { success: false, error: 'Failed to update client alert note' };
+  }
+}
+
+/**
+ * Update booking internal notes
+ * Saves directly to booking_groups.internal_notes field
+ */
+export async function updateBookingInternalNotes(
+  bookingId: string,
+  internalNotes: string | null
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireStaff();
+
+    const { error } = await supabaseAdmin
+      .from('booking_groups')
+      .update({ internal_notes: internalNotes })
+      .eq('id', bookingId);
+
+    if (error) {
+      console.error('Error updating booking internal notes:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error in updateBookingInternalNotes:', error);
+    return { success: false, error: 'Failed to update internal notes' };
   }
 }

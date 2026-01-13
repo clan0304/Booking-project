@@ -55,6 +55,7 @@ export interface CalendarAppointment {
   services?: CalendarService | null;
   category_color?: string | null; // Computed from service category
 }
+
 /**
  * Complete booking group with all nested data
  * Note: Supabase can return venues as either array or single object
@@ -78,6 +79,7 @@ export interface CalendarBooking {
   venues: CalendarVenue[] | CalendarVenue | null;
   appointments: CalendarAppointment[];
 }
+
 /**
  * Appointment with parent booking reference
  * Used for displaying appointment cards
@@ -93,6 +95,7 @@ export interface AppointmentsByMember {
   member: CalendarTeamMember;
   appointments: AppointmentWithBooking[];
 }
+
 /**
  * Appointments grouped by team member and date (for week view)
  */
@@ -215,6 +218,7 @@ export interface BookingGroupWithAppointments {
     email: string;
     phone_number: string | null;
     photo_url: string | null;
+    alert_note?: string | null; // Client alert note for staff warnings
   } | null;
 
   appointments: AppointmentInBooking[];

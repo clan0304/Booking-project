@@ -240,10 +240,25 @@ export async function getUpcomingAppointments(): Promise<{
           id: string;
           status: string;
         }>;
+
+        // ✅ FIX: Check if booking itself is cancelled (handles legacy data where
+        // individual appointments weren't updated when booking was cancelled)
+        const isBookingCancelled =
+          booking.status === 'cancelled' ||
+          booking.status === 'fully_cancelled' ||
+          booking.status === 'no_show';
+
         for (const appt of appointments || []) {
-          if (appt.status === 'confirmed' || appt.status === 'completed') {
+          // If booking is cancelled, count all its appointments as cancelled
+          // regardless of individual appointment status
+          if (isBookingCancelled) {
+            dayCancelled++;
+          } else if (
+            appt.status === 'confirmed' ||
+            appt.status === 'completed'
+          ) {
             dayConfirmed++;
-          } else if (appt.status === 'cancelled') {
+          } else if (appt.status === 'cancelled' || appt.status === 'no_show') {
             dayCancelled++;
           }
         }
