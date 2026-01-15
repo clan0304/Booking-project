@@ -1,7 +1,7 @@
 # Hair Salon Booking System - Architecture Documentation
 
 > **Project Goal:** Build a hair salon booking system similar to Fresha  
-> **Last Updated:** December 2025  
+> **Last Updated:** January 2025  
 > **Architecture:** Clerk for Authentication, Supabase for Authorization (Simplified)
 
 ---
@@ -25,6 +25,7 @@
    - [Phase 5: Booking System & Admin Calendar](#phase-5-booking-system--admin-calendar--completed)
    - [Phase 5.5: Booking Holds](#phase-55-booking-holds--completed)
    - [Phase 6: Stripe Payment Integration](#phase-6-stripe-payment-integration--completed)
+   - [Phase 6.5: Client Dashboard & Reviews](#phase-65-client-dashboard--reviews--completed)
    - [Phase 7: Email Notifications](#phase-7-email-notifications--todo)
    - [Phase 8: Future Enhancements](#phase-8-future-enhancements--todo)
 5. [Key Files Structure](#key-files-structure)
@@ -150,6 +151,19 @@
 | **booking_groups** | Booking container           | venue_id, client_id, guest_info, booking_date, total_price, status, payment_status, total_paid |
 | **appointments**   | Individual appointments     | booking_id, service_id, team_member_id, start_time, end_time, price, status                    |
 | **booking_holds**  | Temporary slot reservations | venue_id, team_member_id, session_token, hold_date, start_time, expires_at                     |
+
+### Review Tables
+
+| Table       | Purpose                    | Key Fields                                                                             |
+| ----------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| **reviews** | Client reviews per stylist | id, booking_group_id, client_id, venue_id, team_member_id, rating, review_text, status |
+
+**Reviews Table Details:**
+
+- Reviews are **per-stylist** within a booking (not per-venue like Fresha)
+- Supports group bookings where multiple stylists can be reviewed independently
+- Status: `published` or `hidden` (admin can hide inappropriate reviews)
+- Unique constraint: One review per (booking_group_id, team_member_id, client_id)
 
 ### Payment Tables
 
@@ -524,6 +538,42 @@
 
 ---
 
+### Phase 6.5: Client Dashboard & Reviews ✅ (COMPLETED)
+
+- [x] **Client Dashboard**
+
+  - [x] Fresha-style two-panel layout (list + detail)
+  - [x] Booking list with venue photos and quick stats
+  - [x] Booking detail panel with services, pricing, venue info
+  - [x] Mobile-responsive slide-over for booking details
+  - [x] Upcoming vs Past booking separation
+  - [x] Cancel booking (48hr policy enforcement)
+
+- [x] **Review System**
+
+  - [x] Per-stylist reviews (not per-venue like Fresha)
+  - [x] Star rating (1-5) with labels: Terrible, Bad, Okay, Good, Great
+  - [x] Review text with 600 character limit
+  - [x] Fresha-style modal popup on star click
+  - [x] Shows only for completed bookings
+  - [x] Hides review prompt after stylist reviewed
+  - [x] Displays submitted reviews with read-only stars
+
+- [x] **Review Admin Features**
+
+  - [x] Hide/unhide reviews (staff)
+  - [x] View all reviews with filters (venue, team member, status)
+  - [x] Team member review statistics
+  - [x] Venue review statistics
+
+- [x] **Technical Implementation**
+  - [x] `reviews` table with proper foreign keys
+  - [x] RLS consideration: Use `supabaseAdmin` for fetching team member details
+  - [x] Optimistic UI updates for submitted reviews
+  - [x] Local review tracking before page refresh
+
+---
+
 ### Phase 7: Email Notifications 🚧 (TODO)
 
 - [ ] **Booking Notifications**
@@ -628,7 +678,8 @@ project-root/
 │   │   ├── staff-management.ts       # Time tracking, clock in/out, breaks
 │   │   ├── staff-pay-rates.ts        # Pay rates, holidays, payroll
 │   │   ├── products.ts               # Products CRUD (JWT + RLS)
-│   │   ├── bookings.ts               # Public booking creation
+│   │   ├── bookings.ts               # Booking creation + client dashboard
+│   │   ├── reviews.ts                # Review CRUD operations
 │   │   ├── calendar-appointments.ts  # Admin appointment CRUD
 │   │   ├── booking-holds.ts          # Booking holds management
 │   │   └── stripe/
@@ -661,6 +712,9 @@ project-root/
 │   │   ├── staff-management/page.tsx # Staff time tracking
 │   │   ├── products/page.tsx         # Products management
 │   │   └── calendar/page.tsx         # Admin calendar view
+│   │
+│   ├── dashboard/
+│   │   └── page.tsx                  # Client dashboard page
 │   │
 │   └── [venue-slug]/                  # Public booking pages
 │       └── page.tsx
@@ -745,6 +799,15 @@ project-root/
 │   │           ├── cash-form.tsx
 │   │           └── test-payment-form.tsx
 │   │
+│   ├── public/
+│   │   └── dashboard/
+│   │       ├── index.ts                  # Exports
+│   │       ├── dashboard-client.tsx      # Main container with state
+│   │       ├── booking-list.tsx          # Left panel booking list
+│   │       ├── booking-detail.tsx        # Right panel details
+│   │       ├── review-section.tsx        # Review prompts + submitted reviews
+│   │       └── review-modal.tsx          # Fresha-style review modal
+│   │
 │   ├── booking/                       # Public booking flow components
 │   │   ├── service-selection.tsx
 │   │   ├── team-selection.tsx
@@ -783,7 +846,8 @@ project-root/
         ├── 007_service_groups.sql     # Service groups migration
         ├── 008_bookings.sql           # Bookings + appointments
         ├── 009_booking_holds.sql      # Booking holds
-        └── 010_payments.sql           # Stripe payment tables
+        ├── 010_payments.sql           # Stripe payment tables
+        └── 011_reviews.sql            # Reviews table
 ```
 
 ---
@@ -1005,33 +1069,132 @@ useEffect(() => {
 
 ---
 
+### RLS vs Service Role for Related User Data
+
+**Problem:** Client dashboard needs to display team member names/photos for appointments, but RLS on `users` table blocks access to other users.
+
+**Context:**
+
+- Clients can only read their own row in `users` table (RLS policy)
+- Appointments reference `team_member_id` which points to `users` table
+- JWT client respects RLS → team member queries return empty
+
+**Solution:**
+
+```typescript
+// ❌ WRONG: JWT client blocked by RLS
+const { data: teamMembers } = await supabase
+  .from('users')
+  .select('id, first_name, last_name, photo_url')
+  .in('id', teamMemberIds);
+
+// ✅ CORRECT: Service Role bypasses RLS
+const { data: teamMembers } = await supabaseAdmin
+  .from('users')
+  .select('id, first_name, last_name, photo_url') // Only safe columns!
+  .in('id', teamMemberIds);
+```
+
+**Security Note:** When using `supabaseAdmin` to fetch user data, explicitly select only public-safe columns. Never use `SELECT *`.
+
+**Key Principle:**
+
+> "Use JWT + RLS for data the user owns (their bookings, their reviews). Use Service Role for fetching related data from other tables (team member names, venue info). Always explicitly list safe columns."
+
+---
+
+### Review Section Conditional Rendering
+
+**Problem:** Review section needs complex conditional logic based on multiple factors.
+
+**Display Rules:**
+
+1. Only show for `status === 'completed'` bookings
+2. Only show if `teamMembers.length > 0` (need team member data)
+3. Hide individual stylist after they're reviewed
+4. Change header when all stylists reviewed
+
+**Implementation:**
+
+```typescript
+// Check all conditions
+const canReview = booking.status === 'completed';
+const hasTeamMembers = uniqueTeamMembers.size > 0;
+const unreviewedCount = teamMembers.filter((tm) => !hasReview(tm.id)).length;
+const allReviewed = unreviewedCount === 0;
+
+// Render nothing if can't review or no team members
+if (!canReview || !hasTeamMembers) return null;
+```
+
+**Key Principle:**
+
+> "For conditional UI sections, explicitly check all required data before rendering. Missing related data (like team members) should hide the section gracefully, not show broken UI."
+
+---
+
 ## 🎯 Critical Decisions Summary
 
-| Decision                  | Choice                            | Rationale                                  |
-| ------------------------- | --------------------------------- | ------------------------------------------ |
-| **Data Access Pattern**   | Service Role (server-side)        | Simpler, more secure, easier to maintain   |
-| **Authorization Pattern** | Supabase only (no Clerk metadata) | Single source of truth, instant updates    |
-| **Role Storage**          | Supabase users.roles ONLY         | No JWT caching issues, instant changes     |
-| **Client Data Access**    | Server-side with filtering        | Users access own data via filtered queries |
-| **RLS Policies**          | Disabled (except Products)        | Not needed with Service Role               |
-| **Timezone Handling**     | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11)    |
-| **Date Storage**          | YYYY-MM-DD strings                | No timezone, consistent across systems     |
-| **Service Types**         | Two-type system (service/bundle)  | Simplified from three types                |
-| **Service Groups**        | UI layer only                     | Clean separation from service data         |
-| **Custom Pricing**        | NULL = default, value = override  | Flexible per-stylist rates                 |
-| **Appointment Pricing**   | Snapshot at booking time          | Price stability, historical accuracy       |
-| **Appointment Modal**     | Right-side slide-in               | Context preservation                       |
-| **Appointment Details**   | Hover tooltip                     | Instant info, non-intrusive                |
-| **Calendar Positioning**  | 20px per 15-min slot              | Perfect grid alignment                     |
-| **Time Tracking**         | JSONB breaks array                | Flexible, tracks multiple breaks           |
-| **Pay Rates**             | Default + Custom (per member)     | System defaults with overrides             |
-| **Booking Holds**         | DELETE-based cleanup              | Simple, no status management               |
-| **Payment Recording**     | Transaction + line items          | Supports split payments & item refunds     |
-| **Refund Tracking**       | Per-item with amounts             | Enables partial/product-only refunds       |
+| Decision                  | Choice                            | Rationale                                       |
+| ------------------------- | --------------------------------- | ----------------------------------------------- |
+| **Data Access Pattern**   | Service Role (server-side)        | Simpler, more secure, easier to maintain        |
+| **Authorization Pattern** | Supabase only (no Clerk metadata) | Single source of truth, instant updates         |
+| **Role Storage**          | Supabase users.roles ONLY         | No JWT caching issues, instant changes          |
+| **Client Data Access**    | Server-side with filtering        | Users access own data via filtered queries      |
+| **RLS Policies**          | Disabled (except Products)        | Not needed with Service Role                    |
+| **Timezone Handling**     | UTC-safe everywhere               | Prevents bugs in Melbourne (UTC+10/+11)         |
+| **Date Storage**          | YYYY-MM-DD strings                | No timezone, consistent across systems          |
+| **Service Types**         | Two-type system (service/bundle)  | Simplified from three types                     |
+| **Service Groups**        | UI layer only                     | Clean separation from service data              |
+| **Custom Pricing**        | NULL = default, value = override  | Flexible per-stylist rates                      |
+| **Appointment Pricing**   | Snapshot at booking time          | Price stability, historical accuracy            |
+| **Appointment Modal**     | Right-side slide-in               | Context preservation                            |
+| **Appointment Details**   | Hover tooltip                     | Instant info, non-intrusive                     |
+| **Calendar Positioning**  | 20px per 15-min slot              | Perfect grid alignment                          |
+| **Time Tracking**         | JSONB breaks array                | Flexible, tracks multiple breaks                |
+| **Pay Rates**             | Default + Custom (per member)     | System defaults with overrides                  |
+| **Booking Holds**         | DELETE-based cleanup              | Simple, no status management                    |
+| **Payment Recording**     | Transaction + line items          | Supports split payments & item refunds          |
+| **Refund Tracking**       | Per-item with amounts             | Enables partial/product-only refunds            |
+| **Review Granularity**    | Per-stylist (not per-venue)       | Better feedback for group bookings              |
+| **Review Timing**         | After completion only             | Prevents fake reviews, ensures service received |
+| **Team Member Fetching**  | supabaseAdmin (bypass RLS)        | Users table RLS blocks cross-user reads         |
+
+---
+
+## 📝 Database Migration Reference
+
+### 011_reviews.sql
+
+```sql
+-- Reviews table
+CREATE TABLE reviews (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  booking_group_id UUID NOT NULL REFERENCES booking_groups(id) ON DELETE CASCADE,
+  client_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  venue_id UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+  team_member_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  review_text TEXT,
+  status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published', 'hidden')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  -- One review per stylist per booking
+  UNIQUE (booking_group_id, team_member_id, client_id)
+);
+
+-- Indexes for common queries
+CREATE INDEX idx_reviews_booking_group ON reviews(booking_group_id);
+CREATE INDEX idx_reviews_client ON reviews(client_id);
+CREATE INDEX idx_reviews_team_member ON reviews(team_member_id);
+CREATE INDEX idx_reviews_venue ON reviews(venue_id);
+CREATE INDEX idx_reviews_status ON reviews(status);
+```
 
 ---
 
 **Document Status:** Living document - update as architecture evolves  
 **Next Review:** After Phase 7 (Email Notifications)  
 **Architecture:** Clerk for Authentication, Supabase for Authorization (Finalized & Simplified)  
-**Last Major Change:** Completed Phase 6 - Stripe Payment Integration (December 2025)
+**Last Major Change:** Completed Phase 6.5 - Client Dashboard & Reviews (January 2025)

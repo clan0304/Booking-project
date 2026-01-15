@@ -577,7 +577,7 @@ export async function getMyBookings(): Promise<{
     > = {};
 
     if (allTeamMemberIds.length > 0) {
-      const { data: teamMembers } = await supabase
+      const { data: teamMembers } = await supabaseAdmin
         .from('users')
         .select('id, first_name, last_name, photo_url')
         .in('id', allTeamMemberIds);

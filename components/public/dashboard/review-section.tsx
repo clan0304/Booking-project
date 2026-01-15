@@ -3,8 +3,8 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { Star, Loader2, Check } from 'lucide-react';
-import { createReview } from '@/app/actions/reviews';
+import { Star, Check } from 'lucide-react';
+import { ReviewModal } from './review-modal';
 import { cn } from '@/lib/utils';
 import type { DashboardBooking } from '@/app/actions/bookings';
 
@@ -22,6 +22,7 @@ interface TeamMemberForReview {
 interface ReviewSectionProps {
   bookingId: string;
   venueName: string;
+  venuePhotoUrl: string | null;
   teamMembers: TeamMemberForReview[];
   existingReviews: DashboardReview[];
   onReviewSubmitted: (
@@ -33,155 +34,52 @@ interface ReviewSectionProps {
   ) => void;
 }
 
-interface StarRatingInputProps {
-  rating: number;
-  onRatingChange: (rating: number) => void;
-  disabled?: boolean;
-  size?: 'sm' | 'md' | 'lg';
-}
-
-function StarRatingInput({
+// Display stars (read-only)
+function StarRatingDisplay({
   rating,
-  onRatingChange,
-  disabled,
-  size = 'lg',
-}: StarRatingInputProps) {
-  const [hoverRating, setHoverRating] = useState(0);
-
+  size = 'sm',
+}: {
+  rating: number;
+  size?: 'sm' | 'md' | 'lg';
+}) {
   const sizeClasses = {
-    sm: 'w-5 h-5',
-    md: 'w-8 h-8',
-    lg: 'w-10 h-10',
+    sm: 'w-4 h-4',
+    md: 'w-5 h-5',
+    lg: 'w-6 h-6',
   };
 
   return (
-    <div className="flex items-center gap-1">
-      {[1, 2, 3, 4, 5].map((star) => {
-        const isActive = star <= (hoverRating || rating);
-        return (
-          <button
-            key={star}
-            type="button"
-            disabled={disabled}
-            onClick={() => onRatingChange(star)}
-            onMouseEnter={() => !disabled && setHoverRating(star)}
-            onMouseLeave={() => setHoverRating(0)}
-            className={cn(
-              'transition-transform',
-              !disabled && 'hover:scale-110',
-              disabled && 'cursor-not-allowed'
-            )}
-          >
-            <Star
-              className={cn(
-                sizeClasses[size],
-                'transition-colors',
-                isActive
-                  ? 'fill-yellow-400 text-yellow-400'
-                  : 'fill-gray-200 text-gray-200'
-              )}
-            />
-          </button>
-        );
-      })}
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          className={cn(
+            sizeClasses[size],
+            star <= rating
+              ? 'fill-yellow-400 text-yellow-400'
+              : 'fill-gray-200 text-gray-200'
+          )}
+        />
+      ))}
     </div>
   );
 }
 
-interface SingleReviewFormProps {
-  bookingId: string;
+// Component to show a submitted review (read-only)
+interface SubmittedReviewDisplayProps {
   teamMember: TeamMemberForReview;
-  existingReview: DashboardReview | null;
-  onReviewSubmitted: (
-    teamMemberId: string,
-    reviewId: string,
-    rating: number,
-    reviewText: string | null
-  ) => void;
+  review: DashboardReview;
 }
 
-function SingleReviewForm({
-  bookingId,
+function SubmittedReviewDisplay({
   teamMember,
-  existingReview,
-  onReviewSubmitted,
-}: SingleReviewFormProps) {
-  const [rating, setRating] = useState(existingReview?.rating || 0);
-  const [reviewText, setReviewText] = useState(
-    existingReview?.review_text || ''
-  );
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(!!existingReview);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async () => {
-    if (rating === 0) {
-      setError('Please select a rating');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      const result = await createReview(
-        bookingId,
-        teamMember.id,
-        rating,
-        reviewText.trim() || undefined
-      );
-
-      if (result.success && result.reviewId) {
-        setIsSubmitted(true);
-        onReviewSubmitted(
-          teamMember.id,
-          result.reviewId,
-          rating,
-          reviewText.trim() || null
-        );
-      } else {
-        setError(result.error || 'Failed to submit review');
-      }
-    } catch (err) {
-      setError(`${err} An error occurred. Please try again.`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  if (isSubmitted && existingReview) {
-    return (
-      <div className="flex items-center gap-3 p-4 bg-green-50 rounded-lg">
-        <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-          <Check className="w-5 h-5 text-green-600" />
-        </div>
-        <div>
-          <p className="font-medium text-green-800">
-            Thank you for your review!
-          </p>
-          <div className="flex items-center gap-1 mt-1">
-            {[1, 2, 3, 4, 5].map((star) => (
-              <Star
-                key={star}
-                className={cn(
-                  'w-4 h-4',
-                  star <= existingReview.rating
-                    ? 'fill-yellow-400 text-yellow-400'
-                    : 'fill-gray-200 text-gray-200'
-                )}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  review,
+}: SubmittedReviewDisplayProps) {
   return (
-    <div className="space-y-3">
-      {/* Team Member Info */}
-      <div className="flex items-center gap-3">
-        <div className="relative w-12 h-12 rounded-full overflow-hidden bg-gray-100 flex-shrink-0">
+    <div className="bg-gray-50 rounded-lg p-4">
+      <div className="flex items-start gap-3">
+        {/* Avatar */}
+        <div className="relative w-10 h-10 rounded-full overflow-hidden bg-gray-100 flex-shrink-0">
           {teamMember.photo_url ? (
             <Image
               src={teamMember.photo_url}
@@ -191,65 +89,174 @@ function SingleReviewForm({
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-pink-100">
-              <span className="text-lg font-semibold text-purple-600">
+              <span className="text-sm font-semibold text-purple-600">
                 {teamMember.first_name.charAt(0)}
               </span>
             </div>
           )}
         </div>
-        <div>
-          <p className="font-medium text-gray-900">
-            {teamMember.first_name} {teamMember.last_name?.charAt(0) || ''}.
-          </p>
-          <p className="text-sm text-gray-500">
-            {teamMember.services.join(', ')}
-          </p>
-        </div>
-      </div>
 
-      {/* Star Rating */}
-      <div className="flex justify-center py-2">
-        <StarRatingInput
-          rating={rating}
-          onRatingChange={setRating}
-          disabled={isSubmitting}
-        />
-      </div>
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-sm font-medium text-gray-900">
+              {teamMember.first_name} {teamMember.last_name?.charAt(0) || ''}.
+            </p>
+            <div className="flex items-center gap-1 text-green-600">
+              <Check className="w-3.5 h-3.5" />
+              <span className="text-xs font-medium">Reviewed</span>
+            </div>
+          </div>
 
-      {/* Review Text (optional, shown after rating) */}
-      {rating > 0 && (
-        <div>
-          <textarea
-            value={reviewText}
-            onChange={(e) => setReviewText(e.target.value)}
-            placeholder="Share your experience (optional)"
-            disabled={isSubmitting}
-            className="w-full p-3 border border-gray-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-50"
-            rows={3}
-          />
-        </div>
-      )}
+          {/* Stars */}
+          <StarRatingDisplay rating={review.rating} size="sm" />
 
-      {/* Error */}
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      {/* Submit Button */}
-      {rating > 0 && (
-        <button
-          onClick={handleSubmit}
-          disabled={isSubmitting}
-          className="w-full py-2.5 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Submitting...
-            </>
-          ) : (
-            'Submit Review'
+          {/* Review Text */}
+          {review.review_text && (
+            <p className="mt-2 text-sm text-gray-600 line-clamp-3">
+              &ldquo;{review.review_text}&rdquo;
+            </p>
           )}
-        </button>
-      )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Separate component for star rating prompt (clickable)
+interface StarRatingPromptProps {
+  teamMember: TeamMemberForReview;
+  onRatingClick: (rating: number) => void;
+  size?: 'sm' | 'lg';
+  centered?: boolean;
+}
+
+function StarRatingPrompt({
+  teamMember,
+  onRatingClick,
+  size = 'sm',
+  centered = false,
+}: StarRatingPromptProps) {
+  const [hoverRating, setHoverRating] = useState(0);
+
+  const starSize = size === 'lg' ? 'w-10 h-10' : 'w-7 h-7';
+  const avatarSize = size === 'lg' ? 'w-14 h-14' : 'w-12 h-12';
+  const initialsSize = size === 'lg' ? 'text-xl' : 'text-lg';
+
+  if (centered) {
+    return (
+      <div className="flex flex-col items-center">
+        <div
+          className={cn(
+            'relative rounded-full overflow-hidden bg-gray-100 mb-3',
+            avatarSize
+          )}
+        >
+          {teamMember.photo_url ? (
+            <Image
+              src={teamMember.photo_url}
+              alt={teamMember.first_name}
+              fill
+              className="object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-pink-100">
+              <span
+                className={cn('font-semibold text-purple-600', initialsSize)}
+              >
+                {teamMember.first_name.charAt(0)}
+              </span>
+            </div>
+          )}
+        </div>
+        <p className="text-sm font-medium text-gray-900 mb-2">
+          {teamMember.first_name} {teamMember.last_name?.charAt(0) || ''}.
+        </p>
+        <div className="flex items-center gap-1">
+          {[1, 2, 3, 4, 5].map((star) => {
+            const isActive = star <= hoverRating;
+            return (
+              <button
+                key={star}
+                type="button"
+                onClick={() => onRatingClick(star)}
+                onMouseEnter={() => setHoverRating(star)}
+                onMouseLeave={() => setHoverRating(0)}
+                className="transition-transform hover:scale-110"
+              >
+                <Star
+                  className={cn(
+                    'transition-colors',
+                    starSize,
+                    isActive
+                      ? 'fill-yellow-400 text-yellow-400'
+                      : 'fill-gray-200 text-gray-200'
+                  )}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-4">
+      {/* Team Member Avatar */}
+      <div
+        className={cn(
+          'relative rounded-full overflow-hidden bg-gray-100 flex-shrink-0',
+          avatarSize
+        )}
+      >
+        {teamMember.photo_url ? (
+          <Image
+            src={teamMember.photo_url}
+            alt={teamMember.first_name}
+            fill
+            className="object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-pink-100">
+            <span className={cn('font-semibold text-purple-600', initialsSize)}>
+              {teamMember.first_name.charAt(0)}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Name and Stars */}
+      <div className="flex-1">
+        <p className="text-sm font-medium text-gray-900 mb-1">
+          {teamMember.first_name} {teamMember.last_name?.charAt(0) || ''}.
+        </p>
+        <div className="flex items-center gap-1">
+          {[1, 2, 3, 4, 5].map((star) => {
+            const isActive = star <= hoverRating;
+            return (
+              <button
+                key={star}
+                type="button"
+                onClick={() => onRatingClick(star)}
+                onMouseEnter={() => setHoverRating(star)}
+                onMouseLeave={() => setHoverRating(0)}
+                className="transition-transform hover:scale-110"
+              >
+                <Star
+                  className={cn(
+                    'transition-colors',
+                    starSize,
+                    isActive
+                      ? 'fill-yellow-400 text-yellow-400'
+                      : 'fill-gray-200 text-gray-200'
+                  )}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -257,67 +264,176 @@ function SingleReviewForm({
 export function ReviewSection({
   bookingId,
   venueName,
+  venuePhotoUrl,
   teamMembers,
   existingReviews,
   onReviewSubmitted,
 }: ReviewSectionProps) {
-  // Find existing review for each team member
-  const getExistingReview = (teamMemberId: string) => {
+  // Track locally submitted reviews (for optimistic UI)
+  const [localReviews, setLocalReviews] = useState<
+    Map<string, { rating: number; text: string | null }>
+  >(new Map());
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedTeamMember, setSelectedTeamMember] =
+    useState<TeamMemberForReview | null>(null);
+  const [initialRating, setInitialRating] = useState(0);
+
+  // Get existing review for a team member
+  const getExistingReview = (teamMemberId: string): DashboardReview | null => {
     return (
       existingReviews.find((r) => r.team_member_id === teamMemberId) || null
     );
   };
 
-  // Check if all team members have been reviewed
-  const allReviewed = teamMembers.every((tm) => getExistingReview(tm.id));
+  // Get locally submitted review
+  const getLocalReview = (teamMemberId: string) => {
+    return localReviews.get(teamMemberId) || null;
+  };
 
+  // Check if stylist has been reviewed (existing or local)
+  const hasReview = (teamMemberId: string): boolean => {
+    return !!getExistingReview(teamMemberId) || !!getLocalReview(teamMemberId);
+  };
+
+  // Separate reviewed and unreviewed
+  const reviewedTeamMembers = teamMembers.filter((tm) => hasReview(tm.id));
+  const unreviewedTeamMembers = teamMembers.filter((tm) => !hasReview(tm.id));
+
+  // Handle star click - open modal
+  const handleRatingClick = (
+    teamMember: TeamMemberForReview,
+    rating: number
+  ) => {
+    setSelectedTeamMember(teamMember);
+    setInitialRating(rating);
+    setModalOpen(true);
+  };
+
+  // Handle review submitted from modal
+  const handleReviewSubmitted = (
+    teamMemberId: string,
+    reviewId: string,
+    rating: number,
+    reviewText: string | null
+  ) => {
+    // Track locally for optimistic UI
+    setLocalReviews((prev) => {
+      const next = new Map(prev);
+      next.set(teamMemberId, { rating, text: reviewText });
+      return next;
+    });
+    // Notify parent
+    onReviewSubmitted(bookingId, teamMemberId, reviewId, rating, reviewText);
+  };
+
+  // Don't render if no team members at all
   if (teamMembers.length === 0) {
     return null;
   }
 
+  // All reviewed - show summary
+  const allReviewed = unreviewedTeamMembers.length === 0;
+
   return (
-    <div className="border border-gray-200 rounded-xl p-5 mb-4">
-      <div className="text-center mb-4">
-        <h3 className="font-semibold text-gray-900">
-          How was your experience at {venueName}?
-        </h3>
-        <p className="text-sm text-gray-500 mt-1">
-          {allReviewed
-            ? 'Thanks for your feedback!'
-            : 'Let us know your thoughts'}
-        </p>
+    <>
+      <div className="border border-gray-200 rounded-xl p-5 mb-4">
+        {/* Header */}
+        <div className="text-center mb-5">
+          <h3 className="font-semibold text-gray-900">
+            {allReviewed
+              ? `Your reviews for ${venueName}`
+              : `How was your experience at ${venueName}?`}
+          </h3>
+          <p className="text-sm text-gray-500 mt-1">
+            {allReviewed
+              ? 'Thanks for your feedback!'
+              : 'Let us know your thoughts'}
+          </p>
+        </div>
+
+        {/* Unreviewed Stylists */}
+        {unreviewedTeamMembers.length > 0 && (
+          <div className="mb-4">
+            {unreviewedTeamMembers.length === 1 &&
+            reviewedTeamMembers.length === 0 ? (
+              // Single stylist, none reviewed - centered layout
+              <StarRatingPrompt
+                teamMember={unreviewedTeamMembers[0]}
+                onRatingClick={(rating) =>
+                  handleRatingClick(unreviewedTeamMembers[0], rating)
+                }
+                size="lg"
+                centered
+              />
+            ) : (
+              // Multiple or mixed - list layout
+              <div className="space-y-3">
+                {unreviewedTeamMembers.map((tm) => (
+                  <StarRatingPrompt
+                    key={tm.id}
+                    teamMember={tm}
+                    onRatingClick={(rating) => handleRatingClick(tm, rating)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Divider if both sections exist */}
+        {unreviewedTeamMembers.length > 0 && reviewedTeamMembers.length > 0 && (
+          <div className="border-t border-gray-200 my-4" />
+        )}
+
+        {/* Reviewed Stylists */}
+        {reviewedTeamMembers.length > 0 && (
+          <div className="space-y-3">
+            {reviewedTeamMembers.map((tm) => {
+              // Get review data (existing or local)
+              const existingReview = getExistingReview(tm.id);
+              const localReview = getLocalReview(tm.id);
+
+              // Build review object for display
+              const reviewData: DashboardReview = existingReview || {
+                id: 'local',
+                team_member_id: tm.id,
+                rating: localReview?.rating || 0,
+                review_text: localReview?.text || null,
+                status: 'published',
+                created_at: new Date().toISOString(),
+              };
+
+              return (
+                <SubmittedReviewDisplay
+                  key={tm.id}
+                  teamMember={tm}
+                  review={reviewData}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* If single team member, show inline */}
-      {teamMembers.length === 1 ? (
-        <SingleReviewForm
+      {/* Review Modal */}
+      {selectedTeamMember && (
+        <ReviewModal
+          isOpen={modalOpen}
+          onClose={() => {
+            setModalOpen(false);
+            setSelectedTeamMember(null);
+            setInitialRating(0);
+          }}
           bookingId={bookingId}
-          teamMember={teamMembers[0]}
-          existingReview={getExistingReview(teamMembers[0].id)}
-          onReviewSubmitted={(tmId, reviewId, rating, text) =>
-            onReviewSubmitted(bookingId, tmId, reviewId, rating, text)
-          }
+          venueName={venueName}
+          venuePhotoUrl={venuePhotoUrl}
+          teamMember={selectedTeamMember}
+          initialRating={initialRating}
+          onReviewSubmitted={handleReviewSubmitted}
         />
-      ) : (
-        /* Multiple team members - show each */
-        <div className="space-y-4">
-          {teamMembers.map((tm) => (
-            <div
-              key={tm.id}
-              className="border-t border-gray-100 pt-4 first:border-t-0 first:pt-0"
-            >
-              <SingleReviewForm
-                bookingId={bookingId}
-                teamMember={tm}
-                existingReview={getExistingReview(tm.id)}
-                onReviewSubmitted={(tmId, reviewId, rating, text) =>
-                  onReviewSubmitted(bookingId, tmId, reviewId, rating, text)
-                }
-              />
-            </div>
-          ))}
-        </div>
       )}
-    </div>
+    </>
   );
 }

@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { BookingList } from './booking-list';
-import { BookingDetail } from './booking-detail';
+import { BookingDetail, MobileBookingDetail } from './booking-detail';
 import type { DashboardBooking } from '@/app/actions/bookings';
 
 // Stats type (calculated in page.tsx)
@@ -34,6 +34,20 @@ export function DashboardClient({
       initialUpcoming[0] || initialPast[0] || null
     );
 
+  // Mobile slide-over state
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+
+  // Handle booking selection (opens slide-over on mobile)
+  const handleSelectBooking = (booking: DashboardBooking) => {
+    setSelectedBooking(booking);
+    setMobileDetailOpen(true); // Open slide-over on mobile
+  };
+
+  // Handle closing mobile detail
+  const handleCloseMobileDetail = () => {
+    setMobileDetailOpen(false);
+  };
+
   // Handle booking cancellation - move from upcoming to past
   const handleBookingCancelled = (bookingId: string) => {
     // Find the cancelled booking in upcoming
@@ -43,7 +57,7 @@ export function DashboardClient({
       // Update the booking status
       const updatedBooking: DashboardBooking = {
         ...cancelledBooking,
-        status: 'cancelled',
+        status: 'fully_cancelled',
       };
 
       // Remove from upcoming
@@ -112,17 +126,17 @@ export function DashboardClient({
   return (
     <div className="flex h-[calc(100vh-4rem)] bg-gray-50">
       {/* Left Panel - Booking List */}
-      <div className="w-full md:w-[400px] lg:w-[450px] border-r border-gray-200 bg-white overflow-y-auto">
+      <div className="w-full md:w-[400px] lg:w-[450px] md:border-r border-gray-200 bg-white overflow-y-auto">
         <BookingList
           upcoming={upcoming}
           past={past}
           stats={stats}
           selectedBookingId={selectedBooking?.id || null}
-          onSelectBooking={(booking) => setSelectedBooking(booking)}
+          onSelectBooking={handleSelectBooking}
         />
       </div>
 
-      {/* Right Panel - Booking Detail */}
+      {/* Right Panel - Booking Detail (Desktop only) */}
       <div className="hidden md:flex flex-1 overflow-y-auto">
         {selectedBooking ? (
           <BookingDetail
@@ -138,6 +152,17 @@ export function DashboardClient({
           </div>
         )}
       </div>
+
+      {/* Mobile Slide-over Detail */}
+      {selectedBooking && (
+        <MobileBookingDetail
+          isOpen={mobileDetailOpen}
+          booking={selectedBooking}
+          onReviewSubmitted={handleReviewSubmitted}
+          onBookingCancelled={handleBookingCancelled}
+          onClose={handleCloseMobileDetail}
+        />
+      )}
     </div>
   );
 }

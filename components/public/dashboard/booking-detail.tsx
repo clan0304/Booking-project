@@ -36,6 +36,8 @@ interface BookingDetailProps {
     reviewText: string | null
   ) => void;
   onBookingCancelled: (bookingId: string) => void;
+  onClose?: () => void; // For mobile slide-over
+  isMobile?: boolean;
 }
 
 // Format date: "Wed, 16 July 2025"
@@ -62,8 +64,18 @@ function getTotalDuration(appointments: DashboardAppointment[]): number {
   return appointments.reduce((sum, apt) => sum + apt.duration_minutes, 0);
 }
 
+// Normalize status for display (fully_cancelled & partially_cancelled -> cancelled)
+function normalizeStatus(status: string): string {
+  if (status === 'fully_cancelled' || status === 'partially_cancelled') {
+    return 'cancelled';
+  }
+  return status;
+}
+
 // Status badge component
 function StatusBadge({ status }: { status: string }) {
+  const normalizedStatus = normalizeStatus(status);
+
   const config: Record<
     string,
     { icon: typeof CheckCircle; color: string; label: string }
@@ -90,7 +102,11 @@ function StatusBadge({ status }: { status: string }) {
     },
   };
 
-  const { icon: Icon, color, label } = config[status] || config.confirmed;
+  const {
+    icon: Icon,
+    color,
+    label,
+  } = config[normalizedStatus] || config.confirmed;
 
   return (
     <span
@@ -105,10 +121,13 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export function BookingDetail({
+// Inner content component (shared between desktop and mobile)
+function BookingDetailContent({
   booking,
   onReviewSubmitted,
   onBookingCancelled,
+  onClose,
+  isMobile,
 }: BookingDetailProps) {
   const [showServices, setShowServices] = useState(true);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -180,6 +199,17 @@ export function BookingDetail({
           <div className="absolute inset-0 bg-gradient-to-br from-purple-600 to-pink-500" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+
+        {/* Mobile Close Button */}
+        {isMobile && onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 z-10 w-10 h-10 bg-black/30 backdrop-blur-sm rounded-full flex items-center justify-center text-white hover:bg-black/50 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+
         <div className="absolute bottom-0 left-0 right-0 p-6">
           <h1 className="text-2xl font-bold text-white">
             {booking.venue?.name || 'Unknown Venue'}
@@ -202,11 +232,12 @@ export function BookingDetail({
           <p className="text-gray-600 mt-1">{totalDuration} minutes duration</p>
         </div>
 
-        {/* Review Section - Only for completed bookings */}
+        {/* Review Section - Only for completed bookings with unreviewed stylists */}
         {canReview && (
           <ReviewSection
             bookingId={booking.id}
             venueName={booking.venue?.name || 'this salon'}
+            venuePhotoUrl={booking.venue?.photo_url || null}
             teamMembers={Array.from(uniqueTeamMembers.entries()).map(
               ([id, tm]) => ({
                 id,
@@ -336,6 +367,9 @@ export function BookingDetail({
             <span className="font-medium">Cancel Booking</span>
           </button>
         )}
+
+        {/* Bottom padding for mobile */}
+        {isMobile && <div className="h-8" />}
       </div>
 
       {/* Cancel Confirmation Dialog */}
@@ -390,5 +424,46 @@ export function BookingDetail({
         </div>
       )}
     </div>
+  );
+}
+
+// Main export - handles both desktop and mobile views
+export function BookingDetail(props: BookingDetailProps) {
+  return <BookingDetailContent {...props} />;
+}
+
+// Mobile slide-over wrapper
+interface MobileBookingDetailProps extends BookingDetailProps {
+  isOpen: boolean;
+}
+
+export function MobileBookingDetail({
+  isOpen,
+  onClose,
+  ...props
+}: MobileBookingDetailProps) {
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/50 md:hidden"
+        onClick={onClose}
+      />
+
+      {/* Slide-over Panel */}
+      <div
+        className={cn(
+          'fixed inset-y-0 right-0 z-50 w-full bg-white md:hidden',
+          'transform transition-transform duration-300 ease-out',
+          isOpen ? 'translate-x-0' : 'translate-x-full'
+        )}
+      >
+        <div className="h-full overflow-y-auto">
+          <BookingDetailContent {...props} onClose={onClose} isMobile />
+        </div>
+      </div>
+    </>
   );
 }
