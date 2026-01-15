@@ -17,11 +17,11 @@ import type {
   BlockedTime,
 } from '@/types/calendar';
 import { EditAppointmentModal } from './appointment/edit-appointment-modal';
-import Image from 'next/image';
 import {
   getBookingByAppointmentId,
   getBookingById,
 } from '@/app/actions/calendar-appointments';
+import { TeamMemberHeaderPopover } from './team-member-header-popover';
 import type { BookingGroupWithAppointments } from '@/types/calendar';
 import { BookingHoldBlock } from './booking-hold-block';
 import type { BookingHold } from './calendar-client';
@@ -862,44 +862,25 @@ export function DayView({
             >
               {/* Team Member Headers */}
               <div className="flex border-b border-gray-200 bg-gray-50">
-                <div className="flex-shrink-0 w-14" />
+                <div className="flex-shrink-0 w-16 border-r-2 border-gray-300 bg-gray-100" />
 
                 {appointmentsByMember.map(({ member }) => (
                   <div
                     key={member.id}
-                    className="border-r border-gray-200 py-3 px-2"
+                    className="border-r border-gray-200 py-2 px-1"
                     style={{
                       width: useFixedWidth ? '200px' : columnWidth,
                       minWidth: useFixedWidth ? '200px' : 'auto',
                     }}
                   >
-                    <div className="flex flex-col items-center gap-2">
-                      {/* Photo - Smaller */}
-                      <div className="flex-shrink-0">
-                        {member.photo_url ? (
-                          <Image
-                            src={member.photo_url}
-                            alt={`${member.first_name} ${member.last_name}`}
-                            width={48}
-                            height={48}
-                            className="rounded-full object-cover"
-                            style={{ width: '48px', height: '48px' }}
-                          />
-                        ) : (
-                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center">
-                            <span className="text-sm font-semibold text-white">
-                              {member.first_name[0]}
-                              {member.last_name[0]}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Name */}
-                      <p className="text-sm font-semibold text-gray-900 truncate text-center w-full px-1">
-                        {member.first_name} {member.last_name}
-                      </p>
-                    </div>
+                    <TeamMemberHeaderPopover
+                      member={member}
+                      currentDate={currentDate}
+                      venueId={venueId}
+                      venueName=""
+                      shifts={shifts}
+                      onRefresh={onRefresh}
+                    />
                   </div>
                 ))}
               </div>
@@ -907,7 +888,7 @@ export function DayView({
               {/* Time Grid */}
               <div className="flex">
                 {/* Time Labels Column */}
-                <div className="flex-shrink-0 w-14 border-r border-gray-200 bg-gray-50">
+                <div className="flex-shrink-0 w-16 border-r-2 border-gray-300 bg-gray-100">
                   {timeSlots.map((time) => {
                     const isHourMark = time.endsWith(':00');
                     const showLabel = hourLabels.includes(time);
@@ -1041,7 +1022,7 @@ export function DayView({
                           getCurrentTimePosition &&
                           member.id === appointmentsByMember[0]?.member.id && (
                             <div
-                              className="absolute left-0 right-0 z-50 pointer-events-none"
+                              className="absolute left-0 right-0 z-10 pointer-events-none"
                               style={{ top: `${getCurrentTimePosition.top}px` }}
                             >
                               <div className="relative">

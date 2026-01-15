@@ -1,88 +1,118 @@
 // app/dashboard/page.tsx
-import { requireAuth } from '@/lib/auth';
-import { supabaseAdmin } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { UserButton } from '@clerk/nextjs';
+import { currentUser } from '@clerk/nextjs/server';
+import { PublicLayout } from '@/components/public';
 import Link from 'next/link';
+import { Calendar, Clock, Gift, ChevronRight } from 'lucide-react';
 
 export default async function DashboardPage() {
-  const { userId } = await requireAuth();
+  const user = await currentUser();
 
-  // Check if user has completed onboarding
-  const { data: user } = await supabaseAdmin
-    .from('users')
-    .select('*')
-    .eq('clerk_user_id', userId)
-    .single();
-
-  if (user && !user.onboarding_completed) {
-    redirect('/onboarding');
+  if (!user) {
+    redirect('/sign-in');
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <h1 className="text-xl font-bold">Dashboard</h1>
-          <div className="flex items-center gap-4">
+    <PublicLayout>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">
+            Welcome back, {user.firstName || 'there'}!
+          </h1>
+          <p className="mt-2 text-gray-600">
+            Manage your bookings and account settings
+          </p>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <Calendar className="w-6 h-6 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">0</p>
+                <p className="text-sm text-gray-600">Upcoming Bookings</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                <Clock className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">0</p>
+                <p className="text-sm text-gray-600">Past Appointments</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Quick Actions
+            </h2>
+          </div>
+
+          <div className="divide-y divide-gray-100">
+            <Link
+              href="/"
+              className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <Calendar className="w-5 h-5 text-gray-400" />
+                <span className="font-medium text-gray-900">
+                  Book an Appointment
+                </span>
+              </div>
+              <ChevronRight className="w-5 h-5 text-gray-400" />
+            </Link>
+
             <Link
               href="/profile"
-              className="text-sm text-gray-600 hover:text-gray-900"
+              className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
             >
-              Edit Profile
+              <div className="flex items-center gap-3">
+                <Clock className="w-5 h-5 text-gray-400" />
+                <span className="font-medium text-gray-900">View Profile</span>
+              </div>
+              <ChevronRight className="w-5 h-5 text-gray-400" />
             </Link>
-            {/* Show admin link if user has staff roles */}
-            {user?.roles &&
-              (user.roles.includes('admin') ||
-                user.roles.includes('team_member')) && (
-                <Link
-                  href="/admin"
-                  className="text-sm text-gray-600 hover:text-gray-900"
-                >
-                  Admin Panel
-                </Link>
-              )}
-            <UserButton afterSignOutUrl="/" />
-          </div>
-        </div>
-      </nav>
-
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <h2 className="text-2xl font-bold text-gray-900">
-          Welcome, {user?.first_name || 'there'}!
-        </h2>
-        <p className="mt-2 text-gray-600">Your client dashboard</p>
-
-        <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          <div className="rounded-lg bg-white p-6 shadow">
-            <h3 className="text-lg font-semibold text-gray-900">My Bookings</h3>
-            <p className="mt-2 text-3xl font-bold text-gray-900">0</p>
-            <p className="mt-1 text-sm text-gray-600">Upcoming appointments</p>
-          </div>
-
-          <div className="rounded-lg bg-white p-6 shadow">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Booking History
-            </h3>
-            <p className="mt-2 text-3xl font-bold text-gray-900">0</p>
-            <p className="mt-1 text-sm text-gray-600">Past appointments</p>
-          </div>
-
-          <div className="rounded-lg bg-white p-6 shadow">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Loyalty Points
-            </h3>
-            <p className="mt-2 text-3xl font-bold text-gray-900">0</p>
-            <p className="mt-1 text-sm text-gray-600">Points earned</p>
           </div>
         </div>
 
-        <div className="mt-8">
-          <button className="rounded-lg bg-black px-6 py-3 text-white hover:bg-gray-800">
-            Book an Appointment
-          </button>
+        {/* Upcoming Bookings Section */}
+        <div className="mt-8 bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Upcoming Bookings
+            </h2>
+          </div>
+
+          <div className="p-12 text-center">
+            <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              No upcoming bookings
+            </h3>
+            <p className="text-gray-600 mb-6">
+              You don&apos;t have any appointments scheduled yet.
+            </p>
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              <Calendar className="w-5 h-5" />
+              Book Now
+            </Link>
+          </div>
         </div>
       </div>
-    </div>
+    </PublicLayout>
   );
 }

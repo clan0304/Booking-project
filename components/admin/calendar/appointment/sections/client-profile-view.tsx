@@ -17,6 +17,8 @@ import {
   Pencil,
   Trash2,
   MoreVertical,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import {
   getClientAppointmentHistory,
@@ -26,8 +28,25 @@ import {
   updateClientNote,
   deleteClientNote,
 } from '@/app/actions/client-profile';
+import {
+  getClientReviewsAdmin,
+  hideReview,
+  unhideReview,
+  type ReviewWithDetails,
+} from '@/app/actions/reviews';
+import { StarRating } from '@/components/ui/star-rating';
 
 // Types
+interface AppointmentReview {
+  id: string;
+  team_member_id: string;
+  team_member_name: string;
+  rating: number;
+  review_text: string | null;
+  status: 'published' | 'hidden';
+  services: string[];
+}
+
 interface ClientAppointment {
   id: string;
   booking_date: string;
@@ -46,11 +65,13 @@ interface ClientAppointment {
       first_name: string;
       last_name: string | null;
     } | null;
+    team_member_id: string;
   }>;
   payment_status: string | null;
   total_price: number | null;
   internal_notes: string | null;
   notes: string | null;
+  reviews?: AppointmentReview[];
 }
 
 interface ClientNote {
@@ -68,7 +89,7 @@ interface AppointmentNote {
   team_member_name: string | null;
 }
 
-type ProfileTab = 'appointments' | 'sales' | 'memo' | 'reviews';
+type ProfileTab = 'appointments' | 'sales' | 'memo';
 type AppointmentFilter =
   | 'all'
   | 'booked'
@@ -124,6 +145,13 @@ export function ClientProfileView({
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeNoteMenu, setActiveNoteMenu] = useState<string | null>(null);
 
+  // Reviews state (for inline display in appointments)
+  const [reviewsByBooking, setReviewsByBooking] = useState<
+    Map<string, ReviewWithDetails[]>
+  >(new Map());
+  const [activeReviewMenu, setActiveReviewMenu] = useState<string | null>(null);
+  const [togglingReviewId, setTogglingReviewId] = useState<string | null>(null);
+
   // Generate gradient colors for avatar
   const getGradientColors = (name: string): string => {
     const colors: string[] = [
@@ -164,14 +192,29 @@ export function ClientProfileView({
     return date.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
   };
 
-  // Load appointments
+  // Load appointments and reviews
   useEffect(() => {
-    const loadAppointments = async () => {
+    const loadAppointmentsAndReviews = async () => {
       setIsLoading(true);
       try {
-        const result = await getClientAppointmentHistory(clientId);
-        if (result.success && result.data) {
-          setAppointments(result.data);
+        const [appointmentsResult, reviewsResult] = await Promise.all([
+          getClientAppointmentHistory(clientId),
+          getClientReviewsAdmin(clientId),
+        ]);
+
+        if (appointmentsResult.success && appointmentsResult.data) {
+          setAppointments(appointmentsResult.data);
+        }
+
+        // Group reviews by booking_group_id
+        if (reviewsResult.success && reviewsResult.data) {
+          const grouped = new Map<string, ReviewWithDetails[]>();
+          reviewsResult.data.forEach((review) => {
+            const existing = grouped.get(review.booking_group_id) || [];
+            existing.push(review);
+            grouped.set(review.booking_group_id, existing);
+          });
+          setReviewsByBooking(grouped);
         }
       } catch (error) {
         console.error('Error loading appointments:', error);
@@ -181,7 +224,7 @@ export function ClientProfileView({
     };
 
     if (activeTab === 'appointments' && clientId) {
-      loadAppointments();
+      loadAppointmentsAndReviews();
     }
   }, [clientId, activeTab]);
 
@@ -212,6 +255,44 @@ export function ClientProfileView({
       loadMemoData();
     }
   }, [clientId, activeTab]);
+
+  // Handle toggle review visibility (hide/unhide)
+  const handleToggleReviewVisibility = async (
+    reviewId: string,
+    bookingGroupId: string,
+    currentStatus: string
+  ) => {
+    setTogglingReviewId(reviewId);
+    try {
+      const result =
+        currentStatus === 'published'
+          ? await hideReview(reviewId)
+          : await unhideReview(reviewId);
+
+      if (result.success) {
+        // Update local state
+        const newReviewsByBooking = new Map(reviewsByBooking);
+        const bookingReviews = newReviewsByBooking.get(bookingGroupId) || [];
+        const updatedReviews = bookingReviews.map((r) =>
+          r.id === reviewId
+            ? {
+                ...r,
+                status: (currentStatus === 'published'
+                  ? 'hidden'
+                  : 'published') as 'published' | 'hidden',
+              }
+            : r
+        );
+        newReviewsByBooking.set(bookingGroupId, updatedReviews);
+        setReviewsByBooking(newReviewsByBooking);
+      }
+    } catch (error) {
+      console.error('Error toggling review visibility:', error);
+    } finally {
+      setTogglingReviewId(null);
+      setActiveReviewMenu(null);
+    }
+  };
 
   // Format date for notes display
   const formatNoteDate = (dateStr: string): string => {
@@ -414,7 +495,6 @@ export function ClientProfileView({
       icon: <FileText className="w-4 h-4" />,
       count: clientNotes.length + appointmentNotes.length,
     },
-    { id: 'reviews', label: 'Reviews', icon: <Star className="w-4 h-4" /> },
   ];
 
   return (
@@ -765,6 +845,124 @@ export function ClientProfileView({
                                   )}
                                 </div>
                               )}
+
+                              {/* Reviews Section (only for completed bookings) */}
+                              {apt.status === 'completed' &&
+                                reviewsByBooking.get(apt.id) &&
+                                reviewsByBooking.get(apt.id)!.length > 0 && (
+                                  <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                                    {reviewsByBooking
+                                      .get(apt.id)!
+                                      .map((review) => (
+                                        <div
+                                          key={review.id}
+                                          className={`relative p-3 bg-yellow-50 border border-yellow-100 rounded-lg ${
+                                            review.status === 'hidden'
+                                              ? 'opacity-60'
+                                              : ''
+                                          }`}
+                                        >
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="flex items-center gap-2">
+                                              <Star className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+                                              <span className="text-xs font-medium text-yellow-700">
+                                                Review for{' '}
+                                                {review.team_member
+                                                  ?.first_name || 'Staff'}
+                                              </span>
+                                              <StarRating
+                                                rating={review.rating}
+                                                size="sm"
+                                              />
+                                            </div>
+
+                                            {/* Actions Menu */}
+                                            <div className="relative">
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setActiveReviewMenu(
+                                                    activeReviewMenu ===
+                                                      review.id
+                                                      ? null
+                                                      : review.id
+                                                  );
+                                                }}
+                                                className="p-1 rounded hover:bg-yellow-100"
+                                              >
+                                                <MoreVertical className="w-3.5 h-3.5 text-yellow-600" />
+                                              </button>
+
+                                              {activeReviewMenu ===
+                                                review.id && (
+                                                <>
+                                                  <div
+                                                    className="fixed inset-0 z-40"
+                                                    onClick={() =>
+                                                      setActiveReviewMenu(null)
+                                                    }
+                                                  />
+                                                  <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px]">
+                                                    <button
+                                                      onClick={() =>
+                                                        handleToggleReviewVisibility(
+                                                          review.id,
+                                                          apt.id,
+                                                          review.status
+                                                        )
+                                                      }
+                                                      disabled={
+                                                        togglingReviewId ===
+                                                        review.id
+                                                      }
+                                                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
+                                                    >
+                                                      {review.status ===
+                                                      'published' ? (
+                                                        <>
+                                                          <EyeOff className="w-4 h-4" />
+                                                          Hide review
+                                                        </>
+                                                      ) : (
+                                                        <>
+                                                          <Eye className="w-4 h-4" />
+                                                          Show review
+                                                        </>
+                                                      )}
+                                                    </button>
+                                                  </div>
+                                                </>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          {/* Services for this review */}
+                                          {review.services &&
+                                            review.services.length > 0 && (
+                                              <p className="text-xs text-yellow-600 mt-1 ml-5">
+                                                Services:{' '}
+                                                {review.services.join(', ')}
+                                              </p>
+                                            )}
+
+                                          {/* Review Text */}
+                                          {review.review_text && (
+                                            <p className="text-sm text-gray-700 mt-2 ml-5 whitespace-pre-wrap">
+                                              &quot;{review.review_text}&quot;
+                                            </p>
+                                          )}
+
+                                          {/* Hidden Badge */}
+                                          {review.status === 'hidden' && (
+                                            <span className="inline-flex items-center mt-2 ml-5 px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600">
+                                              <EyeOff className="w-3 h-3 mr-1" />
+                                              Hidden
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
+                                  </div>
+                                )}
 
                               {/* Action Buttons */}
                               {apt.status === 'completed' && (
@@ -1122,13 +1320,6 @@ export function ClientProfileView({
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {activeTab === 'reviews' && (
-          <div className="p-8 text-center">
-            <Star className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500">Reviews coming soon</p>
           </div>
         )}
       </div>

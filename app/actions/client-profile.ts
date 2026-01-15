@@ -26,6 +26,7 @@ interface ClientAppointment {
       first_name: string;
       last_name: string | null;
     } | null;
+    team_member_id: string;
   }>;
   payment_status: string | null;
   total_price: number | null;
@@ -81,6 +82,7 @@ export async function getClientAppointmentHistory(
           start_time,
           duration_minutes,
           price,
+          team_member_id,
           team_member:users!appointments_team_member_id_fkey (
             first_name,
             last_name
@@ -112,6 +114,7 @@ export async function getClientAppointmentHistory(
           start_time: string;
           duration_minutes: number;
           price: number;
+          team_member_id: string;
           team_member:
             | { first_name: string; last_name: string | null }
             | { first_name: string; last_name: string | null }[]
@@ -128,6 +131,7 @@ export async function getClientAppointmentHistory(
             duration_minutes: apt.duration_minutes,
             price: apt.price,
             team_member: teamMemberData || null,
+            team_member_id: apt.team_member_id,
           };
         }
       );
