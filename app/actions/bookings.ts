@@ -95,31 +95,6 @@ interface Appointment {
   team_member?: TeamMember | null;
 }
 
-interface VenueSimple {
-  name: string;
-  slug: string;
-}
-
-interface AppointmentSimple {
-  id: string;
-  service_name: string;
-  start_time: string;
-  status: string;
-  team_member_id?: string;
-}
-
-interface BookingGroupSimple {
-  id: string;
-  venue_id: string;
-  booking_date: string;
-  total_appointments: number;
-  total_price: number;
-  status: string;
-  created_at: string;
-  venues: VenueSimple[] | null; // Supabase returns as array
-  appointments: AppointmentSimple[];
-}
-
 interface VenueBookingAppointment {
   id: string;
   service_name: string;
@@ -328,6 +303,58 @@ interface TeamMemberAssignmentFromDB {
   team_member_id: string;
   users: TeamMemberFromUsers | TeamMemberFromUsers[];
 }
+
+// Dashboard-specific types (enhanced version of BookingGroupSimple)
+interface DashboardVenue {
+  id: string;
+  name: string;
+  address: string;
+  phone_number: string | null;
+  photo_url: string | null;
+  slug: string;
+}
+
+interface DashboardAppointment {
+  id: string;
+  service_name: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  price: number;
+  status: string;
+  team_member_id: string;
+  team_member: {
+    id: string;
+    first_name: string;
+    last_name: string | null;
+    photo_url: string | null;
+  } | null;
+}
+
+interface DashboardReview {
+  id: string;
+  team_member_id: string;
+  rating: number;
+  review_text: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface DashboardBooking {
+  id: string;
+  venue_id: string;
+  booking_date: string;
+  total_appointments: number;
+  total_price: number;
+  status: string;
+  payment_status: string | null;
+  notes: string | null;
+  booking_source: string;
+  created_at: string;
+  venue: DashboardVenue | null;
+  appointments: DashboardAppointment[];
+  reviews: DashboardReview[];
+}
 // =====================================================
 // HELPER FUNCTIONS
 // =====================================================
@@ -467,19 +494,22 @@ export async function getBookingForClient(bookingId: string): Promise<{
 }
 
 /**
- * Get all bookings for logged-in client
+ * Get all bookings for logged-in client (for dashboard)
  * RLS ensures they only see their own bookings
+ * Includes venue details, team members, and reviews
+ * Returns ALL statuses (confirmed, completed, cancelled, no_show)
  */
 export async function getMyBookings(): Promise<{
   success: boolean;
-  data?: BookingGroupSimple[];
+  data?: DashboardBooking[];
   error?: string;
 }> {
   try {
     await requireAuth();
     const supabase = await createSupabaseJWTClient();
 
-    const { data, error } = await supabase
+    // Fetch all bookings for this client (RLS auto-filters by client_id)
+    const { data: bookings, error: bookingsError } = await supabase
       .from('booking_groups')
       .select(
         `
@@ -489,28 +519,156 @@ export async function getMyBookings(): Promise<{
         total_appointments,
         total_price,
         status,
+        payment_status,
+        notes,
+        booking_source,
         created_at,
         venues (
+          id,
           name,
+          address,
+          phone_number,
+          photo_url,
           slug
         ),
         appointments (
           id,
           service_name,
           start_time,
-          status
+          end_time,
+          duration_minutes,
+          price,
+          status,
+          team_member_id
         )
       `
       )
       .order('booking_date', { ascending: false })
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching bookings:', error);
+    if (bookingsError) {
+      console.error('Error fetching bookings:', bookingsError);
       return { success: false, error: 'Failed to fetch bookings' };
     }
 
-    return { success: true, data: data as unknown as BookingGroupSimple[] };
+    if (!bookings || bookings.length === 0) {
+      return { success: true, data: [] };
+    }
+
+    // Fetch team member details for all appointments
+    const allTeamMemberIds = [
+      ...new Set(
+        bookings.flatMap((b) =>
+          (b.appointments || []).map(
+            (a: { team_member_id: string }) => a.team_member_id
+          )
+        )
+      ),
+    ];
+
+    const teamMembersMap: Record<
+      string,
+      {
+        id: string;
+        first_name: string;
+        last_name: string | null;
+        photo_url: string | null;
+      }
+    > = {};
+
+    if (allTeamMemberIds.length > 0) {
+      const { data: teamMembers } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, photo_url')
+        .in('id', allTeamMemberIds);
+
+      if (teamMembers) {
+        teamMembers.forEach((tm) => {
+          teamMembersMap[tm.id] = tm;
+        });
+      }
+    }
+
+    // Fetch reviews for all bookings (RLS filters by client_id)
+    const bookingIds = bookings.map((b) => b.id);
+    const reviewsMap: Record<string, DashboardReview[]> = {};
+
+    const { data: reviews, error: reviewsError } = await supabase
+      .from('reviews')
+      .select(
+        'id, booking_group_id, team_member_id, rating, review_text, status, created_at'
+      )
+      .in('booking_group_id', bookingIds);
+
+    if (!reviewsError && reviews) {
+      reviews.forEach((review) => {
+        if (!reviewsMap[review.booking_group_id]) {
+          reviewsMap[review.booking_group_id] = [];
+        }
+        reviewsMap[review.booking_group_id].push({
+          id: review.id,
+          team_member_id: review.team_member_id,
+          rating: review.rating,
+          review_text: review.review_text,
+          status: review.status,
+          created_at: review.created_at,
+        });
+      });
+    }
+
+    // Transform data
+    const transformedBookings: DashboardBooking[] = bookings.map((booking) => {
+      // Handle venue - Supabase might return array or single object
+      const venueRaw = booking.venues;
+      const venue = Array.isArray(venueRaw) ? venueRaw[0] : venueRaw;
+
+      // Handle appointments with team members
+      const appointments: DashboardAppointment[] = (
+        booking.appointments || []
+      ).map(
+        (apt: {
+          id: string;
+          service_name: string;
+          start_time: string;
+          end_time: string;
+          duration_minutes: number;
+          price: number;
+          status: string;
+          team_member_id: string;
+        }) => ({
+          id: apt.id,
+          service_name: apt.service_name,
+          start_time: apt.start_time,
+          end_time: apt.end_time,
+          duration_minutes: apt.duration_minutes,
+          price: apt.price,
+          status: apt.status,
+          team_member_id: apt.team_member_id,
+          team_member: teamMembersMap[apt.team_member_id] || null,
+        })
+      );
+
+      // Sort appointments by start_time
+      appointments.sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+      return {
+        id: booking.id,
+        venue_id: booking.venue_id,
+        booking_date: booking.booking_date,
+        total_appointments: booking.total_appointments,
+        total_price: booking.total_price,
+        status: booking.status,
+        payment_status: booking.payment_status,
+        notes: booking.notes,
+        booking_source: booking.booking_source,
+        created_at: booking.created_at,
+        venue: venue || null,
+        appointments,
+        reviews: reviewsMap[booking.id] || [],
+      };
+    });
+
+    return { success: true, data: transformedBookings };
   } catch (error) {
     console.error('Error in getMyBookings:', error);
     return { success: false, error: 'Failed to fetch bookings' };
