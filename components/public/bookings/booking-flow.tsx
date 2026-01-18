@@ -531,7 +531,7 @@ export function BookingFlow({
           confirmation to {bookingData.guestEmail}.
         </p>
         <Link
-          href="/account/bookings"
+          href="/dashboard"
           className="inline-block bg-[#6C5CE7] text-white px-6 py-3 rounded-lg font-medium hover:bg-[#5b4bc4] transition-colors"
         >
           View My Bookings

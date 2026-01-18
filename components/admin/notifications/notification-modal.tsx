@@ -132,6 +132,13 @@ export function NotificationModal({ isOpen, onClose }: NotificationModalProps) {
         setIsLoadingBooking(false);
       }
     }
+
+    // For review notifications, we could navigate to a review detail page
+    // or open a review modal in the future
+    if (notification.category === 'reviews') {
+      // Currently just mark as read - can be extended to show review detail
+      console.log('Review notification clicked:', notification.metadata);
+    }
   };
 
   // Handle edit modal close
@@ -159,6 +166,10 @@ export function NotificationModal({ isOpen, onClose }: NotificationModalProps) {
   // Get unread notifications
   const unreadNotifications = notifications.filter((n) => !n.is_read);
   const readNotifications = notifications.filter((n) => n.is_read);
+
+  // Get empty state icon based on category
+  const EmptyIcon =
+    CATEGORIES.find((c) => c.id === activeCategory)?.icon || Calendar;
 
   if (!isOpen) return null;
 
@@ -266,7 +277,7 @@ export function NotificationModal({ isOpen, onClose }: NotificationModalProps) {
               </div>
             ) : notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-                <Calendar className="h-12 w-12 text-gray-300 mb-3" />
+                <EmptyIcon className="h-12 w-12 text-gray-300 mb-3" />
                 <p>No notifications</p>
               </div>
             ) : (
@@ -365,6 +376,9 @@ function NotificationCard({
   const clientInitial =
     notification.client?.first_name?.charAt(0).toUpperCase() || '?';
 
+  // Get rating from metadata for review notifications
+  const rating = notification.metadata?.rating as number | undefined;
+
   return (
     <button
       onClick={onClick}
@@ -382,6 +396,23 @@ function NotificationCard({
           <p className="font-semibold text-gray-900 mb-1">
             {notification.title}
           </p>
+
+          {/* Star rating display for reviews */}
+          {notification.category === 'reviews' && rating && (
+            <div className="flex items-center gap-0.5 mb-2">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Star
+                  key={star}
+                  className={`w-4 h-4 ${
+                    star <= rating
+                      ? 'fill-yellow-400 text-yellow-400'
+                      : 'fill-gray-200 text-gray-200'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+
           <p className="text-xs text-gray-500 mb-2">
             {formatRelativeTime(notification.created_at)}
           </p>
@@ -420,10 +451,20 @@ function NotificationCard({
             </div>
           )}
 
-          {/* Calendar badge */}
+          {/* Category badge - different colors based on category */}
           {notification.category === 'appointments' && (
             <div className="absolute -bottom-1 -right-1 h-6 w-6 bg-purple-500 rounded-full flex items-center justify-center">
               <Calendar className="h-3 w-3 text-white" />
+            </div>
+          )}
+          {notification.category === 'reviews' && (
+            <div className="absolute -bottom-1 -right-1 h-6 w-6 bg-yellow-500 rounded-full flex items-center justify-center">
+              <Star className="h-3 w-3 text-white fill-white" />
+            </div>
+          )}
+          {notification.category === 'tips' && (
+            <div className="absolute -bottom-1 -right-1 h-6 w-6 bg-green-500 rounded-full flex items-center justify-center">
+              <Gift className="h-3 w-3 text-white" />
             </div>
           )}
         </div>

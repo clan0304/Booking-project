@@ -44,18 +44,48 @@ interface AddServiceModalProps {
 }
 
 const DURATION_OPTIONS = [
+  // Until 1 hour: every 5 minutes (for quick services)
+  { value: 5, label: '5min' },
+  { value: 10, label: '10min' },
   { value: 15, label: '15min' },
+  { value: 20, label: '20min' },
+  { value: 25, label: '25min' },
   { value: 30, label: '30min' },
+  { value: 35, label: '35min' },
+  { value: 40, label: '40min' },
   { value: 45, label: '45min' },
+  { value: 50, label: '50min' },
+  { value: 55, label: '55min' },
   { value: 60, label: '1h' },
-  { value: 75, label: '1h 15min' },
+  // Until 2 hours: every 10 minutes (for standard services)
+  { value: 70, label: '1h 10min' },
+  { value: 80, label: '1h 20min' },
   { value: 90, label: '1h 30min' },
-  { value: 105, label: '1h 45min' },
+  { value: 100, label: '1h 40min' },
+  { value: 110, label: '1h 50min' },
   { value: 120, label: '2h' },
+  // Until 4 hours: every 15 minutes (for longer treatments)
+  { value: 135, label: '2h 15min' },
   { value: 150, label: '2h 30min' },
+  { value: 165, label: '2h 45min' },
   { value: 180, label: '3h' },
+  { value: 195, label: '3h 15min' },
+  { value: 210, label: '3h 30min' },
+  { value: 225, label: '3h 45min' },
+  { value: 240, label: '4h' },
+  // Until 6 hours: every 30 minutes (for very long services)
+  { value: 270, label: '4h 30min' },
+  { value: 300, label: '5h' },
+  { value: 330, label: '5h 30min' },
+  { value: 360, label: '6h' },
+  // Until 12 hours: every hour (for full-day services)
+  { value: 420, label: '7h' },
+  { value: 480, label: '8h' },
+  { value: 540, label: '9h' },
+  { value: 600, label: '10h' },
+  { value: 660, label: '11h' },
+  { value: 720, label: '12h' },
 ] as const;
-
 const SERVICE_TYPES = [
   {
     value: 'service' as const,

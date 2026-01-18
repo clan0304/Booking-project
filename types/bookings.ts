@@ -76,6 +76,7 @@ export interface SelectedAppointment {
   variantId?: string | null;
   teamMemberId: string;
   teamMemberName: string;
+  teamMemberPhotoUrl?: string | null; // Added for Fresha-style UI
   startTime: string;
   endTime: string;
   durationMinutes: number;
@@ -92,23 +93,10 @@ export interface BookingData {
   guestEmail: string;
   guestPhone: string;
   notes?: string;
-}
-
-// Add to BookingData interface:
-export interface BookingData {
-  venueId: string;
-  appointments: SelectedAppointment[];
-  bookingDate: string;
-  guestFirstName: string;
-  guestLastName: string;
-  guestEmail: string;
-  guestPhone: string;
-  notes?: string;
-  // NEW: Payment method ID (saved card for cancellation protection)
+  // Payment method ID (saved card for cancellation protection)
   paymentMethodId?: string;
 }
 
-// Add these new interfaces at the end of the file:
 export interface SavedCard {
   id: string;
   brand: string;

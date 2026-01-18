@@ -1,5 +1,6 @@
 'use server';
 
+import { createReviewNotification } from './notifications';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { requireAuth, requireStaff } from '@/lib/auth';
 
@@ -263,13 +264,75 @@ export async function createReview(
       return { success: false, error: 'Failed to create review' };
     }
 
+    // =====================================================
+    // CREATE NOTIFICATION FOR ADMIN
+    // =====================================================
+    try {
+      // Get team member name
+      const { data: teamMember } = await supabaseAdmin
+        .from('users')
+        .select('first_name, last_name')
+        .eq('id', teamMemberId)
+        .single();
+
+      // Get venue name
+      const { data: venue } = await supabaseAdmin
+        .from('venues')
+        .select('name')
+        .eq('id', booking.venue_id)
+        .single();
+
+      // Get client name
+      const { data: client } = await supabaseAdmin
+        .from('users')
+        .select('first_name, last_name')
+        .eq('id', user.supabaseUserId)
+        .single();
+
+      // Get service name from appointment
+      const { data: appointmentData } = await supabaseAdmin
+        .from('appointments')
+        .select('service_name')
+        .eq('booking_group_id', bookingGroupId)
+        .eq('team_member_id', teamMemberId)
+        .limit(1)
+        .single();
+
+      const teamMemberName = teamMember
+        ? `${teamMember.first_name}${
+            teamMember.last_name ? ' ' + teamMember.last_name : ''
+          }`
+        : 'Unknown';
+
+      const clientName = client
+        ? `${client.first_name}${
+            client.last_name ? ' ' + client.last_name : ''
+          }`
+        : 'A client';
+
+      await createReviewNotification({
+        reviewId: review.id,
+        clientId: user.supabaseUserId,
+        clientName,
+        venueId: booking.venue_id,
+        venueName: venue?.name || 'Unknown Venue',
+        teamMemberId,
+        teamMemberName,
+        rating,
+        reviewText: reviewText?.trim() || null,
+        serviceName: appointmentData?.service_name,
+      });
+    } catch (notificationError) {
+      // Don't fail the review creation if notification fails
+      console.error('Failed to create review notification:', notificationError);
+    }
+
     return { success: true, reviewId: review?.id };
   } catch (error) {
     console.error('Error in createReview:', error);
     return { success: false, error: 'An unexpected error occurred' };
   }
 }
-
 /**
  * Update an existing review
  * Client can only edit their own reviews

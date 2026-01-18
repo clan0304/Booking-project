@@ -32,6 +32,11 @@ export interface NotificationMetadata {
   new_time?: string;
   cancellation_reason?: string;
   [key: string]: string | number | boolean | undefined;
+
+  // Review fields
+  review_id?: string;
+  rating?: number;
+  review_text?: string;
 }
 
 export interface Notification {
@@ -571,5 +576,66 @@ export async function getBookingGroupById(bookingGroupId: string): Promise<{
   } catch (error) {
     console.error('Error in getBookingGroupById:', error);
     return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+// Add this to app/actions/notifications.ts after createBookingNotification function
+
+// =====================================================
+// HELPER: Create Review Notification
+// =====================================================
+
+export async function createReviewNotification(data: {
+  reviewId: string;
+  clientId: string;
+  clientName: string;
+  venueId: string;
+  venueName: string;
+  teamMemberId: string;
+  teamMemberName: string;
+  rating: number;
+  reviewText?: string | null;
+  serviceName?: string;
+  bookingDate?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Create star display for title
+    const starText = '★'.repeat(data.rating) + '☆'.repeat(5 - data.rating);
+
+    const title = `${data.clientName} left a ${data.rating}-star review`;
+
+    let message = `${starText} for ${data.teamMemberName}`;
+    if (data.reviewText) {
+      // Truncate review text if too long
+      const truncatedText =
+        data.reviewText.length > 100
+          ? data.reviewText.substring(0, 100) + '...'
+          : data.reviewText;
+      message += `: "${truncatedText}"`;
+    }
+
+    const result = await createNotification({
+      type: 'review_received',
+      category: 'reviews',
+      title,
+      message,
+      clientId: data.clientId,
+      venueId: data.venueId,
+      teamMemberId: data.teamMemberId,
+      metadata: {
+        review_id: data.reviewId,
+        rating: data.rating,
+        review_text: data.reviewText || undefined,
+        team_member_name: data.teamMemberName,
+        venue_name: data.venueName,
+        service_name: data.serviceName,
+        booking_date: data.bookingDate,
+      },
+    });
+
+    return result;
+  } catch (error) {
+    console.error('Create review notification error:', error);
+    return { success: false, error: 'Failed to create review notification' };
   }
 }

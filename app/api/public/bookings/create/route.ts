@@ -41,8 +41,6 @@ export async function POST(request: NextRequest) {
   try {
     const body: CreateBookingRequest = await request.json();
 
-    console.log('Creating booking with data:', JSON.stringify(body, null, 2));
-
     // Validate required fields
     if (
       !body.venue_id ||
@@ -86,8 +84,6 @@ export async function POST(request: NextRequest) {
       (appt) => appt.team_member_id && appt.team_member_id !== 'any'
     );
 
-    console.log('Is specific stylist requested:', isSpecificStylistRequested);
-
     // Process appointments and assign team members for "any" selections
     const processedAppointments: ProcessedAppointment[] = [];
 
@@ -96,20 +92,11 @@ export async function POST(request: NextRequest) {
 
       // Handle null, undefined, empty string, AND 'any'
       if (!appt.team_member_id || appt.team_member_id === 'any') {
-        console.log(
-          `Finding available team member for slot ${appt.start_time} - ${appt.end_time}`
-        );
-
         const availableTeamMembers = await getAvailableTeamMembers(
           body.venue_id,
           body.booking_date,
           appt.start_time,
           appt.end_time
-        );
-
-        console.log(
-          `Found ${availableTeamMembers.length} available team members:`,
-          availableTeamMembers
         );
 
         if (availableTeamMembers.length === 0) {
@@ -194,13 +181,6 @@ export async function POST(request: NextRequest) {
       body.guest_email
     );
 
-    console.log('Detected client type:', clientType, {
-      isSpecificStylistRequested,
-      clientId: body.client_id,
-      email: body.guest_email,
-      assignedTeamMemberId: processedAppointments[0]?.team_member_id,
-    });
-
     // Create booking group
     const { data: bookingGroup, error: bookingError } = await supabaseAdmin
       .from('booking_groups')
@@ -244,11 +224,6 @@ export async function POST(request: NextRequest) {
       status: 'confirmed',
     }));
 
-    console.log(
-      'Inserting appointments:',
-      JSON.stringify(appointmentsData, null, 2)
-    );
-
     const { error: appointmentsError } = await supabaseAdmin
       .from('appointments')
       .insert(appointmentsData);
@@ -274,8 +249,6 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-
-    console.log('Booking created successfully:', bookingGroup.id);
 
     // =====================================================
     // CREATE NOTIFICATION FOR ADMIN
@@ -321,8 +294,6 @@ export async function POST(request: NextRequest) {
         price: total_price,
         bookingSource: 'online',
       });
-
-      console.log('Notification created for booking:', bookingGroup.id);
     } catch (notificationError) {
       // Don't fail the booking if notification fails
       console.error('Error creating notification:', notificationError);
@@ -360,21 +331,12 @@ async function getAvailableTeamMembers(
   endTime: string
 ): Promise<string[]> {
   try {
-    console.log('Getting available team members for:', {
-      venueId,
-      date,
-      startTime,
-      endTime,
-    });
-
     // 1. Get all team members with shifts at this venue on this date
     const { data: shifts, error: shiftsError } = await supabaseAdmin
       .from('shifts')
       .select('team_member_id, start_time, end_time')
       .eq('venue_id', venueId)
       .eq('shift_date', date);
-
-    console.log(`Found ${shifts?.length || 0} shifts for this date:`, shifts);
 
     if (shiftsError) {
       console.error('Error fetching shifts:', shiftsError);
@@ -397,13 +359,6 @@ async function getAvailableTeamMembers(
 
       const coversSlot = shiftStart <= requestStart && shiftEnd >= requestEnd;
 
-      console.log('Checking shift:', {
-        team_member_id: shift.team_member_id,
-        shiftTime: `${shift.start_time} - ${shift.end_time}`,
-        requestTime: `${startTime} - ${endTime}`,
-        coversSlot,
-      });
-
       // Check if shift covers the requested time
       if (coversSlot) {
         // Check if team member has no conflicting appointments
@@ -424,18 +379,12 @@ async function getAvailableTeamMembers(
           );
         }
 
-        console.log(
-          `Team member ${shift.team_member_id} availability:`,
-          isAvailable
-        );
-
         if (isAvailable) {
           availableTeamMembers.push(shift.team_member_id);
         }
       }
     }
 
-    console.log('Final available team members:', availableTeamMembers);
     return availableTeamMembers;
   } catch (error) {
     console.error('Error getting available team members:', error);

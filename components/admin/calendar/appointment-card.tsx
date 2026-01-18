@@ -54,7 +54,9 @@ export function AppointmentCard({
   isFloating = false,
 }: AppointmentCardProps) {
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
-  const [tooltipSide, setTooltipSide] = useState<'left' | 'right'>('right');
+  const [tooltipSide, setTooltipSide] = useState<
+    'left' | 'right' | 'top' | 'bottom'
+  >('right');
   const [arrowPosition, setArrowPosition] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -107,46 +109,84 @@ export function AppointmentCard({
       const windowWidth = window.innerWidth;
       const windowHeight = window.innerHeight;
 
-      // Calculate the card's center point
-      const cardCenter = rect.top + rect.height / 2;
-
-      // Determine which side has more space
+      // Calculate available space on each side
       const spaceOnRight = windowWidth - rect.right;
       const spaceOnLeft = rect.left;
+      const spaceAbove = rect.top;
+      const spaceBelow = windowHeight - rect.bottom;
 
-      // Choose side based on available space (prefer right if equal)
-      const showOnRight =
-        spaceOnRight >= tooltipWidth + gap || spaceOnRight >= spaceOnLeft;
+      // Check if there's enough horizontal space
+      const hasHorizontalSpace =
+        spaceOnRight >= tooltipWidth + gap || spaceOnLeft >= tooltipWidth + gap;
 
+      let top: number;
       let left: number;
-      if (showOnRight) {
-        // Position to the right of the card
-        left = rect.right + gap;
-        setTooltipSide('right');
+      let side: 'left' | 'right' | 'top' | 'bottom';
+
+      if (hasHorizontalSpace) {
+        // Use horizontal positioning (existing logic)
+        const showOnRight =
+          spaceOnRight >= tooltipWidth + gap || spaceOnRight >= spaceOnLeft;
+
+        if (showOnRight) {
+          left = rect.right + gap;
+          side = 'right';
+        } else {
+          left = rect.left - tooltipWidth - gap;
+          side = 'left';
+        }
+
+        // Calculate vertical position (center on card)
+        top = rect.top + rect.height / 2 - tooltipHeight / 2;
+
+        // Ensure tooltip doesn't go off the bottom of the screen
+        if (top + tooltipHeight > windowHeight - 20) {
+          top = windowHeight - tooltipHeight - 20;
+        }
+
+        // Ensure tooltip doesn't go off the top
+        if (top < 20) {
+          top = 20;
+        }
+
+        // Calculate arrow position relative to tooltip top
+        const cardCenter = rect.top + rect.height / 2;
+        const arrowTop = cardCenter - top;
+        setArrowPosition(arrowTop);
       } else {
-        // Position to the left of the card
-        left = rect.left - tooltipWidth - gap;
-        setTooltipSide('left');
+        // Use vertical positioning (new logic for single column)
+        const showBelow =
+          spaceBelow >= tooltipHeight + gap || spaceBelow >= spaceAbove;
+
+        if (showBelow) {
+          top = rect.bottom + gap;
+          side = 'bottom';
+        } else {
+          top = rect.top - tooltipHeight - gap;
+          side = 'top';
+        }
+
+        // Center horizontally on the card
+        left = rect.left + rect.width / 2 - tooltipWidth / 2;
+
+        // Ensure tooltip doesn't go off the right edge
+        if (left + tooltipWidth > windowWidth - 20) {
+          left = windowWidth - tooltipWidth - 20;
+        }
+
+        // Ensure tooltip doesn't go off the left edge
+        if (left < 20) {
+          left = 20;
+        }
+
+        // Calculate arrow position relative to tooltip left
+        const cardCenter = rect.left + rect.width / 2;
+        const arrowLeft = cardCenter - left;
+        setArrowPosition(arrowLeft);
       }
-
-      // Calculate vertical position
-      let top = rect.top;
-
-      // Ensure tooltip doesn't go off the bottom of the screen
-      if (top + tooltipHeight > windowHeight) {
-        top = windowHeight - tooltipHeight - 20;
-      }
-
-      // Ensure tooltip doesn't go off the top
-      if (top < 20) {
-        top = 20;
-      }
-
-      // Calculate arrow position relative to tooltip top
-      const arrowTop = cardCenter - top;
 
       setTooltipPosition({ top, left });
-      setArrowPosition(arrowTop);
+      setTooltipSide(side);
     }
   }, [isHovered, isInteracting]);
 
@@ -358,18 +398,40 @@ export function AppointmentCard({
             </span>
           </div>
         )}
-
         {/* Arrow pointing to card - direction based on tooltip side */}
         <div
           className={`absolute w-3 h-3 bg-white border-gray-200 transform ${
             tooltipSide === 'right'
               ? 'border-l border-t -rotate-45'
-              : 'border-r border-b rotate-45'
+              : tooltipSide === 'left'
+              ? 'border-r border-b rotate-45'
+              : tooltipSide === 'bottom'
+              ? 'border-l border-t -rotate-45'
+              : 'border-r border-b rotate-45' // top
           }`}
           style={{
-            [tooltipSide === 'right' ? 'left' : 'right']: '-7px',
-            top: `${arrowPosition}px`,
-            marginTop: '-6px',
+            // Horizontal positioning (left/right sides)
+            ...(tooltipSide === 'right' && {
+              left: '-7px',
+              top: `${arrowPosition}px`,
+              marginTop: '-6px',
+            }),
+            ...(tooltipSide === 'left' && {
+              right: '-7px',
+              top: `${arrowPosition}px`,
+              marginTop: '-6px',
+            }),
+            // Vertical positioning (top/bottom sides)
+            ...(tooltipSide === 'bottom' && {
+              top: '-7px',
+              left: `${arrowPosition}px`,
+              marginLeft: '-6px',
+            }),
+            ...(tooltipSide === 'top' && {
+              bottom: '-7px',
+              left: `${arrowPosition}px`,
+              marginLeft: '-6px',
+            }),
           }}
         />
       </div>

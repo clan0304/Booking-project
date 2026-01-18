@@ -10,6 +10,7 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle,
+  FileText,
 } from 'lucide-react';
 import type { Venue, BookingData } from '@/types/bookings';
 
@@ -38,6 +39,7 @@ interface BookingSummaryProps {
   onChangeCard: () => void;
   onConfirm: () => void;
   onBack: () => void;
+  onNotesChange?: (notes: string) => void;
 }
 
 // Format time to 12-hour format
@@ -82,10 +84,12 @@ export function BookingSummary({
   onChangeCard,
   onConfirm,
   onBack,
+  onNotesChange,
 }: BookingSummaryProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agreedToPolicy, setAgreedToPolicy] = useState(!cancellationPolicy);
+  const [notes, setNotes] = useState(bookingData.notes || '');
 
   // Calculate total price
   const totalPrice = bookingData.appointments.reduce(
@@ -98,6 +102,12 @@ export function BookingSummary({
     (sum, appt) => sum + appt.durationMinutes,
     0
   );
+
+  // Handle notes change
+  const handleNotesChange = (value: string) => {
+    setNotes(value);
+    onNotesChange?.(value);
+  };
 
   // Handle booking confirmation
   const handleConfirm = async () => {
@@ -121,7 +131,7 @@ export function BookingSummary({
           guest_last_name: bookingData.guestLastName,
           guest_email: bookingData.guestEmail,
           guest_phone: bookingData.guestPhone,
-          notes: bookingData.notes,
+          notes: notes.trim() || null,
           client_id: authenticatedUserId,
           payment_method_id: savedCard?.id || bookingData.paymentMethodId,
           appointments: bookingData.appointments.map((appt) => ({
@@ -153,95 +163,108 @@ export function BookingSummary({
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">
-          Review & Confirm
-        </h2>
-        <p className="text-gray-600">Please review your booking details</p>
+        <h2 className="text-xl font-bold text-gray-900">Review & Confirm</h2>
+        <p className="text-gray-600 mt-1">
+          Please review your booking details before confirming
+        </p>
       </div>
 
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-red-700">{error}</p>
-        </div>
-      )}
-
       {/* Booking Details Card */}
-      <div className="border border-gray-200 rounded-xl overflow-hidden">
-        {/* Venue & Date */}
-        <div className="bg-gray-50 p-4 border-b border-gray-200">
-          <h3 className="font-semibold text-gray-900">{venue.name}</h3>
-          <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
-            <span className="flex items-center gap-1">
-              <Calendar className="h-4 w-4" />
-              {formatDate(bookingData.bookingDate)}
+      <div className="bg-gray-50 rounded-xl p-5 space-y-4">
+        {/* Venue */}
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
+            <span className="text-purple-600 font-semibold">
+              {venue.name.charAt(0)}
             </span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-4 w-4" />
-              {formatTime(bookingData.appointments[0]?.startTime || '00:00')}
-            </span>
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-900">{venue.name}</h3>
+            <p className="text-sm text-gray-600">{venue.address}</p>
           </div>
         </div>
 
-        {/* Services with Stylist Names */}
-        <div className="p-4 space-y-3">
+        {/* Date & Time */}
+        <div className="flex items-center gap-3 text-gray-700">
+          <Calendar className="w-5 h-5 text-gray-400" />
+          <span>{formatDate(bookingData.bookingDate)}</span>
+        </div>
+
+        {/* Duration */}
+        <div className="flex items-center gap-3 text-gray-700">
+          <Clock className="w-5 h-5 text-gray-400" />
+          <span>
+            {formatTime(bookingData.appointments[0]?.startTime || '09:00')} •{' '}
+            {totalDuration} min
+          </span>
+        </div>
+      </div>
+
+      {/* Services List */}
+      <div className="border border-gray-200 rounded-xl overflow-hidden">
+        <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+          <h3 className="font-semibold text-gray-900">Services</h3>
+        </div>
+        <div className="divide-y divide-gray-100">
           {bookingData.appointments.map((appt, index) => (
-            <div
-              key={index}
-              className="flex items-start justify-between py-2 border-b border-gray-100 last:border-0"
-            >
-              <div className="flex-1">
+            <div key={index} className="p-4 flex justify-between items-start">
+              <div>
                 <p className="font-medium text-gray-900">{appt.serviceName}</p>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-gray-500">
-                  {/* Time */}
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5" />
-                    {formatTime(appt.startTime)} - {formatTime(appt.endTime)}
-                  </span>
-                  {/* Duration */}
+                <div className="flex items-center gap-2 mt-1 text-sm text-gray-600">
+                  <User className="w-4 h-4" />
+                  <span>{appt.teamMemberName}</span>
+                  <span className="text-gray-300">•</span>
                   <span>{appt.durationMinutes} min</span>
-                  {/* Stylist Name - Show assigned stylist */}
-                  {appt.teamMemberName &&
-                    appt.teamMemberName !== 'Any professional' && (
-                      <span className="flex items-center gap-1 text-[#6C5CE7]">
-                        <User className="h-3.5 w-3.5" />
-                        with {appt.teamMemberName}
-                      </span>
-                    )}
                 </div>
               </div>
-              <span className="font-medium text-gray-900 ml-4">
-                ${appt.price}
-              </span>
+              <p className="font-semibold text-gray-900">
+                ${appt.price.toFixed(2)}
+              </p>
             </div>
           ))}
         </div>
-
         {/* Total */}
-        <div className="bg-gray-50 p-4 border-t border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <span className="text-gray-600">Total</span>
-              <span className="text-sm text-gray-500 ml-2">
-                ({totalDuration} min)
-              </span>
-            </div>
-            <span className="text-xl font-bold text-gray-900">
-              ${totalPrice}
-            </span>
-          </div>
+        <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex justify-between items-center">
+          <span className="font-semibold text-gray-900">Total</span>
+          <span className="text-lg font-bold text-gray-900">
+            ${totalPrice.toFixed(2)}
+          </span>
         </div>
       </div>
 
-      {/* Payment Method */}
+      {/* Notes Section */}
+      <div className="border border-gray-200 rounded-xl overflow-hidden">
+        <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
+          <FileText className="w-4 h-4 text-gray-500" />
+          <h3 className="font-semibold text-gray-900">
+            Special Requests{' '}
+            <span className="font-normal text-gray-500">(Optional)</span>
+          </h3>
+        </div>
+        <div className="p-4">
+          <textarea
+            value={notes}
+            onChange={(e) => handleNotesChange(e.target.value)}
+            placeholder="Let us know if you have any special requests or notes for your appointment..."
+            className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+            rows={3}
+            maxLength={500}
+          />
+          <p className="text-xs text-gray-400 mt-1.5 text-right">
+            {notes.length}/500
+          </p>
+        </div>
+      </div>
+
+      {/* Payment Method (if has saved card) */}
       {savedCard && (
         <div className="border border-gray-200 rounded-xl p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                <CreditCard className="h-5 w-5 text-gray-600" />
+                <CreditCard className="w-5 h-5 text-gray-600" />
               </div>
               <div>
                 <p className="font-medium text-gray-900">
@@ -254,95 +277,79 @@ export function BookingSummary({
             </div>
             <button
               onClick={onChangeCard}
-              className="text-sm text-[#6C5CE7] hover:underline"
+              className="text-purple-600 text-sm font-medium hover:text-purple-700"
             >
               Change
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-3">
-            Your card will only be charged if you cancel within the cancellation
-            period or don&apos;t show up for your appointment.
-          </p>
         </div>
       )}
 
-      {/* Cancellation Policy */}
+      {/* Cancellation Policy Agreement */}
       {cancellationPolicy && (
-        <div className="border border-amber-200 bg-amber-50 rounded-xl p-4">
-          <h4 className="font-medium text-amber-800 mb-2">
-            Cancellation Policy
-          </h4>
-          <p className="text-sm text-amber-700 mb-3">
-            Free cancellation up to {cancellationPolicy.notice_hours} hours
-            before your appointment. Late cancellations or no-shows will be
-            charged{' '}
-            {cancellationPolicy.fee_fixed_amount
-              ? `$${cancellationPolicy.fee_fixed_amount}`
-              : `${cancellationPolicy.fee_percentage}% of the booking total`}
-            .
-          </p>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={agreedToPolicy}
-              onChange={(e) => setAgreedToPolicy(e.target.checked)}
-              className="mt-1 rounded border-amber-300 text-[#6C5CE7] focus:ring-[#6C5CE7]"
-            />
-            <span className="text-sm text-amber-800">
-              I understand and agree to the cancellation policy
-            </span>
-          </label>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="font-medium text-amber-900">
+                Cancellation Policy
+              </h4>
+              <p className="text-sm text-amber-800 mt-1">
+                Cancellations made less than {cancellationPolicy.notice_hours}{' '}
+                hours before the appointment will incur a{' '}
+                {cancellationPolicy.fee_percentage}% fee
+                {cancellationPolicy.fee_fixed_amount
+                  ? ` (min $${cancellationPolicy.fee_fixed_amount})`
+                  : ''}
+                .
+              </p>
+              <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={agreedToPolicy}
+                  onChange={(e) => setAgreedToPolicy(e.target.checked)}
+                  className="w-4 h-4 rounded border-amber-300 text-purple-600 focus:ring-purple-500"
+                />
+                <span className="text-sm text-amber-900">
+                  I understand and agree to the cancellation policy
+                </span>
+              </label>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Contact Info Summary */}
-      <div className="border border-gray-200 rounded-xl p-4">
-        <h4 className="font-medium text-gray-900 mb-2">Contact Information</h4>
-        <div className="text-sm text-gray-600 space-y-1">
-          <p>
-            {bookingData.guestFirstName} {bookingData.guestLastName}
-          </p>
-          <p>{bookingData.guestEmail}</p>
-          {bookingData.guestPhone && <p>{bookingData.guestPhone}</p>}
-        </div>
+      {/* Security Notice */}
+      <div className="flex items-center gap-2 text-sm text-gray-500">
+        <CheckCircle className="w-4 h-4 text-green-500" />
+        <span>Your payment information is securely stored</span>
       </div>
 
-      {/* Confirmation Note */}
-      <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
-        <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-        <div className="text-sm text-green-800">
-          <p className="font-medium">Confirmation will be sent to your email</p>
-          <p className="mt-1">
-            You&apos;ll receive a booking confirmation at{' '}
-            {bookingData.guestEmail}
-          </p>
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2 text-red-700">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span className="text-sm">{error}</span>
         </div>
-      </div>
+      )}
 
       {/* Action Buttons */}
-      <div className="flex gap-4">
+      <div className="flex gap-3 pt-2">
         <button
           onClick={onBack}
           disabled={loading}
-          className="flex-1 py-3 border border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          className="px-6 py-3 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
         >
           Back
         </button>
         <button
           onClick={handleConfirm}
           disabled={loading || (!!cancellationPolicy && !agreedToPolicy)}
-          className={`
-            flex-1 py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2
-            ${
-              loading || (!!cancellationPolicy && !agreedToPolicy)
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-[#6C5CE7] text-white hover:bg-[#5b4bc4]'
-            }
-          `}
+          className="flex-1 bg-purple-600 text-white py-3 rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="w-5 h-5 animate-spin" />
               Confirming...
             </>
           ) : (

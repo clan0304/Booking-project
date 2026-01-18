@@ -772,7 +772,6 @@ export function EditAppointmentModal({
 
         setPendingDeletions(new Set());
         setPendingAdditions(new Map());
-        onSuccess();
       } catch (err) {
         setError('An unexpected error occurred');
         console.error(err);
